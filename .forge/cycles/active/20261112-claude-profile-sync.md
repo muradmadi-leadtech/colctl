@@ -82,42 +82,46 @@ Tasks and dependency map: `docs/tasks/claude-profile-sync.md`.
 
 ---
 
-<!-- FORGE_PHASE:Generate:Active -->
+<!-- FORGE_PHASE:Generate:Complete -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.
 
 ### Process
-- [ ] RED: Write failing tests
-- [ ] GREEN: Minimal code to pass
-- [ ] REFACTOR: Improve while green
-- [ ] Code review: Linter and type checks pass
-- [ ] Code review: TDD compliance verified
-- [ ] Code review: Acceptance criteria alignment checked
+- [x] RED: Write failing tests
+- [x] GREEN: Minimal code to pass
+- [x] REFACTOR: Improve while green
+- [x] Code review: Linter and type checks pass
+- [x] Code review: TDD compliance verified
+- [x] Code review: Acceptance criteria alignment checked
 
 ### Implementation Notes
 
-<!-- Document implementation progress here -->
+PRs #1 (publish), #2 (core, T1–T4), #4 (engine and commands, T5–T10), #5 (docs, T11), #7 (fix from the security
+review), #6/#3/#8 (v1.0.0 release). 147 tests, 97.7% line coverage, every AC/EC traced to a named test.
+**Caveat on "TDD compliance":** tests were written with each module rather than strictly one failing test at a time;
+only #7 has a recorded RED → GREEN. See `docs/claude-profile-sync/cycle-review.md` § Issues.
 
 ---
 
-<!-- FORGE_PHASE:Evaluate:Pending -->
+<!-- FORGE_PHASE:Evaluate:Active -->
 ## Phase 5: Evaluate
 
 **Purpose**: Verify output matches intent.
 
 ### Checklist
-- [ ] Criteria verified line-by-line
-- [ ] Edge cases tested
-- [ ] Code review: Full test suite passes with coverage threshold met
-- [ ] Code review: Security review completed
-- [ ] Code review: Integration and interface contracts verified
-- [ ] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
+- [x] Criteria verified line-by-line
+- [x] Edge cases tested
+- [x] Code review: Full test suite passes with coverage threshold met
+- [x] Code review: Security review completed
+- [x] Code review: Integration and interface contracts verified
+- [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
 - [ ] Disposition decision made
 
 ### Disposition
 
-<!-- Accept / Accept with issues / Revise / Reject -->
+Proposed: **Accept with issues** (see cycle-review.md). Awaiting the owner's sign-off. No HTML sibling of the
+review: the project doesn't render its docs.
 
 ---
 
