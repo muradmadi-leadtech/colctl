@@ -16,6 +16,9 @@ use crate::state::{self, Lock, Origin, STATE_DIR, State};
 use crate::vault::{self, CloneState, Vault};
 use std::collections::BTreeMap;
 
+mod quarantine;
+pub use quarantine::update;
+
 /// Where source plugin clones live, and colctl-written manifests inside it.
 pub const PLUGINS: &str = "plugins";
 pub const MANIFESTS: &str = ".manifests";
@@ -1598,89 +1601,6 @@ fn adopt_plugin_from_source(ctx: &Ctx, harness: &Harness, id: &str) -> Option<Ad
         return Some(Adoption::Refused(e.message));
     }
     Some(Adoption::Adopted)
-}
-
-/// `colctl update` (AC3-14…16): moves pins to newer upstream commits.
-pub fn update(
-    ctx: &Ctx,
-    names: &[String],
-    check: bool,
-    rev: Option<&str>,
-    dry_run: bool,
-) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
-    let ws = load(ctx)?;
-    for n in names {
-        if !ws.config.sources.iter().any(|s| &s.name == n) {
-            return Err(CliError::usage(format!("no source named \"{n}\"")));
-        }
-    }
-    if rev.is_some() && names.len() != 1 {
-        return Err(CliError::usage("--rev needs exactly one source name"));
-    }
-    let chosen: Vec<&config::Source> = ws
-        .config
-        .sources
-        .iter()
-        .filter(|s| names.is_empty() || names.contains(&s.name))
-        .collect();
-    let vault = Vault {
-        git: &git,
-        dir: plugins_dir(ctx),
-    };
-    let mut failures = 0;
-    let mut changes: Vec<(String, String, String)> = Vec::new();
-    for s in &chosen {
-        let looked = vault
-            .fetch_clone(&s.name, &s.clone_url())
-            .and_then(|_| match rev {
-                Some(r) => vault.resolve(&s.name, r),
-                None => vault.upstream_head(&s.name),
-            });
-        let new = match looked {
-            Ok(new) => new,
-            Err(e) if rev.is_some() => return Err(CliError::usage(e)),
-            Err(e) => {
-                failures += 1;
-                println!("{}: {e}", s.name);
-                continue;
-            }
-        };
-        if new == s.rev {
-            println!("{}: up to date", s.name);
-        } else {
-            let count = vault.count_between(&s.name, &s.rev, &new);
-            let word = if count == 1 { "commit" } else { "commits" };
-            println!(
-                "{}: {} → {} ({count} new {word})",
-                s.name,
-                vault::short(&s.rev),
-                vault::short(&new)
-            );
-            changes.push((s.name.clone(), s.rev.clone(), new));
-        }
-    }
-    if check || dry_run {
-        return Ok(if failures > 0 || (check && !changes.is_empty()) {
-            EXIT_DRIFT
-        } else {
-            0
-        });
-    }
-    let _lock = Lock::acquire(&ctx.source)?;
-    commit_pending(&git, ctx)?;
-    let mut text = ws.config_text.clone();
-    for (name, _, new) in &changes {
-        text = config::set_source_rev(&text, name, new).map_err(CliError::usage)?;
-        write_config(ctx, &text)?;
-        commit(
-            &git,
-            ctx,
-            &format!("colctl: update source {name} to {}", vault::short(new)),
-        )?;
-    }
-    let code = run_sync(ctx, &git, None)?;
-    Ok(if failures > 0 { EXIT_DRIFT } else { code })
 }
 
 /// `colctl refresh` (AC2-26): pulls adopted items' origins into the source.

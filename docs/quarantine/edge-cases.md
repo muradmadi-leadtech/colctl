@@ -47,7 +47,7 @@ IDs are `EC4-NN`; each needs a test whose name contains `ec4_NN`.
 
 | ID | Case | Expected |
 |---|---|---|
-| EC4-20 | Another colctl run holds the lock | `update` (without `--check`/`--dry-run`), `refresh`, `approve` and `reject` exit 2 with the existing lock message. `review` and `status` don't take the lock |
+| EC4-20 | Another colctl run holds the lock | `update` (without `--check`/`--dry-run`), `refresh`, `approve` and `reject` exit 3 with the existing lock message ("another colctl is running"). `review` and `status` don't take the lock |
 
 ## Security
 
