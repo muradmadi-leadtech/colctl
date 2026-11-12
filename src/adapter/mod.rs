@@ -120,6 +120,15 @@ impl Plugins {
         path.is_some_and(|p| Path::new(p) == dir)
     }
 
+    /// The repo a marketplace comes from, as a config source string.
+    pub fn marketplace_repo(&self, name: &str, kind: Kind) -> Option<String> {
+        let entry = self.marketplaces.get(name)?;
+        match kind {
+            Kind::Codex => codex::marketplace_source(entry),
+            _ => claude::marketplace_source(entry),
+        }
+    }
+
     /// How a marketplace entry describes where it comes from, for messages.
     pub fn marketplace_origin(&self, name: &str) -> String {
         self.marketplaces

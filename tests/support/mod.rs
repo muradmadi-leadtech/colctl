@@ -242,6 +242,51 @@ impl Env {
         (repo, url, head)
     }
 
+    /// Makes `https://github.com/` resolve to local repos under `<root>/github/` for git run by colctl
+    /// (through the temp home's git config), so adopt can follow real-looking origins offline.
+    pub fn github_is_local(&self) -> PathBuf {
+        let base = self.home.parent().unwrap().join("github");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(
+            self.home.join(".gitconfig"),
+            format!(
+                "[url \"file://{}/\"]\n\tinsteadOf = https://github.com/\n",
+                base.display()
+            ),
+        )
+        .unwrap();
+        base
+    }
+
+    /// An upstream repo at `<root>/github/<owner>/<repo>` packaging plugin `plugin` for both tools under
+    /// marketplace `marketplace`. Returns (path, head).
+    pub fn github_repo(
+        &self,
+        owner_repo: &str,
+        plugin: &str,
+        marketplace: &str,
+    ) -> (PathBuf, String) {
+        let repo = self.github_is_local().join(owner_repo);
+        fs::create_dir_all(&repo).unwrap();
+        let write = |rel: &str, value: serde_json::Value| {
+            let path = repo.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, value.to_string()).unwrap();
+        };
+        write(
+            ".claude-plugin/marketplace.json",
+            serde_json::json!({"name": marketplace, "plugins": [{"name": plugin, "source": "./"}]}),
+        );
+        write(
+            ".agents/plugins/marketplace.json",
+            serde_json::json!({"name": marketplace, "plugins": [{"name": plugin, "source": {"source": "url", "url": "./"}}]}),
+        );
+        fs::write(repo.join("README.md"), "v1").unwrap();
+        upstream_git(&repo, &["init", "-q"]);
+        let head = self.upstream_commit(&repo, "v1");
+        (repo, head)
+    }
+
     /// Commits a change in an upstream repo; returns the new head.
     pub fn upstream_commit(&self, repo: &Path, text: &str) -> String {
         fs::write(repo.join("README.md"), text).unwrap();

@@ -140,6 +140,7 @@ fn prepare_sources(
         clones.push((s.name.clone(), state));
         inputs.push(SourceInput {
             name: s.name.clone(),
+            repo: s.repo.clone(),
             rev: s.rev.clone(),
             replaces: s.replaces.clone(),
             claude,
@@ -456,7 +457,6 @@ fn run_sync(ctx: &Ctx, git: &Git, filter: Option<&str>) -> Result<i32, CliError>
     let mut ws = load(ctx)?;
     let errors = ensure_sources(ctx, git, &ws.config);
     (ws.sources, ws.clones) = prepare_sources(ctx, &ws.config, Some(git), &errors);
-    remove_stale_clones(ctx, &ws.config);
     let planned = plan_all(ctx, &ws, filter)?;
     let mut failures = 0;
     for p in &planned {
@@ -487,6 +487,7 @@ fn run_sync(ctx: &Ctx, git: &Git, filter: Option<&str>) -> Result<i32, CliError>
             }
         }
     }
+    remove_stale_clones(ctx, &ws.config);
     state::save(&ctx.source, &ws.state)
         .map_err(|e| CliError::usage(format!("saving state: {e:#}")))?;
 
@@ -876,6 +877,7 @@ pub enum RmKind {
     Skill,
     Agent,
     Plugin,
+    Source,
 }
 
 /// `colctl rm` (AC-23).
@@ -898,10 +900,12 @@ pub fn rm(
             Some(ctx.source.join(AGENTS).join(format!("{name}.md"))),
         ),
         RmKind::Plugin => (plugin_label(list), None),
+        RmKind::Source => ("source", None),
     };
-    let known = match &path {
-        Some(p) => config::valid_item_name(name) && fsx::exists_any(p),
-        None => ws.config.plugin_list(list).1.iter().any(|p| p == name),
+    let known = match (&path, kind) {
+        (Some(p), _) => config::valid_item_name(name) && fsx::exists_any(p),
+        (None, RmKind::Source) => ws.config.sources.iter().any(|s| s.name == name),
+        (None, _) => ws.config.plugin_list(list).1.iter().any(|p| p == name),
     };
     if !known {
         return Err(CliError::usage(format!(
@@ -916,8 +920,12 @@ pub fn rm(
     match &path {
         Some(p) => fsx::remove_any(p).map_err(|e| CliError::usage(format!("{e:#}")))?,
         None => {
-            let text =
-                config::remove_plugin_from(&ws.config_text, list, name).map_err(CliError::usage)?;
+            let text = if kind == RmKind::Source {
+                config::remove_source(&ws.config_text, name)
+            } else {
+                config::remove_plugin_from(&ws.config_text, list, name)
+            }
+            .map_err(CliError::usage)?;
             write_config(ctx, &text)?;
         }
     }
@@ -1235,7 +1243,10 @@ fn adopt_item(ctx: &Ctx, harness: &Harness, item: &Item) -> Adoption {
             &real_copy(false),
         ),
         ItemKind::Instructions => adopt_instructions(ctx, harness),
-        ItemKind::Plugin => adopt_plugin(ctx, harness, &item.name),
+        ItemKind::Plugin => match adopt_plugin_from_source(ctx, harness, &item.name) {
+            Some(outcome) => outcome,
+            None => adopt_plugin(ctx, harness, &item.name),
+        },
         ItemKind::Marketplace => {
             Adoption::Refused("marketplaces are adopted with their plugins".into())
         }
@@ -1283,7 +1294,7 @@ pub fn adopt(
         for p in plan_all(ctx, &ws, harness)? {
             for i in p.plan.items.iter().filter(|i| matches(i)) {
                 match i.state {
-                    ItemState::Foreign => {
+                    ItemState::Foreign | ItemState::FromAggregator => {
                         println!("would adopt {} from {}", i.address(), p.harness.name)
                     }
                     ItemState::ForeignLink if i.can_take_over() => println!(
@@ -1320,7 +1331,7 @@ pub fn adopt(
         for i in p.plan.items.iter().filter(|i| matches(i)) {
             seen = true;
             let outcome = match i.state {
-                ItemState::Foreign => adopt_item(ctx, &p.harness, i),
+                ItemState::Foreign | ItemState::FromAggregator => adopt_item(ctx, &p.harness, i),
                 ItemState::ForeignLink => adopt_link(ctx, &p.harness, i),
                 other if wanted.is_some() => {
                     Adoption::Refused(format!("not a foreign item (state: {})", other.as_str()))
@@ -1368,6 +1379,298 @@ pub fn adopt(
     }
     let code = run_sync(ctx, &git, None)?;
     Ok(if refused > 0 { EXIT_DRIFT } else { code })
+}
+
+fn head_of_dir(git: &Git, dir: &Path) -> Option<String> {
+    git.run(dir, &["rev-parse", "HEAD"])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| config::valid_rev(s))
+}
+
+fn same_repo(a: &str, b: &str) -> bool {
+    let norm = |u: &str| {
+        config::clone_url(u)
+            .trim_end_matches('/')
+            .trim_end_matches(".git")
+            .to_string()
+    };
+    norm(a) == norm(b)
+}
+
+/// Clones `repo` as source `name`, pins `rev` (or upstream's head), and checks the packaging.
+/// Returns the pinned commit and the packaging; on failure the clone is removed again.
+fn clone_and_check(
+    ctx: &Ctx,
+    git: &Git,
+    name: &str,
+    repo: &str,
+    rev: Option<&str>,
+    plugin: &str,
+    subpath: Option<&str>,
+) -> Result<(String, packaging::Packaging), String> {
+    let vault = Vault {
+        git,
+        dir: plugins_dir(ctx),
+    };
+    let url = config::clone_url(repo);
+    let cleanup = || {
+        let _ = vault.remove(name);
+        let _ = fsx::remove_any(&manifests_dir(ctx, name));
+    };
+    let result = (|| {
+        vault.fetch_clone(name, &url)?;
+        let pinned = match rev {
+            Some(r) if config::valid_rev(r) => r.to_string(),
+            Some(r) => vault.resolve(name, r)?,
+            None => vault.upstream_head(name)?,
+        };
+        let path = vault.ensure(name, &url, &pinned)?;
+        let p = packaging::inspect(&path, &manifests_dir(ctx, name), name, plugin, subpath);
+        if !p.any_supported() {
+            return Err(format!(
+                "{repo} has no Claude or Codex packaging for plugin {plugin}"
+            ));
+        }
+        Ok((pinned, p))
+    })();
+    if result.is_err() {
+        cleanup();
+    }
+    result
+}
+
+/// `colctl add source` (AC3-17).
+pub fn add_source(
+    ctx: &Ctx,
+    repo: &str,
+    rev: Option<&str>,
+    name: Option<&str>,
+    plugin: Option<&str>,
+    dry_run: bool,
+) -> Result<i32, CliError> {
+    let git = Git::find(&ctx.path_var)?;
+    let ws = load(ctx)?;
+    if !config::valid_repo(repo) {
+        return Err(CliError::usage(format!(
+            "repo \"{repo}\" must be a URL, git@host:path, an absolute path or github:owner/repo"
+        )));
+    }
+    let name = name
+        .map(str::to_string)
+        .unwrap_or_else(|| skill_name_from(repo, None));
+    if !config::valid_item_name(&name) {
+        return Err(CliError::usage(format!(
+            "invalid source name \"{name}\"; pass --name"
+        )));
+    }
+    if ws.config.sources.iter().any(|s| s.name == name) {
+        return Err(CliError::usage(format!("source \"{name}\" already exists")));
+    }
+    let plugin = plugin
+        .map(str::to_string)
+        .unwrap_or_else(|| skill_name_from(repo, None));
+    if dry_or_write(dry_run, &format!("clone {repo} as source {name}")) {
+        return Ok(0);
+    }
+    let _lock = Lock::acquire(&ctx.source)?;
+    commit_pending(&git, ctx)?;
+    let (pinned, _) =
+        clone_and_check(ctx, &git, &name, repo, rev, &plugin, None).map_err(CliError::usage)?;
+    let source = config::Source {
+        name: name.clone(),
+        repo: repo.to_string(),
+        rev: pinned.clone(),
+        plugin,
+        replaces: Vec::new(),
+        path: None,
+    };
+    let text = config::add_source(&ws.config_text, &source).map_err(CliError::usage)?;
+    write_config(ctx, &text)?;
+    commit(&git, ctx, &format!("colctl: add source {name}"))?;
+    println!("added source {name} at {}", vault::short(&pinned));
+    run_sync(ctx, &git, None)
+}
+
+/// Moves a plugin to its source when the source can be found (AC3-18…21); `None` to fall back
+/// to adopting it into a plugin list (AC3-22).
+fn adopt_plugin_from_source(ctx: &Ctx, harness: &Harness, id: &str) -> Option<Adoption> {
+    let git = Git::find(&ctx.path_var).ok()?;
+    let head = |dir: &Path| head_of_dir(&git, dir);
+    let found = match harness.kind {
+        Kind::Claude => crate::origin::claude(&harness.path, id, &head),
+        Kind::Codex => crate::origin::codex(&harness.path, id, &head),
+        Kind::Agents => None,
+    }?;
+    let ws = match load(ctx) {
+        Ok(ws) => ws,
+        Err(e) => return Some(Adoption::Refused(e.message)),
+    };
+    let list = PluginList::for_kind(harness.kind)?;
+    let mut text = ws.config_text.clone();
+    if ws.config.plugin_list(list).1.iter().any(|p| p == id) {
+        text = match config::remove_plugin_from(&text, list, id) {
+            Ok(t) => t,
+            Err(e) => return Some(Adoption::Refused(e)),
+        };
+    }
+    if let Some(existing) = ws
+        .config
+        .sources
+        .iter()
+        .find(|s| same_repo(&s.repo, &found.repo))
+    {
+        text = match config::add_replaces(&text, &existing.name, id) {
+            Ok(t) => t,
+            Err(e) => return Some(Adoption::Refused(e)),
+        };
+        return Some(match write_config(ctx, &text) {
+            Ok(()) => Adoption::Adopted,
+            Err(e) => Adoption::Refused(e.message),
+        });
+    }
+    let name = found.plugin.clone();
+    if ws.config.sources.iter().any(|s| s.name == name) {
+        return Some(Adoption::Refused(format!(
+            "a source named {name} already exists for another repo"
+        )));
+    }
+    let (pinned, packaging) = match clone_and_check(
+        ctx,
+        &git,
+        &name,
+        &found.repo,
+        found.rev.as_deref(),
+        &found.plugin,
+        found.subpath.as_deref(),
+    ) {
+        Ok(r) => r,
+        Err(e) => return Some(Adoption::Refused(e)),
+    };
+    let here = match harness.kind {
+        Kind::Codex => &packaging.codex,
+        _ => &packaging.claude,
+    };
+    if !matches!(here, ToolPackaging::Supported(_)) {
+        let _ = Vault {
+            git: &git,
+            dir: plugins_dir(ctx),
+        }
+        .remove(&name);
+        return Some(Adoption::Refused(format!(
+            "{} has no packaging for {}",
+            found.repo,
+            harness.kind.as_str()
+        )));
+    }
+    if found.rev.is_none() {
+        println!(
+            "{id}: installed commit unknown; pinned to {}",
+            vault::short(&pinned)
+        );
+    }
+    let source = config::Source {
+        name: name.clone(),
+        repo: found.repo.clone(),
+        rev: pinned,
+        plugin: found.plugin.clone(),
+        replaces: vec![id.to_string()],
+        path: found.subpath.clone(),
+    };
+    text = match config::add_source(&text, &source) {
+        Ok(t) => t,
+        Err(e) => return Some(Adoption::Refused(e)),
+    };
+    if let Err(e) = write_config(ctx, &text) {
+        return Some(Adoption::Refused(e.message));
+    }
+    if let Err(e) = commit(&git, ctx, &format!("colctl: adopt plugin {id} from source")) {
+        return Some(Adoption::Refused(e.message));
+    }
+    Some(Adoption::Adopted)
+}
+
+/// `colctl update` (AC3-14…16): moves pins to newer upstream commits.
+pub fn update(
+    ctx: &Ctx,
+    names: &[String],
+    check: bool,
+    rev: Option<&str>,
+    dry_run: bool,
+) -> Result<i32, CliError> {
+    let git = Git::find(&ctx.path_var)?;
+    let ws = load(ctx)?;
+    for n in names {
+        if !ws.config.sources.iter().any(|s| &s.name == n) {
+            return Err(CliError::usage(format!("no source named \"{n}\"")));
+        }
+    }
+    if rev.is_some() && names.len() != 1 {
+        return Err(CliError::usage("--rev needs exactly one source name"));
+    }
+    let chosen: Vec<&config::Source> = ws
+        .config
+        .sources
+        .iter()
+        .filter(|s| names.is_empty() || names.contains(&s.name))
+        .collect();
+    let vault = Vault {
+        git: &git,
+        dir: plugins_dir(ctx),
+    };
+    let mut failures = 0;
+    let mut changes: Vec<(String, String, String)> = Vec::new();
+    for s in &chosen {
+        let looked = vault
+            .fetch_clone(&s.name, &s.clone_url())
+            .and_then(|_| match rev {
+                Some(r) => vault.resolve(&s.name, r),
+                None => vault.upstream_head(&s.name),
+            });
+        let new = match looked {
+            Ok(new) => new,
+            Err(e) if rev.is_some() => return Err(CliError::usage(e)),
+            Err(e) => {
+                failures += 1;
+                println!("{}: {e}", s.name);
+                continue;
+            }
+        };
+        if new == s.rev {
+            println!("{}: up to date", s.name);
+        } else {
+            let count = vault.count_between(&s.name, &s.rev, &new);
+            let word = if count == 1 { "commit" } else { "commits" };
+            println!(
+                "{}: {} → {} ({count} new {word})",
+                s.name,
+                vault::short(&s.rev),
+                vault::short(&new)
+            );
+            changes.push((s.name.clone(), s.rev.clone(), new));
+        }
+    }
+    if check || dry_run {
+        return Ok(if failures > 0 || (check && !changes.is_empty()) {
+            EXIT_DRIFT
+        } else {
+            0
+        });
+    }
+    let _lock = Lock::acquire(&ctx.source)?;
+    commit_pending(&git, ctx)?;
+    let mut text = ws.config_text.clone();
+    for (name, _, new) in &changes {
+        text = config::set_source_rev(&text, name, new).map_err(CliError::usage)?;
+        write_config(ctx, &text)?;
+        commit(
+            &git,
+            ctx,
+            &format!("colctl: update source {name} to {}", vault::short(new)),
+        )?;
+    }
+    let code = run_sync(ctx, &git, None)?;
+    Ok(if failures > 0 { EXIT_DRIFT } else { code })
 }
 
 /// `colctl refresh` (AC2-26): pulls adopted items' origins into the source.

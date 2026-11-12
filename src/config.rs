@@ -67,6 +67,17 @@ pub fn clone_url(repo: &str) -> String {
     }
 }
 
+/// True when two repo strings name the same repo (`github:` form, trailing `/` and `.git` ignored).
+pub fn same_repo(a: &str, b: &str) -> bool {
+    let norm = |u: &str| {
+        clone_url(u)
+            .trim_end_matches('/')
+            .trim_end_matches(".git")
+            .to_string()
+    };
+    norm(a) == norm(b)
+}
+
 /// True for a repo `git clone` can take: a URL, `git@host:path`, an absolute path, or `github:owner/repo`.
 pub fn valid_repo(repo: &str) -> bool {
     if let Some(rest) = repo.strip_prefix("github:") {

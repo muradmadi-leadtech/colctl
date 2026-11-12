@@ -309,6 +309,7 @@ pub enum SourceTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceInput {
     pub name: String,
+    pub repo: String,
     pub rev: String,
     pub replaces: Vec<String>,
     pub claude: SourceTarget,
@@ -791,8 +792,12 @@ impl Builder<'_> {
                 );
                 continue;
             }
+            // A replaced id equal to the source's own id is the aggregator's copy only until colctl has
+            // installed its own; after that it's colctl's and stays.
+            let own_id_taken_over = state.sources.get(name).is_some_and(|s| s.id == target.id);
+            let own_id_replaced = source.replaces.contains(&target.id) && !own_id_taken_over;
             for id in &source.replaces {
-                if plugins.installed.contains(id) {
+                if plugins.installed.contains(id) && (id != &target.id || own_id_replaced) {
                     self.actions.push(Action::Uninstall { id: id.clone() });
                 }
             }
@@ -801,7 +806,16 @@ impl Builder<'_> {
                 if plugins.marketplaces.contains_key(market) {
                     let ours_to_drop =
                         state.marketplaces.contains(market) && !list_markets.contains_key(market);
-                    if !ours_to_drop {
+                    // The same marketplace served from its remote repo (e.g. adopting a plugin whose
+                    // marketplace is the plugin's own repo): re-point it at the clone.
+                    let same_source = plugins
+                        .marketplace_repo(market, kind)
+                        .is_some_and(|r| crate::config::same_repo(&r, &source.repo));
+                    if same_source && !ours_to_drop {
+                        self.actions.push(Action::RemoveSourceMarketplace {
+                            name: market.clone(),
+                        });
+                    } else if !ours_to_drop {
                         self.invalid(
                             ItemKind::Source,
                             name,
@@ -840,7 +854,8 @@ impl Builder<'_> {
                 )
             };
             let (s_name, id, marketplace, rev) = record(&source.rev);
-            if !plugins.installed.contains(&target.id) {
+            // A replaced id equal to the source's own id is uninstalled above, so it needs installing.
+            if !plugins.installed.contains(&target.id) || own_id_replaced {
                 self.item(ItemKind::Source, name, ItemState::Missing);
                 self.actions.push(Action::InstallSource {
                     source: s_name,

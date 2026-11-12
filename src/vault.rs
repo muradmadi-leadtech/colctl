@@ -61,7 +61,7 @@ impl Vault<'_> {
         if !is_clone(&path) {
             return CloneState::Invalid(format!("{} isn't a git clone", path.display()));
         }
-        let origin = match self.git(&path, &["remote", "get-url", "origin"]) {
+        let origin = match self.git(&path, &["config", "--get", "remote.origin.url"]) {
             Ok(o) => o,
             Err(e) => return CloneState::Invalid(e),
         };
@@ -97,10 +97,7 @@ impl Vault<'_> {
                 std::fs::create_dir_all(&self.dir)
                     .map_err(|e| format!("creating {}: {e}", self.dir.display()))?;
                 let dest = path.to_string_lossy().into_owned();
-                if let Err(e) = self.git(
-                    &self.dir,
-                    &["clone", "-q", "--no-checkout", "--", url, &dest],
-                ) {
+                if let Err(e) = self.git(&self.dir, &["clone", "-q", "--", url, &dest]) {
                     let _ = fsx::remove_any(&path);
                     return Err(format!("cloning {url}: {e}"));
                 }
@@ -138,6 +135,26 @@ impl Vault<'_> {
         } else {
             Err(format!("{} isn't cloned", path.display()))
         }
+    }
+
+    /// Clones `url` if there's no clone yet, without checking anything out (for `add source`/`adopt`,
+    /// before a pin is chosen).
+    pub fn fetch_clone(&self, name: &str, url: &str) -> Result<PathBuf, String> {
+        let path = self.path(name);
+        if fsx::exists_any(&path) {
+            return match self.inspect(name, url, "") {
+                CloneState::Invalid(reason) => Err(reason),
+                _ => Ok(path),
+            };
+        }
+        std::fs::create_dir_all(&self.dir)
+            .map_err(|e| format!("creating {}: {e}", self.dir.display()))?;
+        let dest = path.to_string_lossy().into_owned();
+        if let Err(e) = self.git(&self.dir, &["clone", "-q", "--", url, &dest]) {
+            let _ = fsx::remove_any(&path);
+            return Err(format!("cloning {url}: {e}"));
+        }
+        Ok(path)
     }
 
     /// Fetches and returns the full commit of upstream's default-branch head.
