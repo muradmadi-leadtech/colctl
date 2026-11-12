@@ -1,0 +1,55 @@
+# Builds colctl for each platform, attests each archive's provenance, and attaches the archives to
+# the release, where `mise use -g github:muradmadi-leadtech/colctl` finds them. Anyone can check a download
+# with `gh attestation verify <archive> --repo muradmadi-leadtech/colctl`. release.yml starts this on the tag
+# release-please just made; to redo a release by hand: gh workflow run publish.yml --ref v1.2.3
+name: publish
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  binaries:
+    permissions:
+      contents: write # gh release upload
+      id-token: write # sign the attestations
+      attestations: write # store them on the repo
+      artifact-metadata: write # the storage record actions/attest makes alongside
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Installs the rust and just versions pinned in mise.toml.
+      - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --release --locked --target "$TARGET"
+        env:
+          TARGET: ${{ matrix.target }}
+      - name: Pack
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            echo "::error::Run this on a release tag: gh workflow run publish.yml --ref v1.2.3"
+            exit 1
+          fi
+          tar -czf "colctl-$TARGET.tar.gz" -C "target/$TARGET/release" colctl
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: colctl-${{ matrix.target }}.tar.gz
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+        run: gh release upload "$GITHUB_REF_NAME" "colctl-$TARGET.tar.gz" --clobber
