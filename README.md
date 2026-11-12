@@ -67,3 +67,7 @@ just coverage   # an HTML coverage report
 
 Tests never touch your real `~/.claude`: they run the binary against a temporary home with a fake `claude`
 (`examples/fake_claude.rs`). Every acceptance criterion and edge case has a test named after it (`ac_09_…`, `ec_14_…`).
+
+## License
+
+[MIT](LICENSE)
