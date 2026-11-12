@@ -10,7 +10,7 @@ New versions of source plugins (`update`) and taken-over skills/agents (`refresh
 
 ---
 
-<!-- FORGE_PHASE:Focus:Active -->
+<!-- FORGE_PHASE:Focus:Complete -->
 ## Phase 1: Focus
 
 **Purpose**: Define what you're building and why.
@@ -29,7 +29,7 @@ New versions of source plugins (`update`) and taken-over skills/agents (`refresh
 
 ---
 
-<!-- FORGE_PHASE:Orchestrate:Pending -->
+<!-- FORGE_PHASE:Orchestrate:Active -->
 ## Phase 2: Orchestrate
 
 **Purpose**: Break the work into session-sized pieces.
@@ -42,7 +42,8 @@ New versions of source plugins (`update`) and taken-over skills/agents (`refresh
 
 ### Tasks
 
-<!-- List tasks here -->
+See `docs/tasks/quarantine.md` (T1–T10), `docs/quarantine/containers.md`, `docs/quarantine/components.md`.
+Dependency map: T1 → T3, T4; T2 → T5; T3 + T4 → T5–T8; T5–T8 → T9 → T10.
 
 ---
 
