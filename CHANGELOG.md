@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.0](https://github.com/muradmadi-leadtech/colctl/compare/v1.1.0...v1.2.0) (2026-11-12)
+
+
+### Features
+
+* add, remove, update and adopt source plugins ([#31](https://github.com/muradmadi-leadtech/colctl/issues/31)) ([93bbae9](https://github.com/muradmadi-leadtech/colctl/commit/93bbae9be6bff1b58614ac4ca0a9f6315a29b076))
+* declare source plugins in config ([#24](https://github.com/muradmadi-leadtech/colctl/issues/24)) ([ed70f3a](https://github.com/muradmadi-leadtech/colctl/commit/ed70f3a6fa4f4ecf0586fe0e0e1d4c1495b8bab7))
+* detect plugin packaging and write missing manifests ([#27](https://github.com/muradmadi-leadtech/colctl/issues/27)) ([9843eba](https://github.com/muradmadi-leadtech/colctl/commit/9843eba185bfd19b10c663db0648f047be0deefc))
+* find where an installed plugin comes from ([#29](https://github.com/muradmadi-leadtech/colctl/issues/29)) ([efe7b55](https://github.com/muradmadi-leadtech/colctl/commit/efe7b5534398470cef6097bdbc49b25d718ed915))
+* install source plugins from their clone in every harness ([#30](https://github.com/muradmadi-leadtech/colctl/issues/30)) ([9eb339a](https://github.com/muradmadi-leadtech/colctl/commit/9eb339a90e2aad92c9d65f43cf08cf0eb7417aca))
+* keep source plugin clones at their pin ([#25](https://github.com/muradmadi-leadtech/colctl/issues/25)) ([154aaf1](https://github.com/muradmadi-leadtech/colctl/commit/154aaf1180f26c64d9e6b76fdba8bda81a9d60ff))
+
+
+### Bug Fixes
+
+* leave project-scoped plugins alone and show pending replacements ([#33](https://github.com/muradmadi-leadtech/colctl/issues/33)) ([0236f7d](https://github.com/muradmadi-leadtech/colctl/commit/0236f7d5dae0ac0b80ebf8cf899fd31e598d3eac))
+
 ## [1.1.0](https://github.com/muradmadi-leadtech/colctl/compare/v1.0.0...v1.1.0) (2026-11-12)
 
 
