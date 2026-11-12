@@ -15,3 +15,12 @@ default:
 # One-time setup: commit guard
 setup:
     git config core.hooksPath .githooks
+
+# The tests, with line coverage gated at 90%. Replaces sadr.just's `test` so `check` and CI use it.
+# The fake `claude` in examples/ is test support, so it's left out of the measurement.
+test:
+    cargo llvm-cov --locked --fail-under-lines 90 --ignore-filename-regex '(examples|tests)/' -- --include-ignored
+
+# An HTML coverage report in target/llvm-cov/html
+coverage:
+    cargo llvm-cov --locked --html --ignore-filename-regex '(examples|tests)/' -- --include-ignored
