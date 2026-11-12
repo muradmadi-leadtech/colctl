@@ -8,10 +8,10 @@ _Cycle 3 · Evaluate · 2026-11-12_
 | **Run mode** | Focus, Orchestrate and Refine were confirmed with the owner. Generate ran **autonomously** under the policy in `.forge/context.md`, extended to this cycle |
 | **Intent** | [PRD](../prd/plugins-from-source.md): install plugins once from their author's repo into every Claude and Codex profile, bypassing aggregators, with explicit updates |
 | **Scope delivered** | Everything in the PRD's "In" list. Quarantine (cycle 4) and converting packaging between tools (later) were not built |
-| **Released** | [v1.2.0](https://github.com/muradmadi-leadtech/colctl/releases/tag/v1.2.0): both archives attested; `mise exec github:muradmadi-leadtech/colctl@1.2.0 -- colctl --version` prints `colctl 1.2.0` |
+| **Released** | [v1.2.1](https://github.com/muradmadi-leadtech/colctl/releases/tag/v1.2.1) after the revise (first [v1.2.0](https://github.com/muradmadi-leadtech/colctl/releases/tag/v1.2.0): both archives attested; `mise exec github:muradmadi-leadtech/colctl@1.2.0 -- colctl --version` prints `colctl 1.2.0`) |
 | **PRs** | #23 plan · #24 T1 · #25 T2 · #27 T3 · #29 T4 · #30 T5+T6 · #31 T7 · #32 T8 · #33 fix · #26 release |
 | **Production impact** | None on this machine. Real profiles were only read; the smoke test ran on copies |
-| **Disposition** | **Awaiting the owner** |
+| **Disposition** | First evaluation: **Revise** (owner). After the revise: **awaiting the owner** |
 
 ## Your story, on copies of your real profiles
 
@@ -169,4 +169,49 @@ TOTAL lines 6983, missed 298, cover 95.73%   (gate: 90%)
 - [ ] `colctl status`: superpowers should show `from-aggregator` in both Claude profiles
 - [ ] `colctl adopt`, then `colctl update --check` and `colctl update` (6.4.2 → 7.0.2), then open each harness and check
       superpowers is there
+- [ ] Decide the disposition
+
+## Revise (after the owner's first evaluation)
+
+**What the owner found.** On the real profiles, `colctl status` showed superpowers as `ok`. It had been adopted into
+`[plugins]` back in cycle 1, so it was never `from-aggregator`, and `adopt` refused it ("not a foreign item"). The
+checklist's step 2 couldn't happen. Disposition: **Revise**, back to Refine.
+
+**Refine:** AC3-29, AC3-30 and EC3-19 (in [acceptance-criteria.md](acceptance-criteria.md) and
+[edge-cases.md](edge-cases.md)).
+- **AC3-29:** `adopt` converts a list plugin whose source is known in one step: one commit, one sync, and the old
+  copy uninstalled once per harness.
+- **AC3-30:** `status` hints `source available: …` without changing the exit code.
+- **EC3-19:** without a known source, nothing changes.
+
+**Generate:**
+
+| PR | What | RED run |
+|---|---|---|
+| #35 | AC3-29, AC3-30, EC3-19 (+ docs) | [43259880032](https://github.com/muradmadi-leadtech/colctl/actions/runs/43259880032) |
+| #37 | The first sync of a source made by colctl 1.1 left `.gitignore` uncommitted (found by the revise smoke test) | Pushed GREEN while the RED run was pending, and CI cancels superseded PR runs, so this RED was verified **locally only** (1 failed) |
+
+`ec3_19`'s first version left out a `sync` step; it was fixed in the GREEN commit.
+
+**Smoke test, on a fresh copy of the owner's actual `~/.colctl` and profiles** (real `claude`, `codex`, `git` and
+GitHub):
+1. `status` showed `ok … → source available: https://github.com/obra/superpowers; colctl adopt claude plugin …` in both
+   Claude profiles.
+2. `adopt claude plugin superpowers@anthropic-plugin-directory` was **one commit**: the list entry was removed and
+   the `[[source]]` added at `8ca22db`.
+3. One sync then ran in every profile:
+   - native: uninstalled the old copy, then installed `superpowers@superpowers-dev`;
+   - kilo-claude, where colctl had installed it: forgot it, uninstalled it once, then installed from source;
+   - both Codex profiles: installed from source.
+4. `update`: `8ca22db → 22f0b46 (4 new commits)`, 6.4.2 → 7.0.2. Then `status` was **in sync** with nothing uncommitted.
+
+**Tests on `main` after v1.2.1:** every suite passes. That's 233 tests (146 unit + 87 end-to-end across six suites).
+Line coverage is 95.8%, and traceability now covers AC3-01…30 and EC3-01…19.
+
+### Reviewer checklist (revised)
+
+- [ ] `mise use -g github:muradmadi-leadtech/colctl@1.2.1`
+- [ ] `colctl status`: superpowers shows `ok … source available: …`
+- [ ] `colctl adopt claude plugin superpowers@anthropic-plugin-directory`, then `colctl update` (6.4.2 → 7.0.2), then
+      open each harness and check superpowers is there
 - [ ] Decide the disposition
