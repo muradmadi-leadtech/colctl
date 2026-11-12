@@ -135,9 +135,11 @@ fn one(
         serde_json::to_string_pretty(&body).unwrap_or_default()
     );
     let path = manifests.join(tool.marketplace);
-    let written = (fs::read_to_string(&path).ok().as_deref() == Some(text.as_str()))
-        .then_some(Ok(()))
-        .unwrap_or_else(|| fsx::atomic_write(&path, text.as_bytes()));
+    let written = if fs::read_to_string(&path).ok().as_deref() == Some(text.as_str()) {
+        Ok(())
+    } else {
+        fsx::atomic_write(&path, text.as_bytes())
+    };
     let linked = match fs::read_link(manifests.join("plugin")) {
         Ok(target) if target == folder => Ok(()),
         _ => fsx::atomic_symlink(&folder, &manifests.join("plugin")),
