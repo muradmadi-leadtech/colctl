@@ -889,9 +889,13 @@ fn ec_14_ec_31_foreign_links_are_refused() {
         out.contains("remove or replace this link yourself"),
         "{out}"
     );
+    // Changed in cycle 2 (AC2-25, AC2-28): adopt now takes over links into other folders, but a
+    // dangling one like this is still refused.
     let out = env.expect(1, &["adopt", "claude", "skills/mine"]);
     assert!(
-        out.contains("refused skills/mine in claude: remove or replace this link yourself"),
+        out.contains(
+            "refused skills/mine in claude: it links to /somewhere/else, which doesn't exist"
+        ),
         "{out}"
     );
     let out = env.expect(1, &["adopt", "claude", "CLAUDE.md"]);

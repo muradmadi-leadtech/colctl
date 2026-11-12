@@ -424,20 +424,30 @@ pub fn load(source: &Path, home: &Path) -> Result<(Config, String), CliError> {
 
 /// A fresh config listing `harnesses` as (name, path-as-written).
 pub fn initial_text(harnesses: &[(String, String)]) -> String {
+    let with_kinds: Vec<(String, String, Kind)> = harnesses
+        .iter()
+        .map(|(n, p)| (n.clone(), p.clone(), Kind::Claude))
+        .collect();
+    initial_text_with(&with_kinds)
+}
+
+/// A fresh config listing `harnesses` as (name, path-as-written, kind).
+pub fn initial_text_with(harnesses: &[(String, String, Kind)]) -> String {
     let mut text = String::from(
         "# colctl configuration. Reference: https://github.com/muradmadi-leadtech/colctl/blob/main/docs/reference/config.md\nversion = 1\n",
     );
-    for (name, path) in harnesses {
-        text.push_str(&harness_block(name, path));
+    for (name, path, kind) in harnesses {
+        text.push_str(&harness_block(name, path, *kind));
     }
     text.push_str("\n[marketplaces]\n# name = \"github:owner/repo\"\n\n[plugins]\nenabled = []\n");
     text
 }
 
-fn harness_block(name: &str, path: &str) -> String {
+fn harness_block(name: &str, path: &str, kind: Kind) -> String {
     format!(
-        "\n[[harness]]\nname = {}\nkind = \"claude\"\npath = {}\n",
+        "\n[[harness]]\nname = {}\nkind = \"{}\"\npath = {}\n",
         toml_edit::Value::from(name),
+        kind.as_str(),
         toml_edit::Value::from(path)
     )
 }
@@ -449,11 +459,16 @@ fn document(text: &str) -> Result<DocumentMut, String> {
 
 /// Appends a `[[harness]]` table, leaving every existing line unchanged (AC-06).
 pub fn append_harness(text: &str, name: &str, path: &str) -> String {
+    append_harness_kind(text, name, path, Kind::Claude)
+}
+
+/// Appends a `[[harness]]` table of any kind, leaving every existing line unchanged.
+pub fn append_harness_kind(text: &str, name: &str, path: &str, kind: Kind) -> String {
     let mut out = text.to_string();
     if !out.ends_with('\n') {
         out.push('\n');
     }
-    out.push_str(&harness_block(name, path));
+    out.push_str(&harness_block(name, path, kind));
     out
 }
 

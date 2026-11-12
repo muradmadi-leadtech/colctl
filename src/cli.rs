@@ -1,6 +1,7 @@
 //! Argument parsing and dispatch (interfaces.md § Command line).
 
 use crate::commands::{self, RmKind};
+use crate::config::PluginList;
 use crate::ctx::Ctx;
 use crate::error::{CliError, EXIT_USAGE};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -55,6 +56,9 @@ enum Command {
     Rm {
         kind: Kind,
         name: String,
+        /// A plugin from the Codex list instead of Claude's
+        #[arg(long)]
+        codex: bool,
         /// Print what would happen without changing anything
         #[arg(long)]
         dry_run: bool,
@@ -65,6 +69,14 @@ enum Command {
         harness: Option<String>,
         /// skills/<name>, agents/<name>.md, CLAUDE.md, or plugin <id>
         item: Vec<String>,
+        /// Print what would happen without changing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Pull adopted skills and agents up to date with where they came from
+    Refresh {
+        /// skills/<name> or agents/<name>.md; all with a recorded origin if omitted
+        items: Vec<String>,
         /// Print what would happen without changing anything
         #[arg(long)]
         dry_run: bool,
@@ -100,6 +112,9 @@ enum Add {
         /// Where the marketplace comes from, if it's new: github:owner/repo, a URL or a path
         #[arg(long)]
         marketplace: Option<String>,
+        /// The Codex plugin list instead of Claude's
+        #[arg(long)]
+        codex: bool,
         #[arg(long)]
         dry_run: bool,
     },
@@ -110,6 +125,14 @@ enum Kind {
     Skill,
     Agent,
     Plugin,
+}
+
+fn list(codex: bool) -> PluginList {
+    if codex {
+        PluginList::Codex
+    } else {
+        PluginList::Claude
+    }
 }
 
 fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
@@ -128,12 +151,14 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             Add::Plugin {
                 id,
                 marketplace,
+                codex,
                 dry_run,
-            } => commands::add_plugin(ctx, &id, marketplace.as_deref(), dry_run),
+            } => commands::add_plugin(ctx, &id, marketplace.as_deref(), list(codex), dry_run),
         },
         Command::Rm {
             kind,
             name,
+            codex,
             dry_run,
         } => {
             let kind = match kind {
@@ -141,13 +166,14 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
                 Kind::Agent => RmKind::Agent,
                 Kind::Plugin => RmKind::Plugin,
             };
-            commands::rm(ctx, kind, &name, dry_run)
+            commands::rm(ctx, kind, &name, list(codex), dry_run)
         }
         Command::Adopt {
             harness,
             item,
             dry_run,
         } => commands::adopt(ctx, harness.as_deref(), &item, dry_run),
+        Command::Refresh { items, dry_run } => commands::refresh(ctx, &items, dry_run),
         Command::Version => {
             println!("colctl {}", env!("CARGO_PKG_VERSION"));
             Ok(0)
