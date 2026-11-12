@@ -105,11 +105,11 @@ held only tests (and stubs) and its CI `check` failed; the second commit made it
 - [x] Code review: Security review completed
 - [x] Code review: Integration and interface contracts verified
 - [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
-- [ ] Disposition decision made
+- [x] Disposition decision made
 
 ### Disposition
 
-<!-- Accept / Accept with issues / Revise / Reject -->
+**Accept.** Signed off by the owner on 2026-11-12 after running the reviewer checklist on the real profiles.
 
 ---
 
