@@ -14,11 +14,25 @@ use crate::config::Kind;
 
 /// Reads a harness of any kind.
 pub fn scan_harness(kind: Kind, harness: &Path, source: &Path) -> Scan {
-    match kind {
+    let mut scan = match kind {
         Kind::Claude => claude::scan(harness, source),
         Kind::Codex => codex::scan(harness, source),
         Kind::Agents => agents_dir::scan(harness, source),
+    };
+    let find: fn(&Path, &str, crate::origin::HeadOf) -> Option<crate::origin::Found> = match kind {
+        Kind::Claude => crate::origin::claude,
+        Kind::Codex => crate::origin::codex,
+        Kind::Agents => return scan,
+    };
+    if let Ok(plugins) = scan.plugins.as_mut() {
+        let ids: Vec<String> = plugins.installed.iter().cloned().collect();
+        for id in ids {
+            if let Some(found) = find(harness, &id, &|_| None) {
+                plugins.origins.insert(id, found.repo);
+            }
+        }
     }
+    scan
 }
 
 use crate::fsx;
@@ -81,6 +95,38 @@ pub struct Plugins {
     pub installed: BTreeSet<String>,
     /// Marketplace name → its entry in `known_marketplaces.json`.
     pub marketplaces: BTreeMap<String, Value>,
+    /// Installed plugin id → the commit the tool recorded (Claude's `gitCommitSha`).
+    pub revs: BTreeMap<String, String>,
+    /// Installed plugin id → its source repo, when it can be found (AC3-23).
+    pub origins: BTreeMap<String, String>,
+}
+
+impl Plugins {
+    /// True when marketplace `name` is a local folder marketplace at `dir`.
+    pub fn marketplace_is(&self, name: &str, dir: &Path) -> bool {
+        let Some(entry) = self.marketplaces.get(name) else {
+            return false;
+        };
+        let path = entry
+            .get("source")
+            .filter(|s| s.get("source").and_then(Value::as_str) == Some("directory"))
+            .and_then(|s| s.get("path"))
+            .or_else(|| {
+                (entry.get("source_type").and_then(Value::as_str) == Some("local"))
+                    .then(|| entry.get("source"))
+                    .flatten()
+            })
+            .and_then(Value::as_str);
+        path.is_some_and(|p| Path::new(p) == dir)
+    }
+
+    /// How a marketplace entry describes where it comes from, for messages.
+    pub fn marketplace_origin(&self, name: &str) -> String {
+        self.marketplaces
+            .get(name)
+            .map(|e| e.to_string())
+            .unwrap_or_default()
+    }
 }
 
 /// Everything colctl needs to know about one harness.

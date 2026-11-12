@@ -18,6 +18,8 @@ pub enum ItemKind {
     Agent,
     Marketplace,
     Plugin,
+    /// A source plugin (cycle 3), named by its source.
+    Source,
 }
 
 impl ItemKind {
@@ -28,6 +30,7 @@ impl ItemKind {
             ItemKind::Agent => "agent",
             ItemKind::Marketplace => "marketplace",
             ItemKind::Plugin => "plugin",
+            ItemKind::Source => "source",
         }
     }
 }
@@ -46,6 +49,12 @@ pub enum ItemState {
     Invalid,
     PluginMissing,
     MarketplaceMissing,
+    /// A source plugin installed at another commit than the pin.
+    Outdated,
+    /// The source's repo has no packaging for this harness's tool; informational.
+    Unsupported,
+    /// A plugin from a marketplace whose own source repo is known (AC3-23).
+    FromAggregator,
 }
 
 impl ItemState {
@@ -61,6 +70,9 @@ impl ItemState {
             ItemState::Invalid => "invalid",
             ItemState::PluginMissing => "plugin-missing",
             ItemState::MarketplaceMissing => "marketplace-missing",
+            ItemState::Outdated => "outdated",
+            ItemState::Unsupported => "unsupported",
+            ItemState::FromAggregator => "from-aggregator",
         }
     }
 }
@@ -98,6 +110,7 @@ impl Item {
             ItemKind::Agent => format!("agents/{name}.md"),
             ItemKind::Plugin => format!("plugin {name}"),
             ItemKind::Marketplace => format!("marketplace {name}"),
+            ItemKind::Source => format!("sources/{name}"),
         }
     }
 
@@ -155,13 +168,50 @@ pub enum Action {
     ForgetPlugin {
         id: String,
     },
+    /// Add a source plugin's local marketplace (not recorded as a list marketplace).
+    AddSourceMarketplace {
+        name: String,
+        dir: PathBuf,
+    },
+    /// Install a source plugin; records it in the harness's `sources`.
+    InstallSource {
+        source: String,
+        id: String,
+        marketplace: String,
+        rev: String,
+    },
+    /// Bring an installed source plugin to the pin.
+    UpdateSource {
+        source: String,
+        id: String,
+        marketplace: String,
+        rev: String,
+    },
+    UninstallSource {
+        source: String,
+        id: String,
+    },
+    RemoveSourceMarketplace {
+        name: String,
+    },
+    /// Drop a source from the state.
+    ForgetSource {
+        source: String,
+    },
 }
 
 impl Action {
     /// A one-line description for output; plugin actions are shown as the `tool` command.
     pub fn describe(&self, tool: Option<Tool>) -> String {
-        if let Some(argv) = tool.and_then(|t| t.argv(self).map(|a| (t, a))) {
-            return format!("{} {}", argv.0.program(), argv.1.join(" "));
+        if let Some(t) = tool {
+            let calls = t.argvs(self);
+            if !calls.is_empty() {
+                return calls
+                    .iter()
+                    .map(|a| format!("{} {}", t.program(), a.join(" ")))
+                    .collect::<Vec<_>>()
+                    .join(" && ");
+            }
         }
         match self {
             Action::CleanupTemp(p) => format!("remove leftover {}", p.display()),
@@ -178,6 +228,14 @@ impl Action {
             Action::Install { id } => format!("install plugin {id}"),
             Action::Uninstall { id } => format!("uninstall plugin {id}"),
             Action::ForgetPlugin { id } => format!("forget plugin {id}"),
+            Action::AddSourceMarketplace { dir, .. } => {
+                format!("add marketplace {}", dir.display())
+            }
+            Action::InstallSource { id, .. } => format!("install plugin {id}"),
+            Action::UpdateSource { id, .. } => format!("update plugin {id}"),
+            Action::UninstallSource { id, .. } => format!("uninstall plugin {id}"),
+            Action::RemoveSourceMarketplace { name } => format!("remove marketplace {name}"),
+            Action::ForgetSource { source } => format!("forget source {source}"),
         }
     }
 
@@ -189,6 +247,11 @@ impl Action {
                 | Action::RemoveMarketplace { .. }
                 | Action::Install { .. }
                 | Action::Uninstall { .. }
+                | Action::AddSourceMarketplace { .. }
+                | Action::InstallSource { .. }
+                | Action::UpdateSource { .. }
+                | Action::UninstallSource { .. }
+                | Action::RemoveSourceMarketplace { .. }
         )
     }
 }
@@ -209,7 +272,11 @@ pub struct HarnessPlan {
 impl HarnessPlan {
     /// True when every item is ok and the folder is usable.
     pub fn in_sync(&self) -> bool {
-        self.root == Root::Ok && self.items.iter().all(|i| i.state == ItemState::Ok)
+        self.root == Root::Ok
+            && self
+                .items
+                .iter()
+                .all(|i| matches!(i.state, ItemState::Ok | ItemState::Unsupported))
     }
 }
 
@@ -224,6 +291,38 @@ pub struct Inputs<'a> {
     pub generated: &'a [u8],
     /// Each source agent rendered as Codex TOML, or why it can't be (AC2-08, AC2-11).
     pub codex_agents: &'a BTreeMap<String, Result<Vec<u8>, String>>,
+    /// Source plugins and where each tool installs them from (cycle 3).
+    pub sources: &'a [SourceInput],
+}
+
+/// Where one tool gets a source plugin from, as far as planning is concerned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceTarget {
+    Ready(crate::packaging::Target),
+    /// Not ready yet; sync will get it there (not cloned, clone not at the pin).
+    Pending(String),
+    Unsupported(String),
+    Invalid(String),
+}
+
+/// A declared source plugin, prepared for planning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceInput {
+    pub name: String,
+    pub rev: String,
+    pub replaces: Vec<String>,
+    pub claude: SourceTarget,
+    pub codex: SourceTarget,
+}
+
+impl SourceInput {
+    pub fn target(&self, kind: Kind) -> Option<&SourceTarget> {
+        match kind {
+            Kind::Claude => Some(&self.claude),
+            Kind::Codex => Some(&self.codex),
+            Kind::Agents => None,
+        }
+    }
 }
 
 fn hint(item: &Item, harness: &str, source_display: &str) -> Option<String> {
@@ -234,7 +333,16 @@ fn hint(item: &Item, harness: &str, source_display: &str) -> Option<String> {
         | ItemState::Broken
         | ItemState::Orphaned
         | ItemState::PluginMissing
-        | ItemState::MarketplaceMissing => "colctl sync".to_string(),
+        | ItemState::MarketplaceMissing
+        | ItemState::Outdated => "colctl sync".to_string(),
+        ItemState::Unsupported => return None,
+        ItemState::FromAggregator => format!(
+            "source: {}; colctl adopt {harness} {address}",
+            item.target
+                .as_ref()
+                .map(|t| t.display().to_string())
+                .unwrap_or_default()
+        ),
         ItemState::Foreign => format!("colctl adopt {harness} {address}"),
         ItemState::ForeignLink => match &item.target {
             Some(target) if item.can_take_over() => format!(
@@ -579,16 +687,208 @@ impl Builder<'_> {
             }
         }
 
+        let kind = self.harness.kind;
+        let from_sources: BTreeSet<&String> = self
+            .inputs
+            .sources
+            .iter()
+            .flat_map(|s| {
+                let target = match s.target(kind) {
+                    Some(SourceTarget::Ready(t)) => Some(&t.id),
+                    _ => None,
+                };
+                s.replaces.iter().chain(target)
+            })
+            .chain(state.sources.values().map(|s| &s.id))
+            .collect();
         for id in &plugins.installed {
             let ours = config_plugins.contains(id) || state.plugins.contains(id);
-            if !ours && !excluded(id) {
-                self.item(ItemKind::Plugin, id, ItemState::Foreign);
+            if ours || excluded(id) || from_sources.contains(id) {
+                continue;
+            }
+            match plugins.origins.get(id) {
+                Some(repo) => {
+                    let mut item = Item {
+                        kind: ItemKind::Plugin,
+                        name: id.clone(),
+                        state: ItemState::FromAggregator,
+                        hint: None,
+                        address: Item::address_for(ItemKind::Plugin, kind, id),
+                        target: Some(PathBuf::from(repo)),
+                    };
+                    item.hint = hint(&item, &self.harness.name, self.inputs.source_display);
+                    self.items.push(item);
+                }
+                None => self.item(ItemKind::Plugin, id, ItemState::Foreign),
             }
         }
 
         self.actions.extend(adds);
         self.actions.extend(installs);
         self.actions.extend(removals);
+    }
+}
+
+impl Builder<'_> {
+    /// Source plugins in a claude or codex harness (AC3-09…12).
+    fn sources(
+        &mut self,
+        scan: &Result<crate::adapter::Plugins, String>,
+        state: &HarnessState,
+        list: PluginList,
+    ) {
+        let Ok(plugins) = scan else { return };
+        let kind = self.harness.kind;
+        let (list_markets, list_plugins) = self.inputs.config.plugin_list(list);
+        let declared: BTreeSet<&str> = self
+            .inputs
+            .sources
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        for source in self.inputs.sources {
+            if self.harness.excludes(&format!("sources/{}", source.name)) {
+                continue;
+            }
+            let name = source.name.as_str();
+            let target = match source.target(kind) {
+                Some(SourceTarget::Ready(t)) => t,
+                Some(SourceTarget::Unsupported(reason)) => {
+                    let mut item = Item {
+                        kind: ItemKind::Source,
+                        name: name.to_string(),
+                        state: ItemState::Unsupported,
+                        hint: Some(reason.clone()),
+                        address: Item::address_for(ItemKind::Source, kind, name),
+                        target: None,
+                    };
+                    item.hint = Some(reason.clone());
+                    self.items.push(item);
+                    continue;
+                }
+                Some(SourceTarget::Invalid(reason)) => {
+                    self.invalid(ItemKind::Source, name, reason);
+                    continue;
+                }
+                Some(SourceTarget::Pending(reason)) => {
+                    self.items.push(Item {
+                        kind: ItemKind::Source,
+                        name: name.to_string(),
+                        state: ItemState::Missing,
+                        hint: Some(reason.clone()),
+                        address: Item::address_for(ItemKind::Source, kind, name),
+                        target: None,
+                    });
+                    continue;
+                }
+                None => continue,
+            };
+            if list_plugins.contains(&target.id) {
+                self.invalid(
+                    ItemKind::Source,
+                    name,
+                    &format!("{} is both a source plugin and a list plugin", target.id),
+                );
+                continue;
+            }
+            for id in &source.replaces {
+                if plugins.installed.contains(id) {
+                    self.actions.push(Action::Uninstall { id: id.clone() });
+                }
+            }
+            let market = &target.marketplace;
+            if !plugins.marketplace_is(market, &target.marketplace_dir) {
+                if plugins.marketplaces.contains_key(market) {
+                    let ours_to_drop =
+                        state.marketplaces.contains(market) && !list_markets.contains_key(market);
+                    if !ours_to_drop {
+                        self.invalid(
+                            ItemKind::Source,
+                            name,
+                            &format!(
+                                "marketplace {market} already comes from {}",
+                                plugins.marketplace_origin(market)
+                            ),
+                        );
+                        continue;
+                    }
+                }
+                self.actions.push(Action::AddSourceMarketplace {
+                    name: market.clone(),
+                    dir: target.marketplace_dir.clone(),
+                });
+            }
+            let recorded = state.sources.get(name).map(|s| s.rev.as_str());
+            // The commit a tool records is the marketplace folder's. That's the clone's only when the
+            // repo's own manifest is used; a colctl-written manifest sits in ~/.colctl's repo instead.
+            let wrapped = target
+                .marketplace_dir
+                .components()
+                .any(|c| c.as_os_str() == crate::commands::MANIFESTS);
+            let tool_rev = if wrapped {
+                None
+            } else {
+                plugins.revs.get(&target.id).map(String::as_str)
+            };
+            let installed_rev = tool_rev.or(recorded);
+            let record = |rev: &str| {
+                (
+                    name.to_string(),
+                    target.id.clone(),
+                    market.clone(),
+                    rev.to_string(),
+                )
+            };
+            let (s_name, id, marketplace, rev) = record(&source.rev);
+            if !plugins.installed.contains(&target.id) {
+                self.item(ItemKind::Source, name, ItemState::Missing);
+                self.actions.push(Action::InstallSource {
+                    source: s_name,
+                    id,
+                    marketplace,
+                    rev,
+                });
+            } else if installed_rev == Some(source.rev.as_str()) {
+                self.item(ItemKind::Source, name, ItemState::Ok);
+                if recorded != Some(source.rev.as_str()) {
+                    // Installed at the pin but not recorded: record it with a no-op install.
+                    self.actions.push(Action::InstallSource {
+                        source: s_name,
+                        id,
+                        marketplace,
+                        rev,
+                    });
+                }
+            } else {
+                self.item(ItemKind::Source, name, ItemState::Outdated);
+                self.actions.push(Action::UpdateSource {
+                    source: s_name,
+                    id,
+                    marketplace,
+                    rev,
+                });
+            }
+        }
+        for (name, installed) in &state.sources {
+            if declared.contains(name.as_str()) {
+                continue;
+            }
+            if plugins.installed.contains(&installed.id) {
+                self.item(ItemKind::Source, name, ItemState::Orphaned);
+                self.actions.push(Action::UninstallSource {
+                    source: name.clone(),
+                    id: installed.id.clone(),
+                });
+            }
+            if plugins.marketplaces.contains_key(&installed.marketplace) {
+                self.actions.push(Action::RemoveSourceMarketplace {
+                    name: installed.marketplace.clone(),
+                });
+            }
+            self.actions.push(Action::ForgetSource {
+                source: name.clone(),
+            });
+        }
     }
 }
 
@@ -609,11 +909,13 @@ pub fn plan(harness: &Harness, scan: &Scan, state: &HarnessState, inputs: &Input
                 b.links(ItemKind::Skill, &scan.skills);
                 b.links(ItemKind::Agent, &scan.agents);
                 b.plugins(&scan.plugins, state, PluginList::Claude);
+                b.sources(&scan.plugins, state, PluginList::Claude);
             }
             Kind::Codex => {
                 b.instructions_link(&scan.instructions);
                 b.generated_agents(&scan.generated, state);
                 b.plugins(&scan.plugins, state, PluginList::Codex);
+                b.sources(&scan.plugins, state, PluginList::Codex);
             }
             Kind::Agents => b.links(ItemKind::Skill, &scan.skills),
         }
@@ -674,6 +976,7 @@ mod tests {
             source_display: "~/.colctl",
             generated: GEN,
             codex_agents: &BTreeMap::new(),
+            sources: &[],
         };
         plan(h, s, st, &inputs)
     }

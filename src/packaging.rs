@@ -77,6 +77,7 @@ fn read_json(path: &Path) -> Result<Value, String> {
 }
 
 fn one(
+    write: bool,
     tool: &Tool,
     clone: &Path,
     manifests: &Path,
@@ -135,12 +136,13 @@ fn one(
         serde_json::to_string_pretty(&body).unwrap_or_default()
     );
     let path = manifests.join(tool.marketplace);
-    let written = if fs::read_to_string(&path).ok().as_deref() == Some(text.as_str()) {
+    let written = if !write || fs::read_to_string(&path).ok().as_deref() == Some(text.as_str()) {
         Ok(())
     } else {
         fsx::atomic_write(&path, text.as_bytes())
     };
     let linked = match fs::read_link(manifests.join("plugin")) {
+        _ if !write => Ok(()),
         Ok(target) if target == folder => Ok(()),
         _ => fsx::atomic_symlink(&folder, &manifests.join("plugin")),
     };
@@ -163,9 +165,21 @@ pub fn inspect(
     plugin: &str,
     subpath: Option<&str>,
 ) -> Packaging {
+    inspect_with(true, clone, manifests, name, plugin, subpath)
+}
+
+/// [`inspect`], optionally without writing manifests (for `status`, which never writes).
+pub fn inspect_with(
+    write: bool,
+    clone: &Path,
+    manifests: &Path,
+    name: &str,
+    plugin: &str,
+    subpath: Option<&str>,
+) -> Packaging {
     Packaging {
-        claude: one(&CLAUDE, clone, manifests, name, plugin, subpath),
-        codex: one(&CODEX, clone, manifests, name, plugin, subpath),
+        claude: one(write, &CLAUDE, clone, manifests, name, plugin, subpath),
+        codex: one(write, &CODEX, clone, manifests, name, plugin, subpath),
     }
 }
 

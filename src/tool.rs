@@ -35,7 +35,44 @@ impl Tool {
         }
     }
 
-    /// The argv (without the program) for a plugin action; `None` for actions that aren't.
+    /// Every call (argv without the program) a plugin action needs, in order; empty for actions that
+    /// aren't plugin calls.
+    pub fn argvs(self, action: &Action) -> Vec<Vec<String>> {
+        let own = |w: Vec<&str>| w.into_iter().map(str::to_string).collect::<Vec<_>>();
+        match action {
+            Action::AddSourceMarketplace { dir, .. } => {
+                vec![own(vec![
+                    "plugin",
+                    "marketplace",
+                    "add",
+                    &dir.to_string_lossy(),
+                ])]
+            }
+            Action::InstallSource { id, .. } => self
+                .argv(&Action::Install { id: id.clone() })
+                .into_iter()
+                .collect(),
+            Action::UpdateSource {
+                id, marketplace, ..
+            } => match self {
+                Tool::Claude => vec![
+                    own(vec!["plugin", "marketplace", "update", marketplace]),
+                    own(vec!["plugin", "update", id]),
+                ],
+                Tool::Codex => vec![own(vec!["plugin", "add", id])],
+            },
+            Action::UninstallSource { id, .. } => self
+                .argv(&Action::Uninstall { id: id.clone() })
+                .into_iter()
+                .collect(),
+            Action::RemoveSourceMarketplace { name } => {
+                vec![own(vec!["plugin", "marketplace", "remove", name])]
+            }
+            other => self.argv(other).into_iter().collect(),
+        }
+    }
+
+    /// The argv (without the program) for a single-call plugin action; `None` for actions that aren't.
     pub fn argv(self, action: &Action) -> Option<Vec<String>> {
         let words: Vec<&str> = match action {
             Action::AddMarketplace { source, .. } => {

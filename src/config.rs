@@ -48,6 +48,8 @@ pub struct Source {
     pub plugin: String,
     /// Plugin ids uninstalled wherever they're installed.
     pub replaces: Vec<String>,
+    /// The plugin's folder inside the repo, when it isn't the root (EC3-11).
+    pub path: Option<String>,
 }
 
 impl Source {
@@ -162,6 +164,8 @@ struct RawSource {
     plugin: Option<Spanned<String>>,
     #[serde(default)]
     replaces: Vec<Spanned<String>>,
+    #[serde(default)]
+    path: Option<Spanned<String>>,
 }
 
 #[derive(Deserialize)]
@@ -426,12 +430,28 @@ pub fn parse(text: &str, home: &Path) -> Result<Config, String> {
             }
             replaces.push(id.get_ref().clone());
         }
+        let path = match &raw.path {
+            Some(p)
+                if p.get_ref().starts_with('/') || p.get_ref().split('/').any(|c| c == "..") =>
+            {
+                return Err(at(
+                    p.span(),
+                    format!(
+                        "source path \"{}\" must be a folder inside the repo",
+                        p.get_ref()
+                    ),
+                ));
+            }
+            Some(p) => Some(p.get_ref().clone()),
+            None => None,
+        };
         config.sources.push(Source {
             name: name.clone(),
             repo: raw.repo.get_ref().clone(),
             rev: raw.rev.get_ref().clone(),
             plugin,
             replaces,
+            path,
         });
     }
     Ok(config)
@@ -627,6 +647,12 @@ pub fn add_source(text: &str, source: &Source) -> Result<String, String> {
         out.push_str(&format!(
             "plugin = {}\n",
             toml_edit::Value::from(source.plugin.as_str())
+        ));
+    }
+    if let Some(path) = &source.path {
+        out.push_str(&format!(
+            "path = {}\n",
+            toml_edit::Value::from(path.as_str())
         ));
     }
     if !source.replaces.is_empty() {
@@ -1273,6 +1299,7 @@ enabled = ["superpowers@superpowers-dev", "x@openai-curated"]
             rev: REV.into(),
             plugin: "superpowers".into(),
             replaces: vec!["superpowers@anthropic-plugin-directory".into()],
+            path: None,
         };
         let added = add_source(original, &source).unwrap();
         assert!(added.starts_with(original), "{added}");

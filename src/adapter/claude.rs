@@ -78,6 +78,16 @@ pub fn read_plugins(harness: &Path) -> Result<Plugins, String> {
             .and_then(Value::as_object)
             .ok_or_else(|| format!("{INSTALLED_PLUGINS} has no \"plugins\" object"))?;
         plugins.installed = map.keys().cloned().collect();
+        for (id, entries) in map {
+            if let Some(sha) = entries
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|e| e.get("gitCommitSha"))
+                .and_then(Value::as_str)
+            {
+                plugins.revs.insert(id.clone(), sha.to_string());
+            }
+        }
     }
     if let Some(value) = read_json(&harness.join(KNOWN_MARKETPLACES))? {
         let map = value

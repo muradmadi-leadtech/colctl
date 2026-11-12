@@ -98,18 +98,38 @@ fn main() {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.as_slice() {
         ["plugin", "marketplace", "add", src] => {
-            let name = env::var("FAKE_CLAUDE_MARKET_NAME").unwrap_or_else(|_| {
-                src.trim_end_matches(".git")
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(src)
+            let manifest = Path::new(src).join(".claude-plugin/marketplace.json");
+            let local = src.starts_with('/') && manifest.is_file();
+            let name = if local {
+                read(&manifest, json!({}))["name"]
+                    .as_str()
+                    .unwrap()
                     .to_string()
-            });
+            } else {
+                env::var("FAKE_CLAUDE_MARKET_NAME").unwrap_or_else(|_| {
+                    src.trim_end_matches(".git")
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(src)
+                        .to_string()
+                })
+            };
+            let location = if local {
+                src.to_string()
+            } else {
+                "/fake".to_string()
+            };
             markets.as_object_mut().unwrap().insert(
                 name,
-                json!({"source": source_entry(src), "installLocation": "/fake"}),
+                json!({"source": source_entry(src), "installLocation": location}),
             );
             write(&markets_path, &markets);
+        }
+        ["plugin", "marketplace", "update", name] => {
+            if markets.get(*name).is_none() {
+                eprintln!("marketplace {name} not found");
+                exit(1);
+            }
         }
         ["plugin", "marketplace", "remove", name] => {
             markets.as_object_mut().unwrap().remove(*name);
