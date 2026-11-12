@@ -289,6 +289,7 @@ Given foreign skills, agents, a CLAUDE.md and plugins across several harnesses
 When I run colctl adopt with no arguments
 Then every foreign item is adopted as in AC-24 to AC-27, one item at a time
 And a summary lists each item as adopted, linked (already identical) or refused
+And sync runs afterwards, so adopted items reach every other harness
 And the exit code is 1 if any item was refused, otherwise 0
 ```
 

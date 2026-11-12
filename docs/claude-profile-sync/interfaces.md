@@ -35,7 +35,11 @@ harness and the reason, plus a fix hint. `status --json` prints exactly one JSON
 ```json
 {
   "version": 1,
-  "source": { "path": "/Users/me/.colctl", "uncommitted": ["skills/foo/SKILL.md"] },
+  "source": {
+    "path": "/Users/me/.colctl",
+    "uncommitted": ["skills/foo/SKILL.md"],
+    "invalid": [{ "kind": "skill", "name": "bare", "reason": "no SKILL.md" }]
+  },
   "harnesses": [
     {
       "name": "kilo-claude",
@@ -53,8 +57,9 @@ harness and the reason, plus a fix hint. `status --json` prints exactly one JSON
 ```
 
 Harness `state`: `ok` | `harness-missing` | `invalid`. Item `kind`: `instructions` | `skill` | `agent` | `marketplace`
-| `plugin`. Item `state`: `ok` | `missing` | `broken` | `foreign` | `edited` | `invalid` | `plugin-missing` |
-`marketplace-missing`.
+| `plugin`. Item `state`: `ok` | `missing` | `broken` | `orphaned` | `foreign` | `edited` | `invalid` | `plugin-missing` |
+`marketplace-missing`. (`orphaned` — colctl's own item whose source is gone, which sync removes — was added during
+Generate.)
 
 ## `config.toml`
 
@@ -65,7 +70,7 @@ version = 1                      # required, must be 1
 name = "kilo-claude"             # required, unique, [a-z0-9-]+
 kind = "claude"                  # required; only "claude" in cycle 1
 path = "~/Library/Application Support/kilo-proxy-headless/profiles/claude"  # required; absolute or ~-prefixed
-exclude = ["skills/foo"]         # optional; items colctl must stay out of
+exclude = ["skills/foo"]         # optional: CLAUDE.md, skills/<n>, agents/<n>.md, plugins/<id>
 
 [marketplaces]                   # optional; name = source
 sadr = "github:muradmadi/sadr"   # "github:owner/repo" | "https://…" | absolute path
@@ -137,7 +142,8 @@ absolute targets. Created as `<parent>/.colctl-tmp-<pid>-<name>` then renamed in
 
 Environment for every call: inherited, **minus** `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR`,
 `ANTHROPIC_*`; **plus** `CLAUDE_CONFIG_DIR=<harness path>` unless the harness's canonical path is the canonical
-`~/.claude`. stdin is `/dev/null`. Timeout 300 s. A non-zero exit, timeout or spawn failure is an action failure
+`~/.claude`. stdin is `/dev/null`. Timeout 300 s, overridable with `COLCTL_CLAUDE_TIMEOUT_SECS`; the call runs in its
+own process group so a timeout kills everything it started. A non-zero exit, timeout or spawn failure is an action failure
 (AC-30).
 
 Reading plugin state: `<harness>/plugins/installed_plugins.json` (`.plugins` keys = installed ids) and
@@ -145,8 +151,19 @@ Reading plugin state: `<harness>/plugins/installed_plugins.json` (`.plugins` key
 
 ## Calling `git`
 
-`git init`, `git add -A`, `git -c user.name=colctl -c user.email=colctl@localhost commit -m <msg>` (the `-c` pair only
-when no identity is configured), `git status --porcelain`. All run with `-C <source>`.
+`git init`, `git add -A`, `git -c user.name=colctl -c user.email=colctl@localhost commit --no-verify -m <msg>` (the
+`-c` pair only when no identity is configured; `--no-verify` so a global hook can't block colctl's own bookkeeping
+commits), `git status --porcelain`. All run with `-C <source>`.
 
 Commit messages: `colctl: init`, `colctl: sync`, `colctl: add <kind> <name>`, `colctl: rm <kind> <name>`,
 `colctl: adopt <kind> <name>`.
+
+## Changes made during Generate
+
+Found while implementing and recorded here so intent and code agree:
+
+1. Item state `orphaned` (colctl's item whose source is gone) instead of reusing `broken`.
+2. `status --json` reports invalid source items under `source.invalid`.
+3. `exclude` also accepts `plugins/<id>`.
+4. `adopt` ends with a `sync`, so adopted items reach the other harnesses (needed for SC-6).
+5. `COLCTL_CLAUDE_TIMEOUT_SECS` overrides the 300 s `claude` timeout (also used by the EC-25 test).
