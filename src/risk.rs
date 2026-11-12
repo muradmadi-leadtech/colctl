@@ -92,12 +92,6 @@ const SCRIPT_EXTENSIONS: [&str; 12] = [
 
 /// The flags for a set of changed files, ordered by path, then kind.
 pub fn flags(changes: &[Changed]) -> Vec<Flag> {
-    let _ = changes; // RED: not implemented yet
-    Vec::new()
-}
-
-#[allow(dead_code)]
-fn flags_impl(changes: &[Changed]) -> Vec<Flag> {
     let mut out = Vec::new();
     for c in changes {
         let Some(new) = &c.new else { continue };
