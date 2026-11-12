@@ -215,11 +215,46 @@ impl Vault<'_> {
         .unwrap_or(0)
     }
 
+    /// Keeps `rev` under [`CANDIDATE_REF`] so it survives upstream force-pushes and `git gc` until it's
+    /// approved or rejected (AC4-03).
+    pub fn hold(&self, name: &str, rev: &str) -> Result<(), String> {
+        let path = self.existing(name)?;
+        self.git(&path, &["update-ref", CANDIDATE_REF, rev])
+            .map(|_| ())
+    }
+
+    /// The commit held for `name`, if any.
+    pub fn held(&self, name: &str) -> Option<String> {
+        self.git(
+            &self.path(name),
+            &[
+                "rev-parse",
+                "--verify",
+                "-q",
+                &format!("{CANDIDATE_REF}^{{commit}}"),
+            ],
+        )
+        .ok()
+        .filter(|r| !r.is_empty())
+    }
+
+    /// Drops the held commit's ref. Missing is fine.
+    pub fn release(&self, name: &str) -> Result<(), String> {
+        if self.held(name).is_none() {
+            return Ok(());
+        }
+        self.git(&self.path(name), &["update-ref", "-d", CANDIDATE_REF])
+            .map(|_| ())
+    }
+
     /// Deletes a clone.
     pub fn remove(&self, name: &str) -> Result<(), String> {
         fsx::remove_any(&self.path(name)).map_err(|e| format!("{e:#}"))
     }
 }
+
+/// The ref that keeps a held commit alive in its clone.
+pub const CANDIDATE_REF: &str = "refs/colctl/candidate";
 
 /// The first 7 characters of a commit.
 pub fn short(rev: &str) -> &str {
@@ -311,6 +346,34 @@ mod tests {
         fn head(&self) -> String {
             sh_git(&self.vault().path("p"), &["rev-parse", "HEAD"])
         }
+    }
+
+    #[test]
+    fn ac4_03_a_held_commit_survives_force_push_and_gc() {
+        let f = Fixture::new();
+        let v1 = sh_git(&f.upstream, &["rev-parse", "HEAD"]);
+        f.vault().ensure("p", &f.url, &v1).unwrap();
+        assert_eq!(f.vault().held("p"), None);
+        let v2 = f.commit("v2");
+        let head = f.vault().upstream_head("p").unwrap();
+        assert_eq!(head, v2);
+        f.vault().hold("p", &v2).unwrap();
+        assert_eq!(f.vault().held("p"), Some(v2.clone()));
+        // Upstream rewrites its branch so v2 is gone from it.
+        sh_git(&f.upstream, &["reset", "-q", "--hard", &v1]);
+        f.commit("v2-rewritten");
+        let clone = f.vault().path("p");
+        sh_git(&clone, &["fetch", "-q", "--prune", "--force", "origin"]);
+        sh_git(&clone, &["reflog", "expire", "--expire=now", "--all"]);
+        sh_git(&clone, &["gc", "-q", "--prune=now"]);
+        assert_eq!(f.vault().held("p"), Some(v2.clone()));
+        sh_git(&clone, &["cat-file", "-e", &format!("{v2}^{{commit}}")]);
+        assert_eq!(f.head(), v1, "holding never checks anything out");
+        f.vault().release("p").unwrap();
+        assert_eq!(f.vault().held("p"), None);
+        f.vault().release("p").unwrap();
+        assert!(f.vault().hold("nope", &v2).is_err());
+        assert_eq!(f.vault().held("nope"), None);
     }
 
     #[test]

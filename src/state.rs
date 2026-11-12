@@ -58,6 +58,75 @@ pub struct Origin {
     pub hash: String,
 }
 
+/// A held new version, waiting for `approve` or `reject` (cycle 4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Candidate {
+    /// A source plugin's commit, kept in its clone under [`crate::vault::CANDIDATE_REF`].
+    Source(HeldCommit),
+    /// A taken-over skill's snapshot in `.state/quarantine/skills/<name>`.
+    Skill(HeldCopy),
+    /// A taken-over agent's snapshot in `.state/quarantine/agents/<name>.md`.
+    Agent(HeldCopy),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeldCommit {
+    /// The pin when it was held.
+    pub from: String,
+    /// The held commit.
+    pub to: String,
+    /// Unix seconds.
+    pub held_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeldCopy {
+    pub origin: PathBuf,
+    /// The source copy's hash when it was held.
+    pub base: String,
+    /// The snapshot's hash.
+    pub hash: String,
+    /// Unix seconds.
+    pub held_at: u64,
+}
+
+impl Candidate {
+    pub fn held_at(&self) -> u64 {
+        match self {
+            Candidate::Source(c) => c.held_at,
+            Candidate::Skill(c) | Candidate::Agent(c) => c.held_at,
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Candidate::Source(_) => "source",
+            Candidate::Skill(_) => "skill",
+            Candidate::Agent(_) => "agent",
+        }
+    }
+
+    /// The version that `rejected` remembers: the commit, or the snapshot's hash.
+    pub fn version(&self) -> &str {
+        match self {
+            Candidate::Source(c) => &c.to,
+            Candidate::Skill(c) | Candidate::Agent(c) => &c.hash,
+        }
+    }
+
+    fn is_valid(&self, key: &str) -> bool {
+        let hex40 = |s: &str| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit());
+        match self {
+            Candidate::Source(c) => key.starts_with("sources/") && hex40(&c.from) && hex40(&c.to),
+            Candidate::Skill(c) => key.starts_with("skills/") && c.origin.is_absolute(),
+            Candidate::Agent(c) => key.starts_with("agents/") && c.origin.is_absolute(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct State {
@@ -67,6 +136,12 @@ pub struct State {
     /// Source item (`skills/<name>`, `agents/<name>.md`) → where it was taken over from.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub origins: BTreeMap<String, Origin>,
+    /// Candidate key (`sources/<name>`, `skills/<name>`, `agents/<name>.md`) → the held version.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub quarantine: BTreeMap<String, Candidate>,
+    /// Candidate key → rejected commits or snapshot hashes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rejected: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Default for State {
@@ -75,6 +150,8 @@ impl Default for State {
             version: 1,
             harnesses: BTreeMap::new(),
             origins: BTreeMap::new(),
+            quarantine: BTreeMap::new(),
+            rejected: BTreeMap::new(),
         }
     }
 }
@@ -91,11 +168,39 @@ impl State {
     /// Drops harnesses with nothing recorded so the file stays small.
     pub fn prune(&mut self) {
         self.harnesses.retain(|_, h| !h.is_empty());
+        self.rejected.retain(|_, r| !r.is_empty());
+    }
+
+    /// True when `version` of `key` was rejected.
+    pub fn is_rejected(&self, key: &str, version: &str) -> bool {
+        self.rejected.get(key).is_some_and(|r| r.contains(version))
+    }
+
+    /// Forgets everything held or rejected for `key` (when the item is removed).
+    pub fn forget(&mut self, key: &str) {
+        self.quarantine.remove(key);
+        self.rejected.remove(key);
     }
 }
 
 pub fn state_dir(source: &Path) -> PathBuf {
     source.join(STATE_DIR)
+}
+
+/// Where a held skill or agent's snapshot lives: `.state/quarantine/<key>`, inside the git-ignored
+/// state folder so nothing held is ever committed (AC4-02).
+pub fn snapshot_path(source: &Path, key: &str) -> PathBuf {
+    state_dir(source).join(QUARANTINE_DIR).join(key)
+}
+
+pub const QUARANTINE_DIR: &str = "quarantine";
+
+/// Now, in Unix seconds.
+pub fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Loads the state; missing is empty (EC-24), unreadable is an error (EC-23).
@@ -114,6 +219,7 @@ pub fn load(source: &Path) -> Result<State, CliError> {
     serde_json::from_str::<State>(&text)
         .ok()
         .filter(|s| s.version == 1)
+        .filter(|s| s.quarantine.iter().all(|(k, c)| c.is_valid(k)))
         .ok_or_else(|| {
             CliError::usage(format!(
                 "state is corrupt at {}; move it aside and run colctl status (generated files will then show as foreign)",
@@ -312,6 +418,88 @@ mod tests {
             again.harness("kilo-codex").generated["agents/rev.toml"],
             "sha256:def"
         );
+    }
+
+    #[test]
+    fn ac4_01_older_state_files_load_and_new_fields_appear_only_when_used() {
+        let t = tempfile::tempdir().unwrap();
+        fs::create_dir_all(state_dir(t.path())).unwrap();
+        let v12 = r#"{"version": 1, "harnesses": {"c": {"plugins": ["x@m"]}},
+            "origins": {"skills/a": {"path": "/o", "hash": "sha256:1"}}}"#;
+        fs::write(state_dir(t.path()).join(STATE_FILE), v12).unwrap();
+        let mut s = load(t.path()).unwrap();
+        assert!(s.quarantine.is_empty() && s.rejected.is_empty());
+        save(t.path(), &s).unwrap();
+        let text = fs::read_to_string(state_dir(t.path()).join(STATE_FILE)).unwrap();
+        assert!(!text.contains("quarantine") && !text.contains("rejected"));
+
+        let held = Candidate::Source(HeldCommit {
+            from: "a".repeat(40),
+            to: "b".repeat(40),
+            held_at: 7,
+        });
+        let copy = Candidate::Skill(HeldCopy {
+            origin: "/o/a".into(),
+            base: "sha256:1".into(),
+            hash: "sha256:2".into(),
+            held_at: 8,
+        });
+        s.quarantine.insert("sources/sp".into(), held.clone());
+        s.quarantine.insert("skills/a".into(), copy.clone());
+        s.rejected
+            .entry("sources/sp".into())
+            .or_default()
+            .insert("c".repeat(40));
+        s.rejected.entry("skills/empty".into()).or_default();
+        save(t.path(), &s).unwrap();
+        let text = fs::read_to_string(state_dir(t.path()).join(STATE_FILE)).unwrap();
+        assert!(text.contains(r#""kind": "source""#), "{text}");
+        assert!(text.contains(r#""kind": "skill""#), "{text}");
+        let again = load(t.path()).unwrap();
+        assert_eq!(again.quarantine["sources/sp"], held);
+        assert_eq!(again.quarantine["skills/a"], copy);
+        assert!(again.is_rejected("sources/sp", &"c".repeat(40)));
+        assert!(!again.is_rejected("sources/sp", &"b".repeat(40)));
+        assert!(!again.rejected.contains_key("skills/empty"));
+        assert_eq!(held.version(), "b".repeat(40));
+        assert_eq!(copy.version(), "sha256:2");
+        assert_eq!((held.kind(), held.held_at()), ("source", 7));
+        assert_eq!((copy.kind(), copy.held_at()), ("skill", 8));
+
+        let mut s = again;
+        s.forget("sources/sp");
+        assert!(!s.quarantine.contains_key("sources/sp") && !s.rejected.contains_key("sources/sp"));
+        assert_eq!(
+            snapshot_path(t.path(), "skills/a"),
+            t.path().join(".state/quarantine/skills/a")
+        );
+        assert!(now() > 1_700_000_000);
+    }
+
+    #[test]
+    fn ec4_04_a_malformed_quarantine_entry_is_corrupt_state() {
+        let t = tempfile::tempdir().unwrap();
+        fs::create_dir_all(state_dir(t.path())).unwrap();
+        let file = state_dir(t.path()).join(STATE_FILE);
+        let good = "a".repeat(40);
+        for bad in [
+            r#"{"sources/x": {"kind": "source", "from": "short", "to": "short", "held_at": 1}}"#.to_string(),
+            r#"{"sources/x": {"kind": "plugin", "from": "a", "to": "b", "held_at": 1}}"#.to_string(),
+            format!(r#"{{"skills/x": {{"kind": "source", "from": "{good}", "to": "{good}", "held_at": 1}}}}"#),
+            r#"{"skills/x": {"kind": "skill", "origin": "relative", "base": "b", "hash": "h", "held_at": 1}}"#.to_string(),
+            r#"{"agents/x.md": {"kind": "agent", "origin": "/o", "base": "b", "hash": "h", "held_at": 1, "extra": 1}}"#.to_string(),
+        ] {
+            fs::write(&file, format!(r#"{{"version": 1, "quarantine": {bad}}}"#)).unwrap();
+            let e = load(t.path()).unwrap_err();
+            assert_eq!(e.code, 2, "{bad}");
+            assert!(e.message.contains("state is corrupt"), "{bad}");
+        }
+        fs::write(
+            &file,
+            r#"{"version": 1, "quarantine": {"agents/x.md": {"kind": "agent", "origin": "/o", "base": "b", "hash": "h", "held_at": 1}}}"#,
+        )
+        .unwrap();
+        assert!(load(t.path()).is_ok());
     }
 
     #[test]
