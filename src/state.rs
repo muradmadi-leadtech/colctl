@@ -117,7 +117,6 @@ impl Candidate {
         }
     }
 
-    #[allow(dead_code)]
     fn is_valid(&self, key: &str) -> bool {
         let hex40 = |s: &str| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit());
         match self {
@@ -169,6 +168,7 @@ impl State {
     /// Drops harnesses with nothing recorded so the file stays small.
     pub fn prune(&mut self) {
         self.harnesses.retain(|_, h| !h.is_empty());
+        self.rejected.retain(|_, r| !r.is_empty());
     }
 
     /// True when `version` of `key` was rejected.
@@ -219,6 +219,7 @@ pub fn load(source: &Path) -> Result<State, CliError> {
     serde_json::from_str::<State>(&text)
         .ok()
         .filter(|s| s.version == 1)
+        .filter(|s| s.quarantine.iter().all(|(k, c)| c.is_valid(k)))
         .ok_or_else(|| {
             CliError::usage(format!(
                 "state is corrupt at {}; move it aside and run colctl status (generated files will then show as foreign)",

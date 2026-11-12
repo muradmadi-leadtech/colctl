@@ -218,8 +218,9 @@ impl Vault<'_> {
     /// Keeps `rev` under [`CANDIDATE_REF`] so it survives upstream force-pushes and `git gc` until it's
     /// approved or rejected (AC4-03).
     pub fn hold(&self, name: &str, rev: &str) -> Result<(), String> {
-        let _ = (name, rev); // RED: not implemented yet
-        Ok(())
+        let path = self.existing(name)?;
+        self.git(&path, &["update-ref", CANDIDATE_REF, rev])
+            .map(|_| ())
     }
 
     /// The commit held for `name`, if any.
