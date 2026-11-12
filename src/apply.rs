@@ -6,7 +6,7 @@ use crate::ctx::Ctx;
 use crate::fsx;
 use crate::plan::Action;
 use crate::runner;
-use crate::state::HarnessState;
+use crate::state::{HarnessState, InstalledSource};
 use crate::tool::Tool;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -43,23 +43,28 @@ fn run_tool(
     let Some(program) = program else {
         return Outcome::Skipped(format!("{} not found", tool.program()));
     };
-    let args = tool.argv(action).unwrap_or_default();
-    let cmd = tool.command(ctx, program.clone(), harness, &args);
-    match cmd.run() {
-        Err(err) => Outcome::Failed(format!("{}: {err}", cmd.display())),
-        Ok(out) if out.timed_out => Outcome::Failed(format!(
-            "{} timed out after {}s",
-            cmd.display(),
-            ctx.tool_timeout.as_secs()
-        )),
-        Ok(out) if !out.success() => Outcome::Failed(format!(
-            "{} exited {}: {}",
-            cmd.display(),
-            out.code.map_or("by signal".to_string(), |c| c.to_string()),
-            out.stderr.trim()
-        )),
-        Ok(_) => Outcome::Done,
+    for args in tool.argvs(action) {
+        let cmd = tool.command(ctx, program.clone(), harness, &args);
+        let failure = match cmd.run() {
+            Err(err) => Some(format!("{}: {err}", cmd.display())),
+            Ok(out) if out.timed_out => Some(format!(
+                "{} timed out after {}s",
+                cmd.display(),
+                ctx.tool_timeout.as_secs()
+            )),
+            Ok(out) if !out.success() => Some(format!(
+                "{} exited {}: {}",
+                cmd.display(),
+                out.code.map_or("by signal".to_string(), |c| c.to_string()),
+                out.stderr.trim()
+            )),
+            Ok(_) => None,
+        };
+        if let Some(reason) = failure {
+            return Outcome::Failed(reason);
+        }
     }
+    Outcome::Done
 }
 
 fn file_outcome(result: anyhow::Result<()>) -> Outcome {
@@ -177,6 +182,60 @@ pub fn apply(
             }
             Action::ForgetMarketplace { name } => {
                 state.marketplaces.remove(name);
+                Outcome::Done
+            }
+            Action::AddSourceMarketplace { name, .. } => {
+                let outcome = run(action);
+                if !outcome.is_done() {
+                    failed_markets.insert(name.clone());
+                }
+                outcome
+            }
+            Action::InstallSource {
+                source,
+                id,
+                marketplace,
+                rev,
+            }
+            | Action::UpdateSource {
+                source,
+                id,
+                marketplace,
+                rev,
+            } => {
+                let already = matches!(action, Action::InstallSource { .. })
+                    && !state.sources.contains_key(source)
+                    && tool.is_some_and(|t| {
+                        let installed = match t {
+                            Tool::Claude => crate::adapter::read_plugins(&harness.path),
+                            Tool::Codex => crate::adapter::codex::read_plugins(&harness.path),
+                        };
+                        installed.is_ok_and(|p| {
+                            p.installed.contains(id) && p.revs.get(id).is_some_and(|r| r == rev)
+                        })
+                    });
+                let outcome = if program.is_some() && failed_markets.contains(marketplace) {
+                    Outcome::Skipped(format!("marketplace \"{marketplace}\" wasn't added"))
+                } else if already {
+                    Outcome::Done
+                } else {
+                    run(action)
+                };
+                if outcome.is_done() {
+                    state.sources.insert(
+                        source.clone(),
+                        InstalledSource {
+                            id: id.clone(),
+                            marketplace: marketplace.clone(),
+                            rev: rev.clone(),
+                        },
+                    );
+                }
+                outcome
+            }
+            Action::UninstallSource { .. } | Action::RemoveSourceMarketplace { .. } => run(action),
+            Action::ForgetSource { source } => {
+                state.sources.remove(source);
                 Outcome::Done
             }
         };

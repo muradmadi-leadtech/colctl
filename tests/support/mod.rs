@@ -48,6 +48,29 @@ fn fake(name: &'static str) -> PathBuf {
     fake
 }
 
+fn upstream_git(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new(real_git())
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
 fn real_git() -> PathBuf {
     let path = std::env::var_os("PATH").unwrap_or_default();
     std::env::split_paths(&path)
@@ -169,6 +192,70 @@ impl Env {
                     .join(" ")
             })
             .collect()
+    }
+
+    /// A local "upstream" plugin repo (reached by file://) with Claude and/or Codex packaging.
+    /// With `marketplace`, the repo ships marketplace manifests under that name; without, plugin
+    /// manifests only. Returns (path, url, head commit).
+    pub fn upstream(
+        &self,
+        name: &str,
+        claude: bool,
+        codex: bool,
+        marketplace: Option<&str>,
+    ) -> (PathBuf, String, String) {
+        let repo = self.home.parent().unwrap().join("upstreams").join(name);
+        fs::create_dir_all(&repo).unwrap();
+        let write = |rel: &str, value: serde_json::Value| {
+            let path = repo.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, value.to_string()).unwrap();
+        };
+        if claude {
+            write(
+                ".claude-plugin/plugin.json",
+                serde_json::json!({"name": name}),
+            );
+            if let Some(m) = marketplace {
+                write(
+                    ".claude-plugin/marketplace.json",
+                    serde_json::json!({"name": m, "plugins": [{"name": name, "source": "./"}]}),
+                );
+            }
+        }
+        if codex {
+            write(
+                ".codex-plugin/plugin.json",
+                serde_json::json!({"name": name}),
+            );
+            if let Some(m) = marketplace {
+                write(
+                    ".agents/plugins/marketplace.json",
+                    serde_json::json!({"name": m, "plugins": [{"name": name, "source": {"source": "url", "url": "./"}}]}),
+                );
+            }
+        }
+        fs::write(repo.join("README.md"), "v1").unwrap();
+        upstream_git(&repo, &["init", "-q"]);
+        let head = self.upstream_commit(&repo, "v1");
+        let url = format!("file://{}", repo.display());
+        (repo, url, head)
+    }
+
+    /// Commits a change in an upstream repo; returns the new head.
+    pub fn upstream_commit(&self, repo: &Path, text: &str) -> String {
+        fs::write(repo.join("README.md"), text).unwrap();
+        upstream_git(repo, &["add", "-A"]);
+        upstream_git(repo, &["commit", "-qm", text]);
+        upstream_git(repo, &["rev-parse", "HEAD"])
+    }
+
+    /// Appends a [[source]] entry to config.toml.
+    pub fn add_source_entry(&self, name: &str, url: &str, rev: &str, extra: &str) {
+        let config = self.config();
+        self.write_config(&format!(
+            "{config}\n[[source]]\nname = \"{name}\"\nrepo = \"{url}\"\nrev = \"{rev}\"\n{extra}"
+        ));
     }
 
     /// Replaces the harness list in config.toml with `(name, kind, path-as-written)` blocks,

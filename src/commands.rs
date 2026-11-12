@@ -8,9 +8,17 @@ use crate::ctx::Ctx;
 use crate::error::{CliError, EXIT_DRIFT};
 use crate::fsx;
 use crate::git::Git;
+use crate::packaging::{self, ToolPackaging};
 use crate::plan::{self, HarnessPlan, Inputs, Item, ItemKind, ItemState};
+use crate::plan::{SourceInput, SourceTarget};
 use crate::source::{self, AGENTS, AGENTS_MD, SKILLS, Source};
 use crate::state::{self, Lock, Origin, STATE_DIR, State};
+use crate::vault::{self, CloneState, Vault};
+use std::collections::BTreeMap;
+
+/// Where source plugin clones live, and colctl-written manifests inside it.
+pub const PLUGINS: &str = "plugins";
+pub const MANIFESTS: &str = ".manifests";
 use crate::tool::Tool;
 use serde_json::{Value, json};
 use std::fs;
@@ -40,19 +48,132 @@ struct Workspace {
     state: State,
     source: Source,
     origin_changed: Vec<(String, PathBuf)>,
+    /// Source plugins prepared for planning, and each clone's state.
+    sources: Vec<SourceInput>,
+    clones: Vec<(String, &'static str)>,
 }
 
 fn load(ctx: &Ctx) -> Result<Workspace, CliError> {
     let (config, config_text) = config::load(&ctx.source, &ctx.home)?;
     let state = state::load(&ctx.source)?;
     let origin_changed = origin_changes(ctx, &state);
+    let git = Git::find(&ctx.path_var).ok();
+    let (sources, clones) = prepare_sources(ctx, &config, git.as_ref(), &BTreeMap::new());
     Ok(Workspace {
         config,
         config_text,
         state,
         source: source::scan(&ctx.source),
         origin_changed,
+        sources,
+        clones,
     })
+}
+
+fn plugins_dir(ctx: &Ctx) -> PathBuf {
+    ctx.source.join(PLUGINS)
+}
+
+fn manifests_dir(ctx: &Ctx, name: &str) -> PathBuf {
+    plugins_dir(ctx).join(MANIFESTS).join(name)
+}
+
+fn source_target(p: ToolPackaging) -> SourceTarget {
+    match p {
+        ToolPackaging::Supported(t) => SourceTarget::Ready(t),
+        ToolPackaging::Unsupported(r) => SourceTarget::Unsupported(r),
+        ToolPackaging::Invalid(r) => SourceTarget::Invalid(r),
+    }
+}
+
+/// Reads each source's clone (offline, never writing) and what each tool would install from it.
+/// `errors` are failures from sync's clone step, reported instead of the clone's state.
+fn prepare_sources(
+    ctx: &Ctx,
+    config: &Config,
+    git: Option<&Git>,
+    errors: &BTreeMap<String, String>,
+) -> (Vec<SourceInput>, Vec<(String, &'static str)>) {
+    let mut inputs = Vec::new();
+    let mut clones = Vec::new();
+    for s in &config.sources {
+        let both = |t: SourceTarget| (t.clone(), t);
+        let (state, (claude, codex)) = if let Some(err) = errors.get(&s.name) {
+            ("invalid", both(SourceTarget::Invalid(err.clone())))
+        } else if let Some(git) = git {
+            let vault = Vault {
+                git,
+                dir: plugins_dir(ctx),
+            };
+            let state = vault.inspect(&s.name, &s.clone_url(), &s.rev);
+            let targets = match &state {
+                CloneState::Ok => {
+                    let p = packaging::inspect_with(
+                        false,
+                        &vault.path(&s.name),
+                        &manifests_dir(ctx, &s.name),
+                        &s.name,
+                        &s.plugin,
+                        s.path.as_deref(),
+                    );
+                    (source_target(p.claude), source_target(p.codex))
+                }
+                CloneState::Missing => both(SourceTarget::Pending(
+                    "not cloned yet; colctl sync clones it".into(),
+                )),
+                CloneState::Moved { .. } => both(SourceTarget::Pending(
+                    "the clone isn't at the pin; colctl sync checks it out".into(),
+                )),
+                CloneState::Dirty => both(SourceTarget::Invalid(format!(
+                    "the clone at {} has local changes",
+                    vault.path(&s.name).display()
+                ))),
+                CloneState::Invalid(r) => both(SourceTarget::Invalid(r.clone())),
+            };
+            (state.as_str(), targets)
+        } else {
+            (
+                "missing",
+                both(SourceTarget::Pending("git isn't on PATH".into())),
+            )
+        };
+        clones.push((s.name.clone(), state));
+        inputs.push(SourceInput {
+            name: s.name.clone(),
+            rev: s.rev.clone(),
+            replaces: s.replaces.clone(),
+            claude,
+            codex,
+        });
+    }
+    (inputs, clones)
+}
+
+/// Sync's clone step: each source cloned and at its pin, with any manifests colctl writes.
+/// Returns the failures, by source name.
+fn ensure_sources(ctx: &Ctx, git: &Git, config: &Config) -> BTreeMap<String, String> {
+    let vault = Vault {
+        git,
+        dir: plugins_dir(ctx),
+    };
+    let mut errors = BTreeMap::new();
+    for s in &config.sources {
+        match vault.ensure(&s.name, &s.clone_url(), &s.rev) {
+            Ok(path) => {
+                packaging::inspect(
+                    &path,
+                    &manifests_dir(ctx, &s.name),
+                    &s.name,
+                    &s.plugin,
+                    s.path.as_deref(),
+                );
+            }
+            Err(e) => {
+                errors.insert(s.name.clone(), e);
+            }
+        }
+    }
+    errors
 }
 
 struct Planned {
@@ -89,6 +210,7 @@ fn plan_all(ctx: &Ctx, ws: &Workspace, filter: Option<&str>) -> Result<Vec<Plann
         source_display: &display,
         generated: &generated,
         codex_agents: &codex_agents,
+        sources: &ws.sources,
     };
     Ok(ws
         .config
@@ -221,6 +343,9 @@ fn status_json(ctx: &Ctx, ws: &Workspace, planned: &[Planned], uncommitted: &[St
                 "target": i.target,
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
+        "sources": ws.config.sources.iter().zip(&ws.clones).map(|(s, (_, clone))| json!({
+            "name": s.name, "repo": s.repo, "rev": s.rev, "clone": clone,
+        })).collect::<Vec<_>>(),
         "in_sync": in_sync(ws, planned, uncommitted),
     })
 }
@@ -327,7 +452,11 @@ fn commit_pending(git: &Git, ctx: &Ctx) -> Result<(), CliError> {
 /// The body of `sync`, run with the lock held.
 fn run_sync(ctx: &Ctx, git: &Git, filter: Option<&str>) -> Result<i32, CliError> {
     commit_pending(git, ctx)?;
+    ensure_layout(ctx)?;
     let mut ws = load(ctx)?;
+    let errors = ensure_sources(ctx, git, &ws.config);
+    (ws.sources, ws.clones) = prepare_sources(ctx, &ws.config, Some(git), &errors);
+    remove_stale_clones(ctx, &ws.config);
     let planned = plan_all(ctx, &ws, filter)?;
     let mut failures = 0;
     for p in &planned {
@@ -433,19 +562,38 @@ fn ensure_layout(ctx: &Ctx) -> Result<(), CliError> {
         fs::create_dir_all(ctx.source.join(dir)).map_err(io)?;
     }
     let ignore = ctx.source.join(".gitignore");
-    let text = fs::read_to_string(&ignore).unwrap_or_default();
-    if !text
-        .lines()
-        .any(|l| l.trim() == ".state/" || l.trim() == ".state")
-    {
-        let mut text = text;
-        if !text.is_empty() && !text.ends_with('\n') {
+    let mut text = fs::read_to_string(&ignore).unwrap_or_default();
+    let mut changed = false;
+    for entry in [".state/", "plugins/"] {
+        let bare = entry.trim_end_matches('/');
+        if !text.lines().any(|l| l.trim() == entry || l.trim() == bare) {
+            if !text.is_empty() && !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text.push_str(entry);
             text.push('\n');
+            changed = true;
         }
-        text.push_str(".state/\n");
+    }
+    if changed {
         fs::write(&ignore, text).map_err(io)?;
     }
     Ok(())
+}
+
+/// Deletes clones (and colctl-written manifests) of sources no longer declared (AC3-13).
+fn remove_stale_clones(ctx: &Ctx, config: &Config) {
+    let declared: Vec<&str> = config.sources.iter().map(|s| s.name.as_str()).collect();
+    for name in source::visible_entries(&plugins_dir(ctx)) {
+        if !declared.contains(&name.as_str()) && vault::is_clone(&plugins_dir(ctx).join(&name)) {
+            let _ = fsx::remove_any(&plugins_dir(ctx).join(&name));
+        }
+    }
+    for name in source::visible_entries(&plugins_dir(ctx).join(MANIFESTS)) {
+        if !declared.contains(&name.as_str()) {
+            let _ = fsx::remove_any(&manifests_dir(ctx, &name));
+        }
+    }
 }
 
 /// `colctl init` (AC-04 … AC-07).
@@ -1091,6 +1239,7 @@ fn adopt_item(ctx: &Ctx, harness: &Harness, item: &Item) -> Adoption {
         ItemKind::Marketplace => {
             Adoption::Refused("marketplaces are adopted with their plugins".into())
         }
+        ItemKind::Source => Adoption::Refused("source plugins are already colctl's".into()),
     }
 }
 

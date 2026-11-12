@@ -65,12 +65,20 @@ fn main() {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.as_slice() {
         ["plugin", "marketplace", "add", src] => {
-            let name = env::var("FAKE_CODEX_MARKET_NAME").unwrap_or_else(|_| {
-                src.trim_end_matches(".git")
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(src)
-                    .to_string()
+            let manifest = PathBuf::from(src).join(".agents/plugins/marketplace.json");
+            let from_manifest = (src.starts_with('/') && manifest.is_file())
+                .then(|| fs::read_to_string(&manifest).ok())
+                .flatten()
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                .and_then(|v| v["name"].as_str().map(str::to_string));
+            let name = from_manifest.unwrap_or_else(|| {
+                env::var("FAKE_CODEX_MARKET_NAME").unwrap_or_else(|_| {
+                    src.trim_end_matches(".git")
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(src)
+                        .to_string()
+                })
             });
             let (source_type, source) = if src.starts_with('/') {
                 ("local", src.to_string())

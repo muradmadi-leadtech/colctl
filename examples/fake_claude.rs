@@ -34,6 +34,24 @@ fn source_entry(src: &str) -> Value {
     }
 }
 
+/// The installed_plugins.json entry: a local (directory) marketplace records its checkout's commit.
+fn install_entry(markets: &Value, market: &str) -> Value {
+    let mut entry = json!({"scope": "user"});
+    let location = markets[market]["installLocation"]
+        .as_str()
+        .unwrap_or_default();
+    if markets[market]["source"]["source"] == "directory" {
+        let out = std::process::Command::new("git")
+            .args(["-C", location, "rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        if out.status.success() {
+            entry["gitCommitSha"] = json!(String::from_utf8_lossy(&out.stdout).trim());
+        }
+    }
+    entry
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let config_dir = env::var_os("CLAUDE_CONFIG_DIR");
@@ -80,18 +98,38 @@ fn main() {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.as_slice() {
         ["plugin", "marketplace", "add", src] => {
-            let name = env::var("FAKE_CLAUDE_MARKET_NAME").unwrap_or_else(|_| {
-                src.trim_end_matches(".git")
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(src)
+            let manifest = Path::new(src).join(".claude-plugin/marketplace.json");
+            let local = src.starts_with('/') && manifest.is_file();
+            let name = if local {
+                read(&manifest, json!({}))["name"]
+                    .as_str()
+                    .unwrap()
                     .to_string()
-            });
+            } else {
+                env::var("FAKE_CLAUDE_MARKET_NAME").unwrap_or_else(|_| {
+                    src.trim_end_matches(".git")
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(src)
+                        .to_string()
+                })
+            };
+            let location = if local {
+                src.to_string()
+            } else {
+                "/fake".to_string()
+            };
             markets.as_object_mut().unwrap().insert(
                 name,
-                json!({"source": source_entry(src), "installLocation": "/fake"}),
+                json!({"source": source_entry(src), "installLocation": location}),
             );
             write(&markets_path, &markets);
+        }
+        ["plugin", "marketplace", "update", name] => {
+            if markets.get(*name).is_none() {
+                eprintln!("marketplace {name} not found");
+                exit(1);
+            }
         }
         ["plugin", "marketplace", "remove", name] => {
             markets.as_object_mut().unwrap().remove(*name);
@@ -103,8 +141,19 @@ fn main() {
                 eprintln!("Plugin \"{id}\" not found: marketplace \"{market}\" is not known");
                 exit(1);
             }
+            let entry = install_entry(&markets, market);
             let plugins = installed["plugins"].as_object_mut().unwrap();
-            plugins.insert(id.to_string(), json!([{"scope": "user"}]));
+            plugins.insert(id.to_string(), json!([entry]));
+            write(&installed_path, &installed);
+        }
+        ["plugin", "update", id] => {
+            let market = id.rsplit_once('@').map(|(_, m)| m).unwrap_or_default();
+            if installed["plugins"].get(*id).is_none() {
+                eprintln!("Plugin \"{id}\" is not installed");
+                exit(1);
+            }
+            let entry = install_entry(&markets, market);
+            installed["plugins"][*id] = json!([entry]);
             write(&installed_path, &installed);
         }
         ["plugin", "uninstall", id] => {
