@@ -429,3 +429,123 @@ fn ec3_18_unknown_installed_commit_pins_the_head() {
     assert!(out.contains("installed commit unknown; pinned to"), "{out}");
     assert_eq!(sources(&env)[0]["rev"], head.as_str());
 }
+
+/// superpowers in [plugins] (adopted in cycle 1), installed by hand in the native profile and by colctl in kilo.
+fn listed_superpowers(env: &Env, v1: &str) {
+    directory_plugin(
+        &env.home.join(".claude"),
+        "superpowers@anthropic-plugin-directory",
+        "github.com/obra/superpowers#",
+        v1,
+    );
+    env.write_config(&env.config().replace(
+        "enabled = []",
+        "enabled = [\"superpowers@anthropic-plugin-directory\"]",
+    ));
+    env.ok(&["sync"]);
+    assert!(
+        env.installed(&env.home.join(KILO))
+            .contains(&"superpowers@anthropic-plugin-directory".to_string())
+    );
+}
+
+#[test]
+fn ac3_30_status_says_a_list_plugin_has_a_source() {
+    let env = machine();
+    let (_, v1) = env.github_repo("obra/superpowers", "superpowers", "superpowers-dev");
+    listed_superpowers(&env, &v1);
+    let out = env.ok(&["status"]);
+    assert!(
+        out.contains("ok                   plugin        superpowers@anthropic-plugin-directory  → source available: https://github.com/obra/superpowers; colctl adopt claude plugin superpowers@anthropic-plugin-directory"),
+        "{out}"
+    );
+}
+
+#[test]
+fn ac3_29_adopt_converts_a_list_plugin_in_one_step() {
+    let env = machine();
+    let (_, v1) = env.github_repo("obra/superpowers", "superpowers", "superpowers-dev");
+    listed_superpowers(&env, &v1);
+    let commits = env.commits().len();
+    env.ok(&[
+        "adopt",
+        "claude",
+        "plugin",
+        "superpowers@anthropic-plugin-directory",
+    ]);
+    assert_eq!(
+        env.commits().len(),
+        commits + 1,
+        "one commit: source added and list entry removed together"
+    );
+    assert!(
+        !env.config()
+            .contains("enabled = [\"superpowers@anthropic-plugin-directory\"]")
+    );
+    let s = &sources(&env)[0];
+    assert_eq!(s["rev"], v1.as_str());
+    assert_eq!(
+        s["replaces"],
+        serde_json::json!(["superpowers@anthropic-plugin-directory"])
+    );
+    for profile in [env.home.join(".claude"), env.home.join(KILO)] {
+        let installed = env.installed(&profile);
+        assert!(
+            installed.contains(&"superpowers@superpowers-dev".to_string()),
+            "{installed:?}"
+        );
+        assert!(!installed.contains(&"superpowers@anthropic-plugin-directory".to_string()));
+    }
+    let uninstalls = env
+        .log_args()
+        .iter()
+        .filter(|a| a.as_str() == "plugin uninstall superpowers@anthropic-plugin-directory")
+        .count();
+    assert_eq!(uninstalls, 2, "once per harness");
+    assert_eq!(
+        env.codex_installed(&env.home.join(".codex")),
+        vec!["superpowers@superpowers-dev"]
+    );
+    env.ok(&["status"]);
+}
+
+#[test]
+fn ac3_29_adopt_all_converts_list_plugins_too() {
+    let env = machine();
+    let (_, v1) = env.github_repo("obra/superpowers", "superpowers", "superpowers-dev");
+    listed_superpowers(&env, &v1);
+    let out = env.ok(&["adopt"]);
+    assert!(
+        out.contains("adopted plugin superpowers@anthropic-plugin-directory"),
+        "{out}"
+    );
+    assert_eq!(sources(&env).len(), 1);
+}
+
+#[test]
+fn ec3_19_a_list_plugin_without_a_known_source() {
+    let env = machine();
+    let native = env.home.join(".claude");
+    fs::create_dir_all(native.join("plugins")).unwrap();
+    fs::write(
+        native.join("plugins/installed_plugins.json"),
+        r#"{"version":2,"plugins":{"mystery@anthropic-plugin-directory":[{"scope":"user"}]}}"#,
+    )
+    .unwrap();
+    env.write_config(&env.config().replace(
+        "enabled = []",
+        "enabled = [\"mystery@anthropic-plugin-directory\"]",
+    ));
+    let out = env.ok(&["status"]);
+    assert!(!out.contains("source available"), "{out}");
+    let out = env.expect(
+        1,
+        &[
+            "adopt",
+            "claude",
+            "plugin",
+            "mystery@anthropic-plugin-directory",
+        ],
+    );
+    assert!(out.contains("not a foreign item (state: ok)"), "{out}");
+}

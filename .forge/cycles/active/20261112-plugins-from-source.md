@@ -52,7 +52,7 @@ T7 commands · T8 docs · T9 evaluate + v1.2.0. New components vault, packaging,
 
 ---
 
-<!-- FORGE_PHASE:Refine:Active -->
+<!-- FORGE_PHASE:Refine:Complete -->
 ## Phase 3: Refine
 
 **Purpose**: Define exactly what "done" looks like.
@@ -62,7 +62,7 @@ T7 commands · T8 docs · T9 evaluate + v1.2.0. New components vault, packaging,
 - [x] Interface specifications documented
 - [x] Edge cases enumerated by category
 - [x] Constraints vs criteria documented
-- [ ] Revise: AC3-29, AC3-30, EC3-19 written (list plugins with a known source)
+- [x] Revise: AC3-29, AC3-30, EC3-19 written (list plugins with a known source)
 
 **CRITICAL**: No code in this phase - specifications only.
 
@@ -73,7 +73,7 @@ packaging detection; calls; finding a plugin's source; state; status JSON). **Aw
 
 ---
 
-<!-- FORGE_PHASE:Generate:Pending -->
+<!-- FORGE_PHASE:Generate:Active -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.
