@@ -72,37 +72,39 @@ packaging detection; calls; finding a plugin's source; state; status JSON). **Aw
 
 ---
 
-<!-- FORGE_PHASE:Generate:Active -->
+<!-- FORGE_PHASE:Generate:Complete -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.
 
 ### Process
-- [ ] RED: Write failing tests
-- [ ] GREEN: Minimal code to pass
-- [ ] REFACTOR: Improve while green
-- [ ] Code review: Linter and type checks pass
-- [ ] Code review: TDD compliance verified
-- [ ] Code review: Acceptance criteria alignment checked
+- [x] RED: Write failing tests
+- [x] GREEN: Minimal code to pass
+- [x] REFACTOR: Improve while green
+- [x] Code review: Linter and type checks pass
+- [x] Code review: TDD compliance verified
+- [x] Code review: Acceptance criteria alignment checked
 
 ### Implementation Notes
 
-<!-- Document implementation progress here -->
+PRs #23 plan, #24 T1, #25 T2, #27 T3, #29 T4 (rebased; #28 closed), #30 T5+T6, #31 T7, #32 T8, #33 fix from the
+smoke test, #26 v1.2.0. Strict TDD: RED pushed before GREEN on every PR; T4's RED run failed at format-check rather
+than on its tests (see cycle-review.md). 228 tests, 95.7% lines.
 
 ---
 
-<!-- FORGE_PHASE:Evaluate:Pending -->
+<!-- FORGE_PHASE:Evaluate:Active -->
 ## Phase 5: Evaluate
 
 **Purpose**: Verify output matches intent.
 
 ### Checklist
-- [ ] Criteria verified line-by-line
-- [ ] Edge cases tested
-- [ ] Code review: Full test suite passes with coverage threshold met
-- [ ] Code review: Security review completed
-- [ ] Code review: Integration and interface contracts verified
-- [ ] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
+- [x] Criteria verified line-by-line
+- [x] Edge cases tested
+- [x] Code review: Full test suite passes with coverage threshold met
+- [x] Code review: Security review completed
+- [x] Code review: Integration and interface contracts verified
+- [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
 - [ ] Disposition decision made
 
 ### Disposition

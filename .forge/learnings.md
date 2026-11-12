@@ -31,6 +31,11 @@ Cycle 2: each feature PR's first commit (tests + compiling stubs) was pushed so 
 
 2026-11-12, claude 2.1.322 + codex-cli 0.167.2, obra/superpowers cloned locally: claude plugin marketplace add <clone> -> marketplace named from .claude-plugin/marketplace.json (superpowers-dev), source {source: directory, path}, installLocation = the clone itself; claude plugin install -> cached at the clone's commit (version + gitCommitSha). Following a new commit: claude plugin marketplace update <m> then claude plugin update <id> (works both directions). codex plugin marketplace add <clone> -> [marketplaces.<m>] source_type local; codex plugin add <id> installs; re-running codex plugin add reinstalls at the clone's current commit; marketplace upgrade is git-only. A colctl-written wrapper (own .claude-plugin/marketplace.json and .agents/plugins/marketplace.json, plugin source ./<name> symlinked to the clone) installs in both. Claude records a directory plugin's origin in plugins/plugin-directory-bindings.json (repositoryKey github.com/obra/superpowers#) and installed_plugins.json gitCommitSha; the directory copy lagged (6.4.2 vs 7.0.2).
 
+### Smoke tests on real data find scope bugs
+*Added: 2026-11-12*
+
+Cycle 3's smoke on copies of real profiles found plugins installed in both user and project scope; unit and e2e fixtures never had that. Keep smoke tests on copies of real state before every release.
+
 ## Anti-Patterns
 
 <!-- Approaches to avoid -->
@@ -49,6 +54,11 @@ Cycle 1 wrote tests with each module rather than one failing test at a time; tra
 *Added: 2026-11-12*
 
 Copying only config.toml of kilo's Codex profile left out models.json (referenced by model_catalog_json), so the real codex failed. Copy every file a config references.
+
+### Text replace after cargo fmt
+*Added: 2026-11-12*
+
+A python str.replace aimed at code cargo fmt had already reflowed silently did nothing (fake CLIs). Assert the old text exists before replacing, or use the Edit tool.
 
 ## Decisions
 
