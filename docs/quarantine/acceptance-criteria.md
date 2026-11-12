@@ -258,7 +258,9 @@ Given held candidates
 When I run colctl status
 Then the source section lists each as "pending-review  <key>  <from> → <to>  → colctl review <name>"
 And status --json has a "quarantine" array (see interfaces.md)
-And the exit code is 1, as for origin-changed; in_sync is false
+And the exit code is 1, as for origin-changed, and the last line says "<n> held for review"
+And in_sync keeps meaning "the harnesses match the source", so sync and approve aren't held back by other
+  pending reviews (changed in Generate: an in_sync that counted pending reviews made sync exit 1)
 ```
 
 **AC4-30 List plugins are unreviewed**
