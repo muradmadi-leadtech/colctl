@@ -34,6 +34,24 @@ fn source_entry(src: &str) -> Value {
     }
 }
 
+/// The installed_plugins.json entry: a local (directory) marketplace records its checkout's commit.
+fn install_entry(markets: &Value, market: &str) -> Value {
+    let mut entry = json!({"scope": "user"});
+    let location = markets[market]["installLocation"]
+        .as_str()
+        .unwrap_or_default();
+    if markets[market]["source"]["source"] == "directory" {
+        let out = std::process::Command::new("git")
+            .args(["-C", location, "rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        if out.status.success() {
+            entry["gitCommitSha"] = json!(String::from_utf8_lossy(&out.stdout).trim());
+        }
+    }
+    entry
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let config_dir = env::var_os("CLAUDE_CONFIG_DIR");
@@ -103,8 +121,19 @@ fn main() {
                 eprintln!("Plugin \"{id}\" not found: marketplace \"{market}\" is not known");
                 exit(1);
             }
+            let entry = install_entry(&markets, market);
             let plugins = installed["plugins"].as_object_mut().unwrap();
-            plugins.insert(id.to_string(), json!([{"scope": "user"}]));
+            plugins.insert(id.to_string(), json!([entry]));
+            write(&installed_path, &installed);
+        }
+        ["plugin", "update", id] => {
+            let market = id.rsplit_once('@').map(|(_, m)| m).unwrap_or_default();
+            if installed["plugins"].get(*id).is_none() {
+                eprintln!("Plugin \"{id}\" is not installed");
+                exit(1);
+            }
+            let entry = install_entry(&markets, market);
+            installed["plugins"][*id] = json!([entry]);
             write(&installed_path, &installed);
         }
         ["plugin", "uninstall", id] => {
