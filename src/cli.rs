@@ -73,6 +73,20 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Move source plugins' pins to newer upstream commits (the only command that looks upstream)
+    Update {
+        /// Sources to update (default: all)
+        names: Vec<String>,
+        /// Only report what's newer; change nothing
+        #[arg(long)]
+        check: bool,
+        /// Pin this tag, branch or commit (needs exactly one source)
+        #[arg(long)]
+        rev: Option<String>,
+        /// Print what would happen without changing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Pull adopted skills and agents up to date with where they came from
     Refresh {
         /// skills/<name> or agents/<name>.md; all with a recorded origin if omitted
@@ -97,6 +111,22 @@ enum Add {
         /// The name to give the skill (default: the folder's name)
         #[arg(long)]
         name: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Add a plugin from its own repo, pinned to a commit (cloned into ~/.colctl/plugins)
+    Source {
+        /// The repo: a URL, git@host:path, an absolute path or github:owner/repo
+        repo: String,
+        /// A tag, branch or commit to pin (default: the default branch's head)
+        #[arg(long)]
+        rev: Option<String>,
+        /// The source's name (default: the repo's name)
+        #[arg(long)]
+        name: Option<String>,
+        /// The plugin's name in the repo's manifests (default: the source's name)
+        #[arg(long)]
+        plugin: Option<String>,
         #[arg(long)]
         dry_run: bool,
     },
@@ -125,6 +155,7 @@ enum Kind {
     Skill,
     Agent,
     Plugin,
+    Source,
 }
 
 fn list(codex: bool) -> PluginList {
@@ -148,6 +179,20 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
                 dry_run,
             } => commands::add_skill(ctx, &source, subdir.as_deref(), name.as_deref(), dry_run),
             Add::Agent { file, dry_run } => commands::add_agent(ctx, &file, dry_run),
+            Add::Source {
+                repo,
+                rev,
+                name,
+                plugin,
+                dry_run,
+            } => commands::add_source(
+                ctx,
+                &repo,
+                rev.as_deref(),
+                name.as_deref(),
+                plugin.as_deref(),
+                dry_run,
+            ),
             Add::Plugin {
                 id,
                 marketplace,
@@ -165,6 +210,7 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
                 Kind::Skill => RmKind::Skill,
                 Kind::Agent => RmKind::Agent,
                 Kind::Plugin => RmKind::Plugin,
+                Kind::Source => RmKind::Source,
             };
             commands::rm(ctx, kind, &name, list(codex), dry_run)
         }
@@ -174,6 +220,12 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             dry_run,
         } => commands::adopt(ctx, harness.as_deref(), &item, dry_run),
         Command::Refresh { items, dry_run } => commands::refresh(ctx, &items, dry_run),
+        Command::Update {
+            names,
+            check,
+            rev,
+            dry_run,
+        } => commands::update(ctx, &names, check, rev.as_deref(), dry_run),
         Command::Version => {
             println!("colctl {}", env!("CARGO_PKG_VERSION"));
             Ok(0)

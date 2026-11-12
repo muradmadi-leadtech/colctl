@@ -313,6 +313,7 @@ fn ac3_20_adopt_a_codex_plugin() {
     let env = machine();
     let (repo, v1) = env.github_repo("obra/superpowers", "superpowers", "superpowers-dev");
     env.upstream_commit(&repo, "v2");
+    std::os::unix::fs::symlink(&repo, repo.with_file_name("superpowers.git")).unwrap();
     let codex = env.home.join(".codex");
     let root = codex.join(".tmp/marketplaces/superpowers-dev");
     let clone = std::process::Command::new("git")
@@ -409,16 +410,22 @@ fn ac3_22_no_source_found_falls_back_to_the_list() {
 fn ec3_18_unknown_installed_commit_pins_the_head() {
     let env = machine();
     let (repo, _) = env.github_repo("obra/superpowers", "superpowers", "superpowers-dev");
+    std::os::unix::fs::symlink(&repo, repo.with_file_name("superpowers.git")).unwrap();
     let head = env.upstream_commit(&repo, "v2");
-    let codex = env.home.join(".codex");
+    // A plain-folder (not git) Codex marketplace whose manifest points at the plugin's repo.
+    let local = env.home.parent().unwrap().join("local-market");
+    fs::create_dir_all(local.join(".agents/plugins")).unwrap();
     fs::write(
-        codex.join("config.toml"),
-        format!("[marketplaces.superpowers-dev]\nsource_type = \"local\"\nsource = \"{}\"\n\n[plugins.\"superpowers@superpowers-dev\"]\nenabled = true\n", repo.display()),
+        local.join(".agents/plugins/marketplace.json"),
+        serde_json::json!({"name": "loc", "plugins": [{"name": "superpowers", "source": {"source": "url", "url": "https://github.com/obra/superpowers.git"}}]}).to_string(),
     )
     .unwrap();
-    // A local marketplace: no checkout commit is recorded, so the head is pinned.
-    fs::remove_dir_all(repo.join(".git").join("refs").join("tags")).ok();
-    let out = env.ok(&["adopt", "codex", "plugin", "superpowers@superpowers-dev"]);
+    fs::write(
+        env.home.join(".codex/config.toml"),
+        format!("[marketplaces.loc]\nsource_type = \"local\"\nsource = \"{}\"\n\n[plugins.\"superpowers@loc\"]\nenabled = true\n", local.display()),
+    )
+    .unwrap();
+    let out = env.ok(&["adopt", "codex", "plugin", "superpowers@loc"]);
     assert!(out.contains("installed commit unknown; pinned to"), "{out}");
     assert_eq!(sources(&env)[0]["rev"], head.as_str());
 }
