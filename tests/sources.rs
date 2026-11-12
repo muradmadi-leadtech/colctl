@@ -396,3 +396,33 @@ fn ec3_12_a_source_id_that_is_also_a_list_plugin() {
         "{out}"
     );
 }
+
+#[test]
+fn ac3_04_a_source_from_an_older_colctl_gets_plugins_ignored_and_committed() {
+    let env = machine();
+    // colctl 1.1 wrote only ".state/" into .gitignore.
+    fs::write(env.source.join(".gitignore"), ".state/\n").unwrap();
+    env.git(&["add", "-A"]);
+    env.git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-qm",
+        "old layout",
+    ]);
+    let (_, url, v1) = env.upstream("superpowers", true, true, Some("superpowers-dev"));
+    env.add_source_entry("superpowers", &url, &v1, "");
+    env.ok(&["sync"]);
+    assert!(
+        fs::read_to_string(env.source.join(".gitignore"))
+            .unwrap()
+            .contains("plugins/")
+    );
+    assert!(
+        env.git(&["status", "--porcelain"]).trim().is_empty(),
+        "nothing left uncommitted"
+    );
+    env.ok(&["status"]);
+}
