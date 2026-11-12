@@ -211,3 +211,11 @@ fn ac_35_ac2_23_every_criterion_and_edge_case_has_a_named_test() {
     let untested: Vec<&String> = defined.difference(&tested).collect();
     assert!(untested.is_empty(), "no test named after: {untested:?}");
 }
+
+#[test]
+fn ac2_21_the_cycle_1_suite_is_still_complete() {
+    // Cycle 2 must not drop or skip any of cycle 1's end-to-end tests.
+    let cli = read("tests/cli.rs");
+    assert_eq!(cli.matches("#[test]").count(), 55);
+    assert!(!cli.contains("#[ignore"));
+}

@@ -118,3 +118,17 @@ adopted while the source copy is unedited). `status --json` items in these state
 `hash` is the tree hash adopted or last refreshed. `refresh` compares the origin and the source copy against it:
 origin changed and source unchanged → copy (staged, verified, renamed into place); both changed → refuse; origin
 missing → refuse. Commit message: `colctl: refresh skill <name>` / `colctl: refresh agent <name>`.
+
+## Changes made during Generate
+
+Found while implementing and recorded here so intent and code agree:
+
+1. `origin-changed` is reported for the source copy (`source.origin_changed` in `status --json`, a line under the
+   source in human output) rather than as an item state in every harness, because it's about the one source copy.
+2. `status --json` items carry `"target"` (the link target of a `linked-elsewhere` item, otherwise `null`).
+3. When a tool's link is pointed back at an existing source copy whose origin changed, `adopt` prints
+   `relinked <item> in <harness> to the source copy; origin has changes; run colctl refresh <item>`.
+4. `refresh` prints `<item> is up to date with <origin>` when there is nothing to pull, and runs `sync` afterwards.
+5. Cycle 1 unit tests that built internal types (`Action`, `Item`) were updated mechanically for the T1 refactor; one
+   (`ac_02`) used `"codex"` as its example unknown kind and now uses `"cursor"`; `ec_14`'s expectations changed as
+   AC2-21 allows. `tests/cli.rs` is otherwise unchanged.

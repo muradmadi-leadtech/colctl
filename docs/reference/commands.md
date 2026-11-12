@@ -8,6 +8,7 @@
 | `colctl add skill\|agent\|plugin …` | [add](add.md) | yes |
 | `colctl rm skill\|agent\|plugin <name> [--dry-run]` | [rm](rm.md) | yes |
 | `colctl adopt [<harness> [<item>]] [--dry-run]` | [adopt](adopt.md) | yes |
+| `colctl refresh [<item>…] [--dry-run]` | [refresh](refresh.md) | yes |
 | `colctl version`, `colctl --version` | — | never |
 
 Every command that changes something:
@@ -23,9 +24,11 @@ Every command that changes something:
 | Variable | Effect |
 |---|---|
 | `COLCTL_HOME` | Use this absolute path as the source instead of `~/.colctl`. Generated `CLAUDE.md` files then import it by its absolute path. |
-| `COLCTL_CLAUDE_TIMEOUT_SECS` | Seconds one `claude` call may take before it is killed (default 300). |
+| `COLCTL_TOOL_TIMEOUT_SECS` | Seconds one `claude` or `codex` call may take before it is killed (default 300). |
+| `COLCTL_CLAUDE_TIMEOUT_SECS` | The 1.0 name of the same setting; used when `COLCTL_TOOL_TIMEOUT_SECS` isn't set. |
 | `HOME` | Required. `~` in `config.toml` expands to it. |
 
 colctl removes `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR` and every `ANTHROPIC_*` variable before calling
 `claude`, then sets `CLAUDE_CONFIG_DIR` to the profile being synced (except for `~/.claude`). Running colctl from
-inside a Claude Code session is safe.
+inside a Claude Code session is safe. For `codex` it removes `CODEX_HOME` and every `OPENAI_*` variable, then sets
+`CODEX_HOME` to the profile (except for `~/.codex`), so running inside a Codex session is safe too.

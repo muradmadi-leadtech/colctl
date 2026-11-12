@@ -16,8 +16,11 @@ colctl init [--dry-run]
 
 | Name | Path |
 |---|---|
-| `claude` | `~/.claude` |
-| `kilo-claude` | `~/Library/Application Support/kilo-proxy-headless/profiles/claude` |
+| `claude` (kind `claude`) | `~/.claude` |
+| `kilo-claude` (kind `claude`) | `~/Library/Application Support/kilo-proxy-headless/profiles/claude` |
+| `codex` (kind `codex`) | `~/.codex` |
+| `kilo-codex` (kind `codex`) | `~/Library/Application Support/kilo-proxy-headless/profiles/codex` |
+| `agents` (kind `agents`) | `~/.agents` |
 
 A path is registered only if it is an existing folder. Others go in `config.toml` by hand
 ([how-to](../how-to/add-a-claude-profile.md)).

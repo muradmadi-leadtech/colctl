@@ -13,6 +13,10 @@ colctl sync [--harness <name>] [--dry-run]
    - `claude plugin marketplace add` for missing marketplaces, then `claude plugin install` for missing plugins;
    - `claude plugin uninstall` / `marketplace remove` for plugins and marketplaces colctl installed that are no
      longer in `config.toml`.
+
+   For a **codex** harness: the `AGENTS.md` link, generated `agents/<name>.toml` files (written, rewritten when the
+   source agent changes, removed when it goes), then `codex plugin marketplace add` / `plugin add` / `plugin remove`
+   with `CODEX_HOME` set to that profile. For the **agents** harness: links in `skills/` only.
 3. Saves the state, re-checks every harness and lists what still needs attention.
 
 It never touches foreign or edited items, never creates a missing profile folder, and keeps going when one action
