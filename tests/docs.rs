@@ -33,6 +33,32 @@ fn ac_33_publish_builds_attested_archives_for_both_targets() {
 }
 
 #[test]
+fn ac2_22_docs_cover_codex_and_the_agents_folder() {
+    let config = read("docs/reference/config.md");
+    for needle in [
+        "kind = \"codex\"",
+        "kind = \"agents\"",
+        "[codex.marketplaces]",
+        "[codex.plugins]",
+        "openai-curated",
+    ] {
+        assert!(
+            config.contains(needle),
+            "reference/config.md lacks {needle}"
+        );
+    }
+    assert!(read("docs/reference/add.md").contains("--codex"));
+    assert!(read("docs/reference/rm.md").contains("--codex"));
+    assert!(read("docs/reference/status.md").contains("linked-elsewhere"));
+    assert!(read("docs/reference/status.md").contains("origin_changed"));
+    assert!(read("docs/reference/adopt.md").contains("refresh"));
+    assert!(read("docs/reference/init.md").contains("~/.agents"));
+    assert!(read("docs/reference/commands.md").contains("COLCTL_TOOL_TIMEOUT_SECS"));
+    assert!(read("docs/reference/commands.md").contains("refresh"));
+    assert!(read("README.md").contains("Codex"));
+}
+
+#[test]
 fn ac_34_docs_exist_for_everything_shipped() {
     let pages = [
         "docs/tutorials/first-sync.md",
@@ -51,6 +77,11 @@ fn ac_34_docs_exist_for_everything_shipped() {
         "docs/reference/state.md",
         "docs/explanation/links-not-copies.md",
         "docs/explanation/ownership.md",
+        // Cycle 2 (AC2-22)
+        "docs/reference/refresh.md",
+        "docs/how-to/add-codex.md",
+        "docs/how-to/take-over-skills-a-tool-installed.md",
+        "docs/explanation/codex-and-the-shared-skills-folder.md",
     ];
     for page in pages {
         assert!(read(page).starts_with("# "), "{page} needs a title");
@@ -102,21 +133,22 @@ fn links(text: &str) -> Vec<String> {
     out
 }
 
-/// IDs (`AC-07`, `EC-14`) defined in a cycle's acceptance criteria and edge cases.
+/// IDs defined in a cycle's acceptance criteria and edge cases: `AC-07`/`EC-14` for cycle 1,
+/// `AC2-07`/`EC2-14` for cycle 2.
 fn defined_ids() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
-    for rel in [
-        "docs/claude-profile-sync/acceptance-criteria.md",
-        "docs/claude-profile-sync/edge-cases.md",
+    for (dir, ac, ec) in [
+        ("claude-profile-sync", "AC", "EC"),
+        ("codex-cli-support", "AC2", "EC2"),
     ] {
-        for line in read(rel).lines() {
-            for prefix in ["**AC-", "| EC-"] {
-                if let Some(rest) = line.strip_prefix(prefix) {
+        for (file, prefix, id) in [
+            ("acceptance-criteria.md", format!("**{ac}-"), ac),
+            ("edge-cases.md", format!("| {ec}-"), ec),
+        ] {
+            for line in read(&format!("docs/{dir}/{file}")).lines() {
+                if let Some(rest) = line.strip_prefix(&prefix) {
                     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-                    ids.insert(format!(
-                        "{}-{digits}",
-                        &prefix[prefix.len() - 3..prefix.len() - 1]
-                    ));
+                    ids.insert(format!("{id}-{digits}"));
                 }
             }
         }
@@ -153,7 +185,7 @@ fn tested_ids() -> BTreeSet<String> {
                 .collect();
             let parts: Vec<&str> = name.split('_').collect();
             for pair in parts.windows(2) {
-                if (pair[0] == "ac" || pair[0] == "ec")
+                if ["ac", "ec", "ac2", "ec2"].contains(&pair[0])
                     && pair[1].len() == 2
                     && pair[1].chars().all(|c| c.is_ascii_digit())
                 {
@@ -166,18 +198,15 @@ fn tested_ids() -> BTreeSet<String> {
 }
 
 #[test]
-fn ac_35_every_criterion_and_edge_case_has_a_named_test() {
+fn ac_35_ac2_23_every_criterion_and_edge_case_has_a_named_test() {
     let defined = defined_ids();
-    assert_eq!(
-        defined.iter().filter(|i| i.starts_with("AC-")).count(),
-        35,
-        "{defined:?}"
-    );
-    assert_eq!(
-        defined.iter().filter(|i| i.starts_with("EC-")).count(),
-        31,
-        "{defined:?}"
-    );
+    for (prefix, count) in [("AC-", 35), ("EC-", 31), ("AC2-", 28), ("EC2-", 28)] {
+        assert_eq!(
+            defined.iter().filter(|i| i.starts_with(prefix)).count(),
+            count,
+            "{prefix}: {defined:?}"
+        );
+    }
     let tested = tested_ids();
     let untested: Vec<&String> = defined.difference(&tested).collect();
     assert!(untested.is_empty(), "no test named after: {untested:?}");
