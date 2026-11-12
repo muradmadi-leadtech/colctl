@@ -13,6 +13,7 @@ pub mod ctx;
 pub mod error;
 pub mod fsx;
 pub mod git;
+pub mod packaging;
 pub mod plan;
 pub mod runner;
 pub mod source;
