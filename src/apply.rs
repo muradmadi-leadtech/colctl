@@ -50,7 +50,7 @@ fn run_tool(
         Ok(out) if out.timed_out => Outcome::Failed(format!(
             "{} timed out after {}s",
             cmd.display(),
-            ctx.claude_timeout.as_secs()
+            ctx.tool_timeout.as_secs()
         )),
         Ok(out) if !out.success() => Outcome::Failed(format!(
             "{} exited {}: {}",

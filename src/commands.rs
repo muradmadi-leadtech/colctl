@@ -69,12 +69,14 @@ fn plan_all(ctx: &Ctx, ws: &Workspace, filter: Option<&str>) -> Result<Vec<Plann
     check_harness(&ws.config, filter)?;
     let display = ctx.source_display();
     let generated = adapter::generated_claude_md(&display);
+    let codex_agents = codex_agents(ctx, &ws.source, &display);
     let inputs = Inputs {
         config: &ws.config,
         source: &ws.source,
         source_dir: &ctx.source,
         source_display: &display,
         generated: &generated,
+        codex_agents: &codex_agents,
     };
     Ok(ws
         .config
@@ -82,13 +84,32 @@ fn plan_all(ctx: &Ctx, ws: &Workspace, filter: Option<&str>) -> Result<Vec<Plann
         .iter()
         .filter(|h| filter.is_none_or(|f| f == h.name))
         .map(|h| {
-            let scan = adapter::scan(&h.path, &ctx.source);
+            let scan = adapter::scan_harness(h.kind, &h.path, &ctx.source);
             Planned {
                 harness: h.clone(),
                 plan: plan::plan(h, &scan, &ws.state.harness(&h.name), &inputs),
             }
         })
         .collect())
+}
+
+/// Every source agent rendered as Codex TOML, or why it can't be.
+fn codex_agents(
+    ctx: &Ctx,
+    source: &Source,
+    display: &str,
+) -> std::collections::BTreeMap<String, Result<Vec<u8>, String>> {
+    source
+        .agents
+        .iter()
+        .map(|name| {
+            let path = ctx.source.join(AGENTS).join(format!("{name}.md"));
+            let rendered = fs::read_to_string(&path)
+                .map_err(|e| format!("reading {}: {e}", path.display()))
+                .and_then(|md| crate::convert::codex_agent(&md, name, display));
+            (name.clone(), rendered)
+        })
+        .collect()
 }
 
 fn root_str(root: Root) -> &'static str {

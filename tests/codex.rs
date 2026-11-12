@@ -27,7 +27,12 @@ fn machine() -> Env {
 }
 
 fn codex_plugins(env: &Env, markets: &str, plugins: &str) {
-    let text = env.config().replace("[plugins]\nenabled = []\n", "");
+    let config = env.config();
+    let text = config
+        .split("\n[codex.marketplaces]")
+        .next()
+        .unwrap()
+        .replace("[plugins]\nenabled = []\n", "");
     env.write_config(&format!(
         "{text}\n[codex.marketplaces]\n{markets}\n\n[codex.plugins]\nenabled = [{plugins}]\n"
     ));
