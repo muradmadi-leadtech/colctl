@@ -26,6 +26,11 @@ GitHub holds workflows on PRs opened by the Actions token; gh api -X POST repos/
 
 Cycle 2: each feature PR's first commit (tests + compiling stubs) was pushed so CI recorded the failure, then GREEN was pushed and auto-merge enabled. Squash-merge keeps one commit per task on main; the CI history is the TDD evidence.
 
+### Plugin-from-source probes (cycle 3)
+*Added: 2026-11-12*
+
+2026-11-12, claude 2.1.322 + codex-cli 0.167.2, obra/superpowers cloned locally: claude plugin marketplace add <clone> -> marketplace named from .claude-plugin/marketplace.json (superpowers-dev), source {source: directory, path}, installLocation = the clone itself; claude plugin install -> cached at the clone's commit (version + gitCommitSha). Following a new commit: claude plugin marketplace update <m> then claude plugin update <id> (works both directions). codex plugin marketplace add <clone> -> [marketplaces.<m>] source_type local; codex plugin add <id> installs; re-running codex plugin add reinstalls at the clone's current commit; marketplace upgrade is git-only. A colctl-written wrapper (own .claude-plugin/marketplace.json and .agents/plugins/marketplace.json, plugin source ./<name> symlinked to the clone) installs in both. Claude records a directory plugin's origin in plugins/plugin-directory-bindings.json (repositoryKey github.com/obra/superpowers#) and installed_plugins.json gitCommitSha; the directory copy lagged (6.4.2 vs 7.0.2).
+
 ## Anti-Patterns
 
 <!-- Approaches to avoid -->
@@ -53,6 +58,11 @@ Copying only config.toml of kilo's Codex profile left out models.json (reference
 *Added: 2026-11-12*
 
 release-please's release-as pinned v1.0.0 for cycle 1, then a follow-up PR removed it so later releases bump from commits.
+
+### Future cycles from cycle 3 Focus
+*Added: 2026-11-12*
+
+Cycle 4: quarantine plugins/skills, human approves a new version before it installs. Later: convert a plugin for tools its repo doesn't package (e.g. Codex from a Claude-only plugin).
 
 ## Tools
 
