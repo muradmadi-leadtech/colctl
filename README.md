@@ -17,7 +17,10 @@ keeps a single copy of all of it in `~/.colctl` and points every profile at it, 
   updates them.
 - **Plugins from source**: a plugin can come straight from its author's repo, cloned once into `~/.colctl`, pinned to
   a commit and installed into every Claude and Codex profile from that clone. `colctl adopt` moves plugins installed
-  from aggregators (like Claude's plugin directory) to their source; `colctl update` moves pins when you choose.
+  from aggregators (like Claude's plugin directory) to their source.
+- **Quarantine**: new versions are held, not installed. `colctl update` and `colctl refresh` hold a plugin's new
+  commit or a skill's new content; `colctl review` shows what changed, with flags on hooks, MCP servers, scripts and
+  tool permissions; `colctl approve` installs exactly what you reviewed, and `colctl reject` drops it.
 - **`~/.colctl` is a local git repo**, committed after every change, so you can see and undo what changed.
 
 colctl never overwrites or deletes anything it didn't create. What it finds that isn't its own is reported, and
@@ -54,13 +57,14 @@ The docs follow [Diataxis](https://diataxis.fr):
 - **How-to:** [Add a Claude profile](docs/how-to/add-a-claude-profile.md) · [Add Codex](docs/how-to/add-codex.md) ·
   [Adopt what you already have](docs/how-to/adopt-what-you-have.md) · [Add a plugin](docs/how-to/add-a-plugin.md) ·
   [Take over skills a tool installed](docs/how-to/take-over-skills-a-tool-installed.md) ·
-  [Move a plugin to its source](docs/how-to/move-a-plugin-to-its-source.md) · [Update plugins](docs/how-to/update-plugins.md)
+  [Move a plugin to its source](docs/how-to/move-a-plugin-to-its-source.md) · [Update plugins](docs/how-to/update-plugins.md) ·
+  [Review an update before it installs](docs/how-to/review-an-update.md)
 - **Reference:** [commands](docs/reference/commands.md) · [`config.toml`](docs/reference/config.md) ·
   [exit codes](docs/reference/exit-codes.md) · [the `.state` folder](docs/reference/state.md)
 - **Explanation:** [Links, not copies](docs/explanation/links-not-copies.md) ·
   [What "owned" means](docs/explanation/ownership.md) ·
   [Codex and the shared skills folder](docs/explanation/codex-and-the-shared-skills-folder.md) ·
-  [Plugins from source](docs/explanation/plugins-from-source.md)
+  [Plugins from source](docs/explanation/plugins-from-source.md) · [Quarantine](docs/explanation/quarantine.md)
 
 colctl is built in [FORGE](https://github.com/scottfeltham/forge-framework) cycles. Each cycle's intent (PRD,
 architecture, acceptance criteria) is in `docs/prd/`, `docs/tasks/` and `docs/<cycle>/`.

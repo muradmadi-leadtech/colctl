@@ -74,5 +74,5 @@ replaces = ["superpowers@anthropic-plugin-directory"] # optional: ids uninstalle
 ```
 
 colctl clones each source into `~/.colctl/plugins/<name>` (git-ignored) at `rev`, and installs it in every claude and
-codex harness its repo packages for. Change `rev` with [`colctl update`](update.md) rather than by hand. A claude or
+codex harness its repo packages for. Change `rev` with [`colctl update`](update.md) and [`colctl approve`](approve.md) rather than by hand. A claude or
 codex harness can opt out of one source with `exclude = ["sources/<name>"]`.

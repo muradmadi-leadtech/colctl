@@ -14,7 +14,7 @@ invalid config, corrupt state, unknown `--harness`).
 
 | State | Meaning | Fix |
 |---|---|---|
-| `ok` | As it should be. A list plugin whose source can be found also gets the hint `source available: …` | — (or `colctl adopt …` to move it to its source) |
+| `ok` | As it should be | — |
 | `missing` | colctl should have put it there and hasn't | `colctl sync` |
 | `broken` | colctl's link or `CLAUDE.md` is wrong (points elsewhere, stale content) | `colctl sync` |
 | `orphaned` | colctl's item whose source is gone | `colctl sync` removes it |
@@ -27,9 +27,21 @@ invalid config, corrupt state, unknown `--harness`).
 | `outdated` | A source plugin installed at another commit than its pin | `colctl sync` |
 | `unsupported` | A source whose repo has no packaging for this harness's tool. Informational: doesn't make the exit code 1 | — |
 | `from-aggregator` | A plugin installed from a marketplace while its own repo is known (shown in the hint) | `colctl adopt <harness> plugin <id>` |
+| `unreviewed` | A plugin from `[plugins]`/`[codex.plugins]`. Its updates come from its marketplace (and the tool's own auto-update), not through `colctl review`. Informational: doesn't make the exit code 1. When its source repo is known, the hint says so | — (or `colctl adopt <harness> plugin <id>` to make it a source plugin, whose updates are held for review) |
 
 Harness states: `ok`, `harness-missing` (start that profile once so it creates its folder), `invalid` (the path is
 a file or a symlink).
+
+## Held for review
+
+The source section lists every version held by `update` or `refresh`:
+
+```
+  pending-review       sources/superpowers  8ca22db → 22f0b46  → colctl review superpowers
+```
+
+While anything is held the exit code is 1 and the last line reads `in sync; <n> held for review` (or `not in sync; …`).
+Held versions don't affect whether the profiles are in sync, so `sync` isn't held back by them.
 
 ## `--json`
 
@@ -61,6 +73,19 @@ a file or a symlink).
 }
 ```
 
+`"quarantine"` lists held versions, each with `"state": "pending-review"`, the fields of
+[`review --json`](review.md#--json) without `commits`, `files` and `diff`, and `"flags"` as a count:
+
+```json
+"quarantine": [
+  { "key": "sources/superpowers", "kind": "source", "name": "superpowers", "state": "pending-review",
+    "from": "8ca22db…", "to": "22f0b46…", "direction": "forward", "repo": "https://github.com/obra/superpowers",
+    "held_at": 1794500000, "flags": 3, "error": null, "warning": null }
+]
+```
+
+`"in_sync"` is about the profiles and the source only; a non-empty `"quarantine"` still makes the exit code 1.
+
 `"sources"` lists each `[[source]]` with its clone's state: `ok`, `missing` (sync clones it), `moved` (sync checks out
 the pin), `dirty` (local changes; never touched) or `invalid`. Each claude/codex harness also lists each source as an
 item of kind `"source"`. `status` never contacts upstream.
@@ -68,6 +93,7 @@ item of kind `"source"`. `status` never contacts upstream.
 Harness `kind`: `claude`, `codex` or `agents`. Item `kind`: `instructions` (named `CLAUDE.md` or `AGENTS.md`),
 `skill`, `agent`, `marketplace`, `plugin`. `target` is set for `linked-elsewhere` items.
 
-`source.origin_changed` lists adopted items whose origin has changed since they were adopted or last refreshed, while
-the source copy hasn't; `colctl refresh <item>` pulls them in. Any entry there makes the exit code 1. When a profile's plugin files can't be read,
+`source.origin_changed` lists adopted items whose origin has changed since they were adopted or last approved, while
+the source copy hasn't, and the origin's content is neither held nor rejected; `colctl refresh <item>` holds it for
+review. Any entry there makes the exit code 1. When a profile's plugin files can't be read,
 there is one item `{ "kind": "plugin", "name": "*", "state": "invalid" }` with the error as its hint.
