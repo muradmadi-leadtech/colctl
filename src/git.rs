@@ -81,7 +81,8 @@ impl Git {
         Ok(true)
     }
 
-    /// `git clone --depth 1 <url> <dir>`.
+    /// `git clone --depth 1 -- <url> <dir>`. The `--` keeps a URL that starts with `-` from being
+    /// read as an option.
     pub fn shallow_clone(&self, url: &str, into: &Path) -> Result<()> {
         let parent = into.parent().unwrap_or(Path::new("/"));
         self.run(
@@ -91,6 +92,7 @@ impl Git {
                 "-q",
                 "--depth",
                 "1",
+                "--",
                 url,
                 into.to_str().unwrap_or_default(),
             ],
@@ -163,5 +165,19 @@ mod tests {
         g.shallow_clone(&format!("file://{}", origin.display()), &into)
             .unwrap();
         assert!(into.join("SKILL.md").is_file());
+    }
+
+    #[test]
+    fn shallow_clone_never_reads_the_url_as_an_option() {
+        let t = tempfile::tempdir().unwrap();
+        let marker = t.path().join("pwned");
+        let url = format!("--upload-pack=touch {}; x://y", marker.display());
+        let err = git()
+            .shallow_clone(&url, &t.path().join("clone"))
+            .unwrap_err()
+            .to_string();
+        assert!(!marker.exists(), "the url ran as an option: {err}");
+        // git must treat the whole string as the repository URL, not as --upload-pack.
+        assert!(err.contains("protocol '--upload-pack="), "{err}");
     }
 }
