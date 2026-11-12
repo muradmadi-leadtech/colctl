@@ -97,3 +97,19 @@ plugin state `from-aggregator`. Top level gains:
 
 `colctl: add source <name>`, `colctl: rm source <name>`, `colctl: update source <name> to <short>`,
 `colctl: adopt plugin <id> from source`.
+
+## Changes made during Generate
+
+Found while implementing and recorded here so intent and code agree:
+
+1. `[[source]]` gained an optional `path` (the plugin's folder in the repo), needed to keep EC3-11's subpath.
+2. `add source` defaults `--plugin` to the repo's name (not `--name`) and writes `plugin` when they differ.
+3. **Marketplace re-pointing:** when a plugin's marketplace *is* its source repo served remotely (e.g. Codex's
+   `superpowers-dev` cloned from github.com/obra/superpowers), the source's local marketplace has the same name. Sync
+   then uninstalls the plugin, removes that marketplace and adds the clone under the same name. Other marketplaces are
+   still never removed.
+4. For a plugin installed through a colctl-written manifest, the commit a tool records is `~/.colctl`'s, not the
+   clone's, so colctl relies on its own `sources` state there.
+5. Clones are checked against `git config --get remote.origin.url` (the URL as configured), because `git remote
+   get-url` applies `insteadOf` rewrites and wrongly reported such clones as foreign.
+6. Clones are made with a normal `git clone` then moved to the pin (a `--no-checkout` clone looks dirty).
