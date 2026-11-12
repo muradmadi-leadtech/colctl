@@ -25,3 +25,9 @@ To get the newer version the author has published since, see [Update plugins](up
 ```sh
 colctl add source https://github.com/obra/superpowers
 ```
+
+## A plugin you already added to colctl's list
+
+If you adopted the plugin into `[plugins]` earlier, `status` shows it as `ok` with
+`source available: https://github.com/obra/superpowers; colctl adopt claude plugin superpowers@anthropic-plugin-directory`.
+Run that command: it moves the plugin from the list to its source in one step.
