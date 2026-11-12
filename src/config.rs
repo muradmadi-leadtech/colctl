@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use toml::Spanned;
-use toml_edit::{DocumentMut, Item, value};
+use toml_edit::{DocumentMut, Item, Table, TableLike, value};
 
 /// The config file's name inside the source.
 pub const CONFIG_FILE: &str = "config.toml";
@@ -20,15 +20,33 @@ pub const PLUGIN_DIRECTORY: &str = "anthropic-plugin-directory";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Claude,
+    /// A Codex CLI profile (a `CODEX_HOME`).
+    Codex,
+    /// The shared `~/.agents` folder (its `skills/`).
+    Agents,
 }
 
 impl Kind {
     pub fn as_str(self) -> &'static str {
         match self {
             Kind::Claude => "claude",
+            Kind::Codex => "codex",
+            Kind::Agents => "agents",
         }
     }
 }
+
+/// Which plugin list in `config.toml` an edit applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginList {
+    /// `[marketplaces]` and `[plugins]`.
+    Claude,
+    /// `[codex.marketplaces]` and `[codex.plugins]`.
+    Codex,
+}
+
+/// Codex's built-in marketplace: Codex plugins from it need no `[codex.marketplaces]` entry.
+pub const CODEX_CURATED: &str = "openai-curated";
 
 /// One registered harness.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +73,10 @@ pub struct Config {
     pub marketplaces: BTreeMap<String, String>,
     /// Enabled plugin ids, `name@marketplace`, in file order.
     pub plugins: Vec<String>,
+    /// `[codex.marketplaces]`: name → source.
+    pub codex_marketplaces: BTreeMap<String, String>,
+    /// `[codex.plugins].enabled`, in file order.
+    pub codex_plugins: Vec<String>,
 }
 
 impl Config {
@@ -69,6 +91,17 @@ struct Raw {
     version: Spanned<i64>,
     #[serde(default)]
     harness: Vec<RawHarness>,
+    #[serde(default)]
+    marketplaces: BTreeMap<String, Spanned<String>>,
+    #[serde(default)]
+    plugins: Option<RawPlugins>,
+    #[serde(default)]
+    codex: Option<RawCodex>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCodex {
     #[serde(default)]
     marketplaces: BTreeMap<String, Spanned<String>>,
     #[serde(default)]
@@ -126,18 +159,33 @@ pub fn valid_marketplace_source(source: &str) -> bool {
     source.starts_with("https://") || source.starts_with("http://") || source.starts_with('/')
 }
 
-fn valid_exclude(item: &str) -> bool {
-    if item == "CLAUDE.md" {
+fn valid_exclude(item: &str, kind: Kind) -> bool {
+    let (instructions, agent_suffix, skills, plugins) = match kind {
+        Kind::Claude => (Some("CLAUDE.md"), Some(".md"), true, true),
+        Kind::Codex => (Some("AGENTS.md"), Some(".toml"), false, true),
+        Kind::Agents => (None, None, true, false),
+    };
+    if instructions == Some(item) {
         return true;
     }
     if let Some(name) = item.strip_prefix("skills/") {
-        return valid_item_name(name);
+        return skills && valid_item_name(name);
     }
     if let Some(file) = item.strip_prefix("agents/") {
-        return file.strip_suffix(".md").is_some_and(valid_item_name);
+        return agent_suffix.is_some_and(|sfx| file.strip_suffix(sfx).is_some_and(valid_item_name));
     }
-    item.strip_prefix("plugins/")
-        .is_some_and(|id| split_plugin_id(id).is_some())
+    plugins
+        && item
+            .strip_prefix("plugins/")
+            .is_some_and(|id| split_plugin_id(id).is_some())
+}
+
+fn exclude_help(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Claude => "CLAUDE.md, skills/<name>, agents/<name>.md or plugins/<id>",
+        Kind::Codex => "AGENTS.md, agents/<name>.toml or plugins/<id>",
+        Kind::Agents => "skills/<name>",
+    }
 }
 
 /// Expands a config path: `~` or `~/…` against `home`; other paths must be absolute (EC-09).
@@ -187,10 +235,14 @@ pub fn parse(text: &str, home: &Path) -> Result<Config, String> {
         }
         let kind = match h.kind.get_ref().as_str() {
             "claude" => Kind::Claude,
+            "codex" => Kind::Codex,
+            "agents" => Kind::Agents,
             other => {
                 return Err(at(
                     h.kind.span(),
-                    format!("unknown harness kind \"{other}\" (supported: \"claude\")"),
+                    format!(
+                        "unknown harness kind \"{other}\" (supported: \"claude\", \"codex\", \"agents\")"
+                    ),
                 ));
             }
         };
@@ -213,12 +265,14 @@ pub fn parse(text: &str, home: &Path) -> Result<Config, String> {
         canonical.push((canon, name.clone()));
         let mut exclude = BTreeSet::new();
         for item in &h.exclude {
-            if !valid_exclude(item.get_ref()) {
+            if !valid_exclude(item.get_ref(), kind) {
                 return Err(at(
                     item.span(),
                     format!(
-                        "exclude entry \"{}\" must be CLAUDE.md, skills/<name>, agents/<name>.md or plugins/<id>",
-                        item.get_ref()
+                        "exclude entry \"{}\" isn't valid for a {} harness; use {}",
+                        item.get_ref(),
+                        kind.as_str(),
+                        exclude_help(kind)
                     ),
                 ));
             }
@@ -232,8 +286,75 @@ pub fn parse(text: &str, home: &Path) -> Result<Config, String> {
         });
     }
 
-    for (name, source) in &raw.marketplaces {
-        if !valid_item_name(name) || name == PLUGIN_DIRECTORY {
+    let (marketplaces, plugins) = plugin_list(
+        &raw.marketplaces,
+        raw.plugins.as_ref(),
+        PluginList::Claude,
+        &at,
+    )?;
+    config.marketplaces = marketplaces;
+    config.plugins = plugins;
+    if let Some(codex) = &raw.codex {
+        let (marketplaces, plugins) = plugin_list(
+            &codex.marketplaces,
+            codex.plugins.as_ref(),
+            PluginList::Codex,
+            &at,
+        )?;
+        config.codex_marketplaces = marketplaces;
+        config.codex_plugins = plugins;
+    }
+    Ok(config)
+}
+
+impl PluginList {
+    /// The marketplace plugins can use without declaring it.
+    pub fn builtin(self) -> &'static str {
+        match self {
+            PluginList::Claude => PLUGIN_DIRECTORY,
+            PluginList::Codex => CODEX_CURATED,
+        }
+    }
+
+    /// How the marketplaces table is written in config.toml.
+    pub fn marketplaces_section(self) -> &'static str {
+        match self {
+            PluginList::Claude => "[marketplaces]",
+            PluginList::Codex => "[codex.marketplaces]",
+        }
+    }
+
+    /// The list a harness kind's plugins come from.
+    pub fn for_kind(kind: Kind) -> Option<PluginList> {
+        match kind {
+            Kind::Claude => Some(PluginList::Claude),
+            Kind::Codex => Some(PluginList::Codex),
+            Kind::Agents => None,
+        }
+    }
+}
+
+impl Config {
+    /// The marketplaces and enabled plugins of one list.
+    pub fn plugin_list(&self, list: PluginList) -> (&BTreeMap<String, String>, &[String]) {
+        match list {
+            PluginList::Claude => (&self.marketplaces, &self.plugins),
+            PluginList::Codex => (&self.codex_marketplaces, &self.codex_plugins),
+        }
+    }
+}
+
+type At<'a> = dyn Fn(std::ops::Range<usize>, String) -> String + 'a;
+
+fn plugin_list(
+    raw_markets: &BTreeMap<String, Spanned<String>>,
+    raw_plugins: Option<&RawPlugins>,
+    list: PluginList,
+    at: &At,
+) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
+    let mut markets = BTreeMap::new();
+    for (name, source) in raw_markets {
+        if !valid_item_name(name) || name == PLUGIN_DIRECTORY || name == CODEX_CURATED {
             return Err(at(
                 source.span(),
                 format!("invalid marketplace name \"{name}\""),
@@ -248,36 +369,35 @@ pub fn parse(text: &str, home: &Path) -> Result<Config, String> {
                 ),
             ));
         }
-        config
-            .marketplaces
-            .insert(name.clone(), source.get_ref().clone());
+        markets.insert(name.clone(), source.get_ref().clone());
     }
-
-    for id in raw.plugins.iter().flat_map(|p| p.enabled.iter()) {
+    let mut plugins: Vec<String> = Vec::new();
+    for id in raw_plugins.iter().flat_map(|p| p.enabled.iter()) {
         let Some((_, market)) = split_plugin_id(id.get_ref()) else {
             return Err(at(
                 id.span(),
                 format!("plugin id \"{}\" must be name@marketplace", id.get_ref()),
             ));
         };
-        if market != PLUGIN_DIRECTORY && !config.marketplaces.contains_key(market) {
+        if market != list.builtin() && !markets.contains_key(market) {
             return Err(at(
                 id.span(),
                 format!(
-                    "plugin \"{}\" uses marketplace \"{market}\", which isn't in [marketplaces]",
-                    id.get_ref()
+                    "plugin \"{}\" uses marketplace \"{market}\", which isn't in {}",
+                    id.get_ref(),
+                    list.marketplaces_section()
                 ),
             ));
         }
-        if config.plugins.contains(id.get_ref()) {
+        if plugins.contains(id.get_ref()) {
             return Err(at(
                 id.span(),
                 format!("duplicate plugin \"{}\"", id.get_ref()),
             ));
         }
-        config.plugins.push(id.get_ref().clone());
+        plugins.push(id.get_ref().clone());
     }
-    Ok(config)
+    Ok((markets, plugins))
 }
 
 /// Reads and validates `<source>/config.toml`. A missing file is EC-01.
@@ -337,30 +457,68 @@ pub fn append_harness(text: &str, name: &str, path: &str) -> String {
     out
 }
 
-/// Adds a plugin (and its marketplace, if given and absent) to the config text (AC-22, AC-27).
+/// Adds a plugin (and its marketplace, if given and absent) to the Claude list (AC-22, AC-27).
 pub fn add_plugin(
     text: &str,
     id: &str,
     marketplace: Option<(&str, &str)>,
 ) -> Result<String, String> {
-    let mut doc = document(text)?;
-    if let Some((name, source)) = marketplace {
-        if doc.get("marketplaces").is_none() {
-            doc["marketplaces"] = toml_edit::table();
+    add_plugin_to(text, PluginList::Claude, id, marketplace)
+}
+
+/// Removes a plugin from `[plugins].enabled` (AC-23). Its marketplace stays.
+pub fn remove_plugin(text: &str, id: &str) -> Result<String, String> {
+    remove_plugin_from(text, PluginList::Claude, id)
+}
+
+/// The table that holds a list's `marketplaces` and `plugins`: the document root for Claude,
+/// `[codex]` (created implicit, so no bare `[codex]` header appears) for Codex.
+fn list_root(doc: &mut DocumentMut, list: PluginList) -> Result<&mut dyn TableLike, String> {
+    match list {
+        PluginList::Claude => Ok(doc.as_table_mut()),
+        PluginList::Codex => {
+            if doc.get("codex").is_none() {
+                let mut table = Table::new();
+                table.set_implicit(true);
+                doc["codex"] = Item::Table(table);
+            }
+            doc["codex"]
+                .as_table_like_mut()
+                .ok_or_else(|| format!("{CONFIG_FILE}: [codex] must be a table"))
         }
-        let table = doc["marketplaces"]
-            .as_table_like_mut()
-            .ok_or_else(|| format!("{CONFIG_FILE}: [marketplaces] must be a table"))?;
+    }
+}
+
+fn child_table<'a>(
+    parent: &'a mut dyn TableLike,
+    key: &str,
+    shown: &str,
+) -> Result<&'a mut dyn TableLike, String> {
+    if parent.get(key).is_none() {
+        parent.insert(key, toml_edit::table());
+    }
+    parent
+        .get_mut(key)
+        .and_then(Item::as_table_like_mut)
+        .ok_or_else(|| format!("{CONFIG_FILE}: {shown} must be a table"))
+}
+
+/// Adds a plugin to the given list (and its marketplace, if given and absent).
+pub fn add_plugin_to(
+    text: &str,
+    list: PluginList,
+    id: &str,
+    marketplace: Option<(&str, &str)>,
+) -> Result<String, String> {
+    let mut doc = document(text)?;
+    let root = list_root(&mut doc, list)?;
+    if let Some((name, source)) = marketplace {
+        let table = child_table(root, "marketplaces", list.marketplaces_section())?;
         if table.get(name).is_none() {
             table.insert(name, value(source));
         }
     }
-    if doc.get("plugins").is_none() {
-        doc["plugins"] = toml_edit::table();
-    }
-    let plugins = doc["plugins"]
-        .as_table_like_mut()
-        .ok_or_else(|| format!("{CONFIG_FILE}: [plugins] must be a table"))?;
+    let plugins = child_table(root, "plugins", "the plugins table")?;
     if plugins.get("enabled").is_none() {
         plugins.insert("enabled", value(toml_edit::Array::new()));
     }
@@ -372,12 +530,16 @@ pub fn add_plugin(
     Ok(doc.to_string())
 }
 
-/// Removes a plugin from `[plugins].enabled` (AC-23). Its marketplace stays.
-pub fn remove_plugin(text: &str, id: &str) -> Result<String, String> {
+/// Removes a plugin from the given list; its marketplace stays.
+pub fn remove_plugin_from(text: &str, list: PluginList, id: &str) -> Result<String, String> {
     let mut doc = document(text)?;
-    if let Some(enabled) = doc
-        .get_mut("plugins")
-        .and_then(|p| p.as_table_like_mut())
+    let root = match list {
+        PluginList::Claude => Some(doc.as_table_mut() as &mut dyn TableLike),
+        PluginList::Codex => doc.get_mut("codex").and_then(Item::as_table_like_mut),
+    };
+    if let Some(enabled) = root
+        .and_then(|r| r.get_mut("plugins"))
+        .and_then(Item::as_table_like_mut)
         .and_then(|p| p.get_mut("enabled"))
         .and_then(Item::as_array_mut)
     {
@@ -451,9 +613,9 @@ enabled = ["sadr@sadr", "superpowers@anthropic-plugin-directory"]
 
     #[test]
     fn ac_02_unknown_kind_duplicate_name_and_bad_plugin_id() {
-        let e = err("version = 1\n[[harness]]\nname = \"a\"\nkind = \"codex\"\npath = \"/a\"\n");
+        let e = err("version = 1\n[[harness]]\nname = \"a\"\nkind = \"cursor\"\npath = \"/a\"\n");
         assert!(
-            e.contains("line 4") && e.contains("unknown harness kind \"codex\""),
+            e.contains("line 4") && e.contains("unknown harness kind \"cursor\""),
             "{e}"
         );
 
@@ -626,5 +788,173 @@ enabled = ["sadr@sadr", "superpowers@anthropic-plugin-directory"]
             remove_plugin("version = 1\n", "p@m").unwrap(),
             "version = 1\n"
         );
+    }
+
+    const CYCLE2: &str = r#"version = 1
+
+[[harness]]
+name = "claude"
+kind = "claude"
+path = "~/.claude"
+
+[[harness]]
+name = "kilo-codex"
+kind = "codex"
+path = "/opt/kilo/profiles/codex"
+exclude = ["AGENTS.md", "agents/reviewer.toml", "plugins/x@superpowers-dev"]
+
+[[harness]]
+name = "agents"
+kind = "agents"
+path = "~/.agents"
+exclude = ["skills/twg-jira"]
+
+[marketplaces]
+sadr = "github:muradmadi/sadr"
+
+[plugins]
+enabled = ["sadr@sadr"]
+
+[codex.marketplaces]
+superpowers-dev = "github:obra/superpowers"
+
+[codex.plugins]
+enabled = ["superpowers@superpowers-dev", "x@openai-curated"]
+"#;
+
+    #[test]
+    fn ac2_01_new_kinds_load() {
+        let c = ok(CYCLE2);
+        let kinds: Vec<Kind> = c.harnesses.iter().map(|h| h.kind).collect();
+        assert_eq!(kinds, vec![Kind::Claude, Kind::Codex, Kind::Agents]);
+        assert_eq!(Kind::Codex.as_str(), "codex");
+        assert_eq!(Kind::Agents.as_str(), "agents");
+        let e = err("version = 1\n[[harness]]\nname = \"a\"\nkind = \"cursor\"\npath = \"/a\"\n");
+        assert!(
+            e.contains("line 4") && e.contains("\"claude\", \"codex\", \"agents\""),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn ac2_02_the_codex_plugin_list_is_separate() {
+        let c = ok(CYCLE2);
+        assert_eq!(c.plugins, vec!["sadr@sadr"]);
+        assert_eq!(
+            c.codex_plugins,
+            vec!["superpowers@superpowers-dev", "x@openai-curated"]
+        );
+        assert_eq!(
+            c.codex_marketplaces["superpowers-dev"],
+            "github:obra/superpowers"
+        );
+        assert!(!c.marketplaces.contains_key("superpowers-dev"));
+        // A 1.0 config loads with empty Codex lists.
+        let old = ok(FULL);
+        assert!(old.codex_plugins.is_empty() && old.codex_marketplaces.is_empty());
+        assert!(err("version = 1\n[codex]\nbogus = 1\n").contains("bogus"));
+    }
+
+    #[test]
+    fn ec2_08_codex_plugin_needs_a_declared_marketplace() {
+        let e = err("version = 1\n[codex.plugins]\nenabled = [\"p@nowhere\"]\n");
+        assert!(
+            e.contains("line 3") && e.contains("[codex.marketplaces]"),
+            "{e}"
+        );
+        // A Claude marketplace doesn't count for Codex, and openai-curated can't be redeclared.
+        let e =
+            err("version = 1\n[marketplaces]\nm = \"/m\"\n[codex.plugins]\nenabled = [\"p@m\"]\n");
+        assert!(e.contains("[codex.marketplaces]"), "{e}");
+        let e = err("version = 1\n[codex.marketplaces]\nopenai-curated = \"/x\"\n");
+        assert!(e.contains("invalid marketplace name"), "{e}");
+        let e = err("version = 1\n[codex.marketplaces]\nm = \"relative\"\n");
+        assert!(e.contains("marketplace source"), "{e}");
+        let e = err(
+            "version = 1\n[codex.marketplaces]\nm = \"/m\"\n[codex.plugins]\nenabled = [\"p@m\", \"p@m\"]\n",
+        );
+        assert!(e.contains("duplicate plugin"), "{e}");
+    }
+
+    #[test]
+    fn ac2_03_ec2_09_excludes_are_checked_per_kind() {
+        let harness = |kind: &str, entry: &str| {
+            format!(
+                "version = 1\n[[harness]]\nname = \"h\"\nkind = \"{kind}\"\npath = \"/h\"\nexclude = [\"{entry}\"]\n"
+            )
+        };
+        for (kind, entry) in [
+            ("claude", "CLAUDE.md"),
+            ("claude", "agents/a.md"),
+            ("codex", "AGENTS.md"),
+            ("codex", "agents/a.toml"),
+            ("codex", "plugins/p@m"),
+            ("agents", "skills/s"),
+        ] {
+            assert!(
+                parse(&harness(kind, entry), Path::new(HOME)).is_ok(),
+                "{kind} {entry}"
+            );
+        }
+        for (kind, entry) in [
+            ("codex", "CLAUDE.md"),
+            ("codex", "skills/s"),
+            ("codex", "agents/a.md"),
+            ("claude", "AGENTS.md"),
+            ("claude", "agents/a.toml"),
+            ("agents", "CLAUDE.md"),
+            ("agents", "plugins/p@m"),
+        ] {
+            let e = err(&harness(kind, entry));
+            assert!(
+                e.contains("line 6") && e.contains("exclude entry"),
+                "{kind} {entry}: {e}"
+            );
+        }
+    }
+
+    #[test]
+    fn codex_list_edits_keep_comments() {
+        let original = "# keep\nversion = 1\n\n[codex.plugins]\nenabled = [] # trailing\n";
+        let out = add_plugin_to(
+            original,
+            PluginList::Codex,
+            "superpowers@superpowers-dev",
+            Some(("superpowers-dev", "github:obra/superpowers")),
+        )
+        .unwrap();
+        assert!(
+            out.contains("# keep") && out.contains("# trailing"),
+            "{out}"
+        );
+        let c = ok(&out);
+        assert_eq!(c.codex_plugins, vec!["superpowers@superpowers-dev"]);
+        assert_eq!(
+            c.codex_marketplaces["superpowers-dev"],
+            "github:obra/superpowers"
+        );
+        assert!(c.plugins.is_empty());
+
+        let fresh =
+            add_plugin_to("version = 1\n", PluginList::Codex, "x@openai-curated", None).unwrap();
+        assert_eq!(ok(&fresh).codex_plugins, vec!["x@openai-curated"]);
+        let claude = add_plugin_to(
+            "version = 1\n",
+            PluginList::Claude,
+            "p@anthropic-plugin-directory",
+            None,
+        )
+        .unwrap();
+        assert_eq!(ok(&claude).plugins, vec!["p@anthropic-plugin-directory"]);
+
+        let removed =
+            remove_plugin_from(&out, PluginList::Codex, "superpowers@superpowers-dev").unwrap();
+        let c = ok(&removed);
+        assert!(c.codex_plugins.is_empty());
+        assert!(
+            c.codex_marketplaces.contains_key("superpowers-dev"),
+            "marketplace stays"
+        );
+        assert!(add_plugin_to("version = 1\ncodex = 3\n", PluginList::Codex, "p@m", None).is_err());
     }
 }
