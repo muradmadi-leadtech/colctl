@@ -185,6 +185,20 @@ fn ac3_15_update_moves_pins_and_every_harness() {
     );
     let out = env.ok(&["update", "superpowers"]);
     assert!(out.contains("already held for review"), "{out}");
+    // Approving it moves the pin and every harness, as update did in 1.2.
+    env.ok(&["approve", "superpowers"]);
+    assert_eq!(sources(&env)[0]["rev"], new.as_str());
+    assert_eq!(head_of(&env.source.join("plugins/superpowers")), new);
+    assert_eq!(
+        state(&env)["harnesses"]["codex"]["sources"]["superpowers"]["rev"],
+        new.as_str()
+    );
+    assert!(
+        env.log_args()
+            .contains(&"plugin update superpowers@superpowers-dev".to_string())
+    );
+    let out = env.ok(&["update", "superpowers"]);
+    assert!(out.contains("up to date"), "{out}");
 }
 
 #[test]
