@@ -11,7 +11,7 @@ _Cycle 2 · Evaluate · 2026-11-12_
 | **Released** | [v1.1.0](https://github.com/muradmadi-leadtech/colctl/releases/tag/v1.1.0): both archives attested; `mise exec github:muradmadi-leadtech/colctl@1.1.0 -- colctl --version` prints `colctl 1.1.0` |
 | **PRs** | #12 plan · #13 T1 · #14 T4 · #15 T3 · #17 T5 · #18 T2+T6 · #19 T7 · #20 T8 · #16 release. All squash-merged after `check` passed |
 | **Production impact** | None on this machine. The owner's real profiles were only read; the smoke test ran on copies |
-| **Disposition** | **Awaiting the owner** |
+| **Disposition** | **Accept**, signed off by the owner on 2026-11-12 after running the reviewer checklist on the real profiles |
 
 ## Strict TDD: the evidence
 
