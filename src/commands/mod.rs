@@ -17,7 +17,7 @@ use crate::vault::{self, CloneState, Vault};
 use std::collections::BTreeMap;
 
 mod quarantine;
-pub use quarantine::update;
+pub use quarantine::{refresh, update};
 
 /// Where source plugin clones live, and colctl-written manifests inside it.
 pub const PLUGINS: &str = "plugins";
@@ -1601,99 +1601,6 @@ fn adopt_plugin_from_source(ctx: &Ctx, harness: &Harness, id: &str) -> Option<Ad
         return Some(Adoption::Refused(e.message));
     }
     Some(Adoption::Adopted)
-}
-
-/// `colctl refresh` (AC2-26): pulls adopted items' origins into the source.
-pub fn refresh(ctx: &Ctx, items: &[String], dry_run: bool) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
-    let ws = load(ctx)?;
-    let keys: Vec<String> = if items.is_empty() {
-        ws.state.origins.keys().cloned().collect()
-    } else {
-        items.to_vec()
-    };
-    for key in &keys {
-        if !ws.state.origins.contains_key(key) {
-            return Err(CliError::usage(format!("{key} has no recorded origin")));
-        }
-    }
-    if keys.is_empty() {
-        println!("nothing to refresh: no adopted item has a recorded origin");
-    }
-    if dry_run {
-        for (key, origin) in ws.origin_changed.iter().filter(|(k, _)| keys.contains(k)) {
-            println!("would refresh {key} from {}", origin.display());
-        }
-        return Ok(0);
-    }
-    let _lock = Lock::acquire(&ctx.source)?;
-    commit_pending(&git, ctx)?;
-    let mut refused = 0;
-    for key in &keys {
-        let mut st = state::load(&ctx.source)?;
-        let Some(origin) = st.origins.get(key).cloned() else {
-            continue;
-        };
-        let is_dir = key.starts_with("skills/");
-        let source_item = ctx.source.join(key);
-        let mut refuse = |why: String| {
-            refused += 1;
-            println!("refused {key}: {why}");
-        };
-        if !fsx::exists_any(&origin.path) {
-            refuse(format!("origin is gone ({})", origin.path.display()));
-            continue;
-        }
-        let (Ok(theirs), Ok(ours)) = (
-            hash_item(&origin.path, is_dir),
-            hash_item(&source_item, is_dir),
-        ) else {
-            refuse("couldn't read the origin or the source copy".into());
-            continue;
-        };
-        if theirs == origin.hash {
-            println!("{key} is up to date with {}", origin.path.display());
-            continue;
-        }
-        if ours != origin.hash {
-            refuse(format!(
-                "changed in both places; compare {} and {}, keep one, then adopt again",
-                origin.path.display(),
-                source_item.display()
-            ));
-            continue;
-        }
-        let name = source_item
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let staging = source_item.with_file_name(format!("{}refresh-{name}", fsx::TMP_PREFIX));
-        let _ = fsx::remove_any(&staging);
-        let copied = real_copy(is_dir)(&origin.path, &staging)
-            .ok()
-            .and_then(|()| hash_item(&staging, is_dir).ok());
-        if copied.as_ref() != Some(&theirs) {
-            let _ = fsx::remove_any(&staging);
-            refuse("the copy didn't match the origin; nothing changed".into());
-            continue;
-        }
-        fsx::remove_any(&source_item)
-            .and_then(|()| fs::rename(&staging, &source_item).map_err(Into::into))
-            .map_err(|e| CliError::usage(format!("{e:#}")))?;
-        if let Some(o) = st.origins.get_mut(key) {
-            o.hash = theirs;
-        }
-        state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))?;
-        let (kind, stem) = match key.split_once('/') {
-            Some((SKILLS, n)) => ("skill", n.to_string()),
-            Some((_, n)) => ("agent", n.trim_end_matches(".md").to_string()),
-            None => ("item", key.clone()),
-        };
-        commit(&git, ctx, &format!("colctl: refresh {kind} {stem}"))?;
-        println!("refreshed {key} from {}", origin.path.display());
-    }
-    let code = run_sync(ctx, &git, None)?;
-    Ok(if refused > 0 { EXIT_DRIFT } else { code })
 }
 
 #[cfg(test)]
