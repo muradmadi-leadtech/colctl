@@ -1,11 +1,27 @@
 //! Reading the shared `~/.agents` folder (the `agents` harness kind): only its `skills/`.
 
-use super::{Root, Scan};
+use super::{Root, Scan, link_entries, owned_by, root_of, temps_in};
+use crate::source::SKILLS;
 use std::path::Path;
 
-/// Reads `<harness>/skills`. `source` tells owned links from foreign ones.
-pub fn scan(_harness: &Path, _source: &Path) -> Scan {
-    Scan::empty(Root::Missing)
+/// Reads `<harness>/skills`. `source` tells owned links from foreign ones; anything else in the
+/// folder (other tools' lock files, plugin manifests) is ignored.
+pub fn scan(harness: &Path, source: &Path) -> Scan {
+    if let Some(root) = root_of(harness) {
+        return Scan::empty(root);
+    }
+    let owned = owned_by(source);
+    let mut scan = Scan::empty(Root::Ok);
+    scan.skills = link_entries(
+        &harness.join(SKILLS),
+        &source.join(SKILLS),
+        "",
+        &[],
+        &owned,
+        |p| p.is_dir(),
+    );
+    scan.temps = temps_in(harness, &[SKILLS]);
+    scan
 }
 
 #[cfg(test)]

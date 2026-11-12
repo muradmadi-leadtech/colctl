@@ -1,24 +1,106 @@
 //! Reading a Codex CLI profile (the `codex` harness kind, a `CODEX_HOME`) into a [`Scan`].
 
-use super::{Plugins, Root, Scan};
+use super::{Generated, Instructions, Plugins, Root, Scan, entry, owned_by, root_of, temps_in};
+use crate::fsx;
+use crate::source::{AGENTS, visible_entries};
 use serde_json::Value;
+use std::collections::BTreeMap;
+use std::fs;
 use std::path::Path;
 
 pub const AGENTS_MD: &str = "AGENTS.md";
+const CONFIG: &str = "config.toml";
 
 /// Reads a Codex profile. `source` tells owned links from foreign ones.
-pub fn scan(_harness: &Path, _source: &Path) -> Scan {
-    Scan::empty(Root::Missing)
+pub fn scan(harness: &Path, source: &Path) -> Scan {
+    if let Some(root) = root_of(harness) {
+        return Scan::empty(root);
+    }
+    let owned = owned_by(source);
+    let agents_md = harness.join(AGENTS_MD);
+    let instructions = if fsx::is_symlink(&agents_md) {
+        Instructions::Linked(entry(&agents_md, &source.join(AGENTS_MD), &owned, |p| {
+            p.is_file()
+        }))
+    } else {
+        match fs::read(&agents_md) {
+            Ok(content) => Instructions::File {
+                hash: fsx::hash_bytes(&content),
+                content,
+            },
+            Err(_) => Instructions::Absent,
+        }
+    };
+
+    let mut generated = BTreeMap::new();
+    let dir = harness.join(AGENTS);
+    for file in visible_entries(&dir) {
+        let Some(stem) = file.strip_suffix(".toml") else {
+            continue;
+        };
+        let path = dir.join(&file);
+        let item = match fsx::link_target(&path) {
+            Some(target) => Generated::Link(target),
+            None => match fs::read(&path) {
+                Ok(content) => Generated::File {
+                    hash: fsx::hash_bytes(&content),
+                    content,
+                },
+                Err(_) => continue,
+            },
+        };
+        generated.insert(stem.to_string(), item);
+    }
+
+    Scan {
+        root: Root::Ok,
+        instructions,
+        skills: BTreeMap::new(),
+        agents: BTreeMap::new(),
+        generated,
+        plugins: read_plugins(harness),
+        temps: temps_in(harness, &[AGENTS]),
+    }
 }
 
-/// Installed plugins and known marketplaces from `$CODEX_HOME/config.toml`.
-pub fn read_plugins(_harness: &Path) -> Result<Plugins, String> {
-    Err("not implemented".into())
+/// Installed plugins and known marketplaces from `$CODEX_HOME/config.toml`. A plugin counts as
+/// installed whatever its `enabled` (EC2-16); a missing file means nothing (EC2-04).
+pub fn read_plugins(harness: &Path) -> Result<Plugins, String> {
+    let path = harness.join(CONFIG);
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Plugins::default()),
+        Err(e) => return Err(format!("reading {}: {e}", path.display())),
+    };
+    let table: toml::Table =
+        toml::from_str(&text).map_err(|e| format!("{CONFIG} doesn't parse: {}", e.message()))?;
+    let section = |key: &str| -> Result<Option<&toml::Table>, String> {
+        match table.get(key) {
+            None => Ok(None),
+            Some(toml::Value::Table(t)) => Ok(Some(t)),
+            Some(_) => Err(format!("{CONFIG}: [{key}] must be a table")),
+        }
+    };
+    let mut plugins = Plugins::default();
+    if let Some(t) = section("plugins")? {
+        plugins.installed = t.keys().cloned().collect();
+    }
+    if let Some(t) = section("marketplaces")? {
+        for (name, entry) in t {
+            let json = serde_json::to_value(entry).unwrap_or(Value::Null);
+            plugins.marketplaces.insert(name.clone(), json);
+        }
+    }
+    Ok(plugins)
 }
 
 /// Turns a `[marketplaces.<name>]` entry back into a config source, for adopt (AC2-18).
-pub fn marketplace_source(_entry: &Value) -> Option<String> {
-    None
+pub fn marketplace_source(entry: &Value) -> Option<String> {
+    let field = |name: &str| entry.get(name).and_then(Value::as_str);
+    match field("source_type")? {
+        "git" | "local" => field("source").map(str::to_string),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
