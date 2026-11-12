@@ -5,6 +5,7 @@ edition = "2024"
 description = "Keep every AI coding harness on your machine in sync with one source of truth"
 repository = "https://github.com/muradmadi-leadtech/colctl"
 readme = "README.md"
+license = "MIT"
 
 [dependencies]
 anyhow = "1.0.104"
