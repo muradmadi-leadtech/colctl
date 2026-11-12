@@ -452,8 +452,9 @@ fn commit_pending(git: &Git, ctx: &Ctx) -> Result<(), CliError> {
 
 /// The body of `sync`, run with the lock held.
 fn run_sync(ctx: &Ctx, git: &Git, filter: Option<&str>) -> Result<i32, CliError> {
-    commit_pending(git, ctx)?;
+    // Layout first, so a new ignore rule (e.g. plugins/ for sources) is part of this commit.
     ensure_layout(ctx)?;
+    commit_pending(git, ctx)?;
     let mut ws = load(ctx)?;
     let errors = ensure_sources(ctx, git, &ws.config);
     (ws.sources, ws.clones) = prepare_sources(ctx, &ws.config, Some(git), &errors);
