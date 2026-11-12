@@ -292,20 +292,17 @@ fn ac2_26_origin_changes_and_refresh() {
         fs::read_to_string(env.source.join("skills/twg-jira/SKILL.md")).unwrap(),
         "v1"
     );
-    env.ok(&["refresh", "skills/twg-jira"]);
+    // Cycle 4: refresh holds the new content for review; the source copy stays at v1.
+    let out = env.ok(&["refresh", "skills/twg-jira"]);
+    assert!(out.contains("held skills/twg-jira for review"), "{out}");
     assert_eq!(
         fs::read_to_string(env.source.join("skills/twg-jira/SKILL.md")).unwrap(),
-        "v2"
-    );
-    assert!(
-        env.commits()
-            .contains(&"colctl: refresh skill twg-jira".to_string())
+        "v1"
     );
     assert_eq!(
-        state(&env)["origins"]["skills/twg-jira"]["hash"],
+        state(&env)["quarantine"]["skills/twg-jira"]["hash"],
         hash(&origin)
     );
-    env.ok(&["status"]);
 
     // Changed in both places: refused.
     fs::write(origin.join("SKILL.md"), "v3").unwrap();
