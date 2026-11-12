@@ -77,14 +77,22 @@ pub fn read_plugins(harness: &Path) -> Result<Plugins, String> {
             .get("plugins")
             .and_then(Value::as_object)
             .ok_or_else(|| format!("{INSTALLED_PLUGINS} has no \"plugins\" object"))?;
-        plugins.installed = map.keys().cloned().collect();
+        // colctl manages user-scope installs only; project and local installs belong to a project.
         for (id, entries) in map {
-            if let Some(sha) = entries
-                .as_array()
-                .and_then(|a| a.first())
-                .and_then(|e| e.get("gitCommitSha"))
-                .and_then(Value::as_str)
-            {
+            let none = Value::Null;
+            let user = match entries.as_array() {
+                // No entries means no scope information: count it, as before.
+                Some(list) if list.is_empty() => Some(&none),
+                Some(list) => list.iter().find(|e| {
+                    e.get("scope")
+                        .and_then(Value::as_str)
+                        .is_none_or(|scope| scope == "user")
+                }),
+                None => Some(&none),
+            };
+            let Some(entry) = user else { continue };
+            plugins.installed.insert(id.clone());
+            if let Some(sha) = entry.get("gitCommitSha").and_then(Value::as_str) {
                 plugins.revs.insert(id.clone(), sha.to_string());
             }
         }
@@ -328,5 +336,28 @@ mod tests {
             String::from_utf8(generated_claude_md("~/.colctl")).unwrap(),
             "<!-- Managed by colctl. Edit ~/.colctl/AGENTS.md instead; this file is regenerated. -->\n@~/.colctl/AGENTS.md\n"
         );
+    }
+
+    #[test]
+    fn ac3_12_only_user_scope_installs_count() {
+        let f = fixture();
+        fs::create_dir_all(f.harness.join("plugins")).unwrap();
+        fs::write(
+            f.harness.join(INSTALLED_PLUGINS),
+            json!({"version": 2, "plugins": {
+                "both@m": [{"scope": "user"}, {"scope": "project", "projectPath": "/p"}],
+                "project-only@m": [{"scope": "project", "projectPath": "/p", "gitCommitSha": "abc"}],
+                "local-only@m": [{"scope": "local", "projectPath": "/p"}],
+                "no-scope@m": [{}]
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        let p = read_plugins(&f.harness).unwrap();
+        assert_eq!(
+            p.installed.iter().map(String::as_str).collect::<Vec<_>>(),
+            vec!["both@m", "no-scope@m"]
+        );
+        assert!(!p.revs.contains_key("project-only@m"));
     }
 }
