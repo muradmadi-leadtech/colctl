@@ -106,7 +106,7 @@ than on its tests (see cycle-review.md). 228 tests, 95.7% lines.
 - [x] Code review: Security review completed
 - [x] Code review: Integration and interface contracts verified
 - [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
-- [ ] Disposition decision made
+- [x] Disposition decision made
 
 ### Disposition
 
@@ -114,6 +114,8 @@ than on its tests (see cycle-review.md). 228 tests, 95.7% lines.
 `[plugins]` in cycle 1, so status reports it `ok` (not `from-aggregator`) and `adopt` refuses it ("not a foreign
 item"). There was no one-step path from a list plugin to a source plugin. Back to Refine (AC3-29, AC3-30, EC3-19),
 then Generate, then Evaluate again; patch release v1.2.1.
+
+**Accept** (owner, 2026-11-12) after evaluating v1.2.1 on the real profiles.
 
 ---
 

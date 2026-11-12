@@ -11,7 +11,7 @@ _Cycle 3 · Evaluate · 2026-11-12_
 | **Released** | [v1.2.1](https://github.com/muradmadi-leadtech/colctl/releases/tag/v1.2.1) after the revise (first [v1.2.0](https://github.com/muradmadi-leadtech/colctl/releases/tag/v1.2.0): both archives attested; `mise exec github:muradmadi-leadtech/colctl@1.2.0 -- colctl --version` prints `colctl 1.2.0`) |
 | **PRs** | #23 plan · #24 T1 · #25 T2 · #27 T3 · #29 T4 · #30 T5+T6 · #31 T7 · #32 T8 · #33 fix · #26 release |
 | **Production impact** | None on this machine. Real profiles were only read; the smoke test ran on copies |
-| **Disposition** | First evaluation: **Revise** (owner). After the revise: **awaiting the owner** |
+| **Disposition** | First evaluation: **Revise**. After the revise: **Accept**, signed off by the owner on 2026-11-12 |
 
 ## Your story, on copies of your real profiles
 
