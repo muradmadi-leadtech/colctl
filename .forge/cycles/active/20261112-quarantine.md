@@ -29,16 +29,16 @@ New versions of source plugins (`update`) and taken-over skills/agents (`refresh
 
 ---
 
-<!-- FORGE_PHASE:Orchestrate:Active -->
+<!-- FORGE_PHASE:Orchestrate:Complete -->
 ## Phase 2: Orchestrate
 
 **Purpose**: Break the work into session-sized pieces.
 
 ### Required Outputs
-- [ ] Container architecture (C4 L2) designed
-- [ ] Component architecture (C4 L3) designed
-- [ ] Dependency map created
-- [ ] Tasks sized for single AI sessions
+- [x] Container architecture (C4 L2) designed
+- [x] Component architecture (C4 L3) designed
+- [x] Dependency map created
+- [x] Tasks sized for single AI sessions
 
 ### Tasks
 
@@ -47,7 +47,7 @@ Dependency map: T1 → T3, T4; T2 → T5; T3 + T4 → T5–T8; T5–T8 → T9 �
 
 ---
 
-<!-- FORGE_PHASE:Refine:Pending -->
+<!-- FORGE_PHASE:Refine:Active -->
 ## Phase 3: Refine
 
 **Purpose**: Define exactly what "done" looks like.
@@ -61,6 +61,8 @@ Dependency map: T1 → T3, T4; T2 → T5; T3 + T4 → T5–T8; T5–T8 → T9 �
 **CRITICAL**: No code in this phase - specifications only.
 
 ### Specifications
+
+`docs/quarantine/acceptance-criteria.md` (AC4-01–33), `interfaces.md`, `edge-cases.md` (EC4-01–23). Constraints vs criteria: the Constraints section of interfaces.md (no new crates, sync offline, first-time adds unchanged, JSON shapes are a contract for the TUI).
 
 <!-- Document specifications here -->
 

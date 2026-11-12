@@ -30,3 +30,17 @@ T1 and T2 are independent of each other. T3 and T4 can run in either order.
 
 **Release:** the first PR that changes `update` or `refresh` behaviour carries a `BREAKING CHANGE:` footer so
 release-please cuts v2.0.0.
+
+## Criteria per task (from Refine)
+
+| Task | Acceptance criteria | Edge cases |
+|---|---|---|
+| T1 | AC4-01, 02, 03 | EC4-04 |
+| T2 | AC4-04 – 10 | EC4-21, 23 |
+| T3 | AC4-11 – 16 | EC4-01, 05, 06, 07, 17, 20 |
+| T4 | AC4-17, 18 | EC4-10, 18 |
+| T5 | AC4-19 – 22 | EC4-02, 03, 08, 09, 22 |
+| T6 | AC4-23 – 26 | EC4-11, 12, 13, 14, 15, 16, 19 |
+| T7 | AC4-27, 28 | — |
+| T8 | AC4-29, 30, 31 | — |
+| T9 | AC4-32, 33 | — |
