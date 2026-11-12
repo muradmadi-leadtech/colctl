@@ -18,3 +18,4 @@ pub mod runner;
 pub mod source;
 pub mod state;
 pub mod tool;
+pub mod vault;
