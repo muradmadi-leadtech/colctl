@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.1](https://github.com/muradmadi-leadtech/colctl/compare/v1.2.0...v1.2.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* adopt plugins already in a list when their source is known ([#35](https://github.com/muradmadi-leadtech/colctl/issues/35)) ([995f16e](https://github.com/muradmadi-leadtech/colctl/commit/995f16eab2c9a070f1764e7cf6e85be242ea9bd1))
+* commit the plugins/ ignore rule on the first sync ([#37](https://github.com/muradmadi-leadtech/colctl/issues/37)) ([6d45ea7](https://github.com/muradmadi-leadtech/colctl/commit/6d45ea7f86b0cfb77096146fbcfdbf1e22753004))
+
 ## [1.2.0](https://github.com/muradmadi-leadtech/colctl/compare/v1.1.0...v1.2.0) (2026-11-12)
 
 
