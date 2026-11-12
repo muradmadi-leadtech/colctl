@@ -313,7 +313,9 @@ impl Builder<'_> {
                 });
             }
             (Instructions::Absent, false) => {}
-            (Instructions::Link, _) => self.item(kind, CLAUDE_MD, ItemState::ForeignLink),
+            (Instructions::Link | Instructions::Linked(_), _) => {
+                self.item(kind, CLAUDE_MD, ItemState::ForeignLink)
+            }
             (Instructions::File { content, hash }, true) => {
                 if content == generated {
                     self.item(kind, CLAUDE_MD, ItemState::Ok);
@@ -477,6 +479,7 @@ mod tests {
             instructions: Instructions::Absent,
             skills: BTreeMap::new(),
             agents: BTreeMap::new(),
+            generated: BTreeMap::new(),
             plugins: Ok(Plugins::default()),
             temps: Vec::new(),
         }

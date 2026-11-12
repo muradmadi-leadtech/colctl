@@ -4,7 +4,9 @@
 //! Only the read side lives here; deciding what to do is [`crate::plan`] and doing it is
 //! [`crate::apply`].
 
+pub mod agents_dir;
 pub mod claude;
+pub mod codex;
 
 pub use claude::{CLAUDE_MD, generated_claude_md, marketplace_source, read_plugins, scan};
 
@@ -37,12 +39,29 @@ pub enum Entry {
     Real,
 }
 
-/// The harness's `CLAUDE.md`.
+/// The harness's instructions file (`CLAUDE.md`, or a Codex profile's `AGENTS.md`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instructions {
     Absent,
+    /// A symlink, where the kind generates a real file (Claude): always foreign.
     Link,
-    File { content: Vec<u8>, hash: String },
+    /// A symlink, where the kind links the instructions (Codex): owned or not.
+    Linked(Entry),
+    File {
+        content: Vec<u8>,
+        hash: String,
+    },
+}
+
+/// A file a kind generates from the source (a Codex profile's `agents/<name>.toml`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Generated {
+    File {
+        content: Vec<u8>,
+        hash: String,
+    },
+    /// A symlink where a generated file belongs: never colctl's.
+    Link(PathBuf),
 }
 
 /// Plugins and marketplaces as Claude recorded them.
@@ -60,6 +79,8 @@ pub struct Scan {
     pub instructions: Instructions,
     pub skills: BTreeMap<String, Entry>,
     pub agents: BTreeMap<String, Entry>,
+    /// Generated agent files by agent name (Codex).
+    pub generated: BTreeMap<String, Generated>,
     /// `Err` with the reason when Claude's plugin files can't be read (EC-13).
     pub plugins: Result<Plugins, String>,
     /// Leftovers from an interrupted run (EC-21).
@@ -73,6 +94,7 @@ impl Scan {
             instructions: Instructions::Absent,
             skills: BTreeMap::new(),
             agents: BTreeMap::new(),
+            generated: BTreeMap::new(),
             plugins: Ok(Plugins::default()),
             temps: Vec::new(),
         }
