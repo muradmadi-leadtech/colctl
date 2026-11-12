@@ -21,6 +21,7 @@ impl Tool {
     pub fn for_kind(kind: Kind) -> Option<Tool> {
         match kind {
             Kind::Claude => Some(Tool::Claude),
+            Kind::Codex | Kind::Agents => None,
         }
     }
 

@@ -20,15 +20,33 @@ pub const PLUGIN_DIRECTORY: &str = "anthropic-plugin-directory";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Claude,
+    /// A Codex CLI profile (a `CODEX_HOME`).
+    Codex,
+    /// The shared `~/.agents` folder (its `skills/`).
+    Agents,
 }
 
 impl Kind {
     pub fn as_str(self) -> &'static str {
         match self {
             Kind::Claude => "claude",
+            Kind::Codex => "codex",
+            Kind::Agents => "agents",
         }
     }
 }
+
+/// Which plugin list in `config.toml` an edit applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginList {
+    /// `[marketplaces]` and `[plugins]`.
+    Claude,
+    /// `[codex.marketplaces]` and `[codex.plugins]`.
+    Codex,
+}
+
+/// Codex's built-in marketplace: Codex plugins from it need no `[codex.marketplaces]` entry.
+pub const CODEX_CURATED: &str = "openai-curated";
 
 /// One registered harness.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +73,10 @@ pub struct Config {
     pub marketplaces: BTreeMap<String, String>,
     /// Enabled plugin ids, `name@marketplace`, in file order.
     pub plugins: Vec<String>,
+    /// `[codex.marketplaces]`: name → source.
+    pub codex_marketplaces: BTreeMap<String, String>,
+    /// `[codex.plugins].enabled`, in file order.
+    pub codex_plugins: Vec<String>,
 }
 
 impl Config {
@@ -372,6 +394,21 @@ pub fn add_plugin(
     Ok(doc.to_string())
 }
 
+/// Adds a plugin to the given list (and its marketplace, if given and absent).
+pub fn add_plugin_to(
+    _text: &str,
+    _list: PluginList,
+    _id: &str,
+    _marketplace: Option<(&str, &str)>,
+) -> Result<String, String> {
+    Err("not implemented".into())
+}
+
+/// Removes a plugin from the given list; its marketplace stays.
+pub fn remove_plugin_from(_text: &str, _list: PluginList, _id: &str) -> Result<String, String> {
+    Err("not implemented".into())
+}
+
 /// Removes a plugin from `[plugins].enabled` (AC-23). Its marketplace stays.
 pub fn remove_plugin(text: &str, id: &str) -> Result<String, String> {
     let mut doc = document(text)?;
@@ -626,5 +663,173 @@ enabled = ["sadr@sadr", "superpowers@anthropic-plugin-directory"]
             remove_plugin("version = 1\n", "p@m").unwrap(),
             "version = 1\n"
         );
+    }
+
+    const CYCLE2: &str = r#"version = 1
+
+[[harness]]
+name = "claude"
+kind = "claude"
+path = "~/.claude"
+
+[[harness]]
+name = "kilo-codex"
+kind = "codex"
+path = "/opt/kilo/profiles/codex"
+exclude = ["AGENTS.md", "agents/reviewer.toml", "plugins/x@superpowers-dev"]
+
+[[harness]]
+name = "agents"
+kind = "agents"
+path = "~/.agents"
+exclude = ["skills/twg-jira"]
+
+[marketplaces]
+sadr = "github:muradmadi/sadr"
+
+[plugins]
+enabled = ["sadr@sadr"]
+
+[codex.marketplaces]
+superpowers-dev = "github:obra/superpowers"
+
+[codex.plugins]
+enabled = ["superpowers@superpowers-dev", "x@openai-curated"]
+"#;
+
+    #[test]
+    fn ac2_01_new_kinds_load() {
+        let c = ok(CYCLE2);
+        let kinds: Vec<Kind> = c.harnesses.iter().map(|h| h.kind).collect();
+        assert_eq!(kinds, vec![Kind::Claude, Kind::Codex, Kind::Agents]);
+        assert_eq!(Kind::Codex.as_str(), "codex");
+        assert_eq!(Kind::Agents.as_str(), "agents");
+        let e = err("version = 1\n[[harness]]\nname = \"a\"\nkind = \"cursor\"\npath = \"/a\"\n");
+        assert!(
+            e.contains("line 4") && e.contains("\"claude\", \"codex\", \"agents\""),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn ac2_02_the_codex_plugin_list_is_separate() {
+        let c = ok(CYCLE2);
+        assert_eq!(c.plugins, vec!["sadr@sadr"]);
+        assert_eq!(
+            c.codex_plugins,
+            vec!["superpowers@superpowers-dev", "x@openai-curated"]
+        );
+        assert_eq!(
+            c.codex_marketplaces["superpowers-dev"],
+            "github:obra/superpowers"
+        );
+        assert!(!c.marketplaces.contains_key("superpowers-dev"));
+        // A 1.0 config loads with empty Codex lists.
+        let old = ok(FULL);
+        assert!(old.codex_plugins.is_empty() && old.codex_marketplaces.is_empty());
+        assert!(err("version = 1\n[codex]\nbogus = 1\n").contains("bogus"));
+    }
+
+    #[test]
+    fn ec2_08_codex_plugin_needs_a_declared_marketplace() {
+        let e = err("version = 1\n[codex.plugins]\nenabled = [\"p@nowhere\"]\n");
+        assert!(
+            e.contains("line 3") && e.contains("[codex.marketplaces]"),
+            "{e}"
+        );
+        // A Claude marketplace doesn't count for Codex, and openai-curated can't be redeclared.
+        let e =
+            err("version = 1\n[marketplaces]\nm = \"/m\"\n[codex.plugins]\nenabled = [\"p@m\"]\n");
+        assert!(e.contains("[codex.marketplaces]"), "{e}");
+        let e = err("version = 1\n[codex.marketplaces]\nopenai-curated = \"/x\"\n");
+        assert!(e.contains("invalid marketplace name"), "{e}");
+        let e = err("version = 1\n[codex.marketplaces]\nm = \"relative\"\n");
+        assert!(e.contains("marketplace source"), "{e}");
+        let e = err(
+            "version = 1\n[codex.marketplaces]\nm = \"/m\"\n[codex.plugins]\nenabled = [\"p@m\", \"p@m\"]\n",
+        );
+        assert!(e.contains("duplicate plugin"), "{e}");
+    }
+
+    #[test]
+    fn ac2_03_ec2_09_excludes_are_checked_per_kind() {
+        let harness = |kind: &str, entry: &str| {
+            format!(
+                "version = 1\n[[harness]]\nname = \"h\"\nkind = \"{kind}\"\npath = \"/h\"\nexclude = [\"{entry}\"]\n"
+            )
+        };
+        for (kind, entry) in [
+            ("claude", "CLAUDE.md"),
+            ("claude", "agents/a.md"),
+            ("codex", "AGENTS.md"),
+            ("codex", "agents/a.toml"),
+            ("codex", "plugins/p@m"),
+            ("agents", "skills/s"),
+        ] {
+            assert!(
+                parse(&harness(kind, entry), Path::new(HOME)).is_ok(),
+                "{kind} {entry}"
+            );
+        }
+        for (kind, entry) in [
+            ("codex", "CLAUDE.md"),
+            ("codex", "skills/s"),
+            ("codex", "agents/a.md"),
+            ("claude", "AGENTS.md"),
+            ("claude", "agents/a.toml"),
+            ("agents", "CLAUDE.md"),
+            ("agents", "plugins/p@m"),
+        ] {
+            let e = err(&harness(kind, entry));
+            assert!(
+                e.contains("line 6") && e.contains("exclude entry"),
+                "{kind} {entry}: {e}"
+            );
+        }
+    }
+
+    #[test]
+    fn codex_list_edits_keep_comments() {
+        let original = "# keep\nversion = 1\n\n[codex.plugins]\nenabled = [] # trailing\n";
+        let out = add_plugin_to(
+            original,
+            PluginList::Codex,
+            "superpowers@superpowers-dev",
+            Some(("superpowers-dev", "github:obra/superpowers")),
+        )
+        .unwrap();
+        assert!(
+            out.contains("# keep") && out.contains("# trailing"),
+            "{out}"
+        );
+        let c = ok(&out);
+        assert_eq!(c.codex_plugins, vec!["superpowers@superpowers-dev"]);
+        assert_eq!(
+            c.codex_marketplaces["superpowers-dev"],
+            "github:obra/superpowers"
+        );
+        assert!(c.plugins.is_empty());
+
+        let fresh =
+            add_plugin_to("version = 1\n", PluginList::Codex, "x@openai-curated", None).unwrap();
+        assert_eq!(ok(&fresh).codex_plugins, vec!["x@openai-curated"]);
+        let claude = add_plugin_to(
+            "version = 1\n",
+            PluginList::Claude,
+            "p@anthropic-plugin-directory",
+            None,
+        )
+        .unwrap();
+        assert_eq!(ok(&claude).plugins, vec!["p@anthropic-plugin-directory"]);
+
+        let removed =
+            remove_plugin_from(&out, PluginList::Codex, "superpowers@superpowers-dev").unwrap();
+        let c = ok(&removed);
+        assert!(c.codex_plugins.is_empty());
+        assert!(
+            c.codex_marketplaces.contains_key("superpowers-dev"),
+            "marketplace stays"
+        );
+        assert!(add_plugin_to("version = 1\ncodex = 3\n", PluginList::Codex, "p@m", None).is_err());
     }
 }

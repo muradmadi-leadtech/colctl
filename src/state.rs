@@ -253,4 +253,37 @@ mod tests {
         assert!(pid_alive(std::process::id()));
         assert!(!pid_alive(999_999_999));
     }
+
+    #[test]
+    fn ec2_22_a_1_0_state_file_loads_unchanged() {
+        let t = tempfile::tempdir().unwrap();
+        fs::create_dir_all(state_dir(t.path())).unwrap();
+        let v1 = r#"{
+  "version": 1,
+  "harnesses": {
+    "kilo-claude": {
+      "generated": { "CLAUDE.md": "sha256:abc" },
+      "marketplaces": ["sadr"],
+      "plugins": ["sadr@sadr"]
+    }
+  }
+}
+"#;
+        fs::write(state_dir(t.path()).join(STATE_FILE), v1).unwrap();
+        let mut s = load(t.path()).unwrap();
+        assert_eq!(
+            s.harness("kilo-claude").generated["CLAUDE.md"],
+            "sha256:abc"
+        );
+        s.harness_mut("kilo-codex")
+            .generated
+            .insert("agents/rev.toml".into(), "sha256:def".into());
+        save(t.path(), &s).unwrap();
+        let again = load(t.path()).unwrap();
+        assert_eq!(again.harness("kilo-claude").plugins.len(), 1);
+        assert_eq!(
+            again.harness("kilo-codex").generated["agents/rev.toml"],
+            "sha256:def"
+        );
+    }
 }
