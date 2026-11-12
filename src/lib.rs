@@ -13,7 +13,9 @@ pub mod ctx;
 pub mod error;
 pub mod fsx;
 pub mod git;
+pub mod origin;
 pub mod packaging;
+||||||| parent of 38aa5cf (test: finding a plugin's source (red))
 pub mod plan;
 pub mod runner;
 pub mod source;
