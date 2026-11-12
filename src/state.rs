@@ -27,11 +27,26 @@ pub struct HarnessState {
     /// Plugins colctl installed.
     #[serde(default)]
     pub plugins: BTreeSet<String>,
+    /// Source plugins colctl installed here (cycle 3).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sources: BTreeMap<String, InstalledSource>,
+}
+
+/// A source plugin as installed in one harness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstalledSource {
+    pub id: String,
+    pub marketplace: String,
+    pub rev: String,
 }
 
 impl HarnessState {
     pub fn is_empty(&self) -> bool {
-        self.generated.is_empty() && self.marketplaces.is_empty() && self.plugins.is_empty()
+        self.generated.is_empty()
+            && self.marketplaces.is_empty()
+            && self.plugins.is_empty()
+            && self.sources.is_empty()
     }
 }
 
@@ -297,5 +312,31 @@ mod tests {
             again.harness("kilo-codex").generated["agents/rev.toml"],
             "sha256:def"
         );
+    }
+
+    #[test]
+    fn ec3_17_a_1_1_state_file_loads_and_gains_sources() {
+        let t = tempfile::tempdir().unwrap();
+        fs::create_dir_all(state_dir(t.path())).unwrap();
+        let v11 = r#"{"version": 1, "harnesses": {"codex": {"plugins": ["x@openai-curated"]}},
+            "origins": {"skills/a": {"path": "/o", "hash": "sha256:1"}}}"#;
+        fs::write(state_dir(t.path()).join(STATE_FILE), v11).unwrap();
+        let mut s = load(t.path()).unwrap();
+        assert!(s.harness("codex").sources.is_empty());
+        s.harness_mut("codex").sources.insert(
+            "superpowers".into(),
+            InstalledSource {
+                id: "superpowers@superpowers-dev".into(),
+                marketplace: "superpowers-dev".into(),
+                rev: "a".repeat(40),
+            },
+        );
+        save(t.path(), &s).unwrap();
+        let again = load(t.path()).unwrap();
+        assert_eq!(
+            again.harness("codex").sources["superpowers"].marketplace,
+            "superpowers-dev"
+        );
+        assert_eq!(again.origins.len(), 1);
     }
 }

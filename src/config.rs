@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use toml::Spanned;
-use toml_edit::{DocumentMut, Item, Table, TableLike, value};
+use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, TableLike, value};
 
 /// The config file's name inside the source.
 pub const CONFIG_FILE: &str = "config.toml";
@@ -34,6 +34,55 @@ impl Kind {
             Kind::Agents => "agents",
         }
     }
+}
+
+/// A plugin installed from its own repo, pinned to a commit (cycle 3, `[[source]]`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Source {
+    pub name: String,
+    /// The repo as given; `github:owner/repo` is kept as written (see [`Source::clone_url`]).
+    pub repo: String,
+    /// The pinned commit, 40 hex characters.
+    pub rev: String,
+    /// The plugin's name in the repo's manifests.
+    pub plugin: String,
+    /// Plugin ids uninstalled wherever they're installed.
+    pub replaces: Vec<String>,
+}
+
+impl Source {
+    /// The URL `git clone` gets.
+    pub fn clone_url(&self) -> String {
+        clone_url(&self.repo)
+    }
+}
+
+/// `github:owner/repo` → `https://github.com/owner/repo`; anything else as is.
+pub fn clone_url(repo: &str) -> String {
+    match repo.strip_prefix("github:") {
+        Some(rest) => format!("https://github.com/{rest}"),
+        None => repo.to_string(),
+    }
+}
+
+/// True for a repo `git clone` can take: a URL, `git@host:path`, an absolute path, or `github:owner/repo`.
+pub fn valid_repo(repo: &str) -> bool {
+    if let Some(rest) = repo.strip_prefix("github:") {
+        let parts: Vec<&str> = rest.split('/').collect();
+        return parts.len() == 2 && parts.iter().all(|p| valid_item_name(p));
+    }
+    ["https://", "http://", "ssh://", "file://", "git@"]
+        .iter()
+        .any(|p| repo.starts_with(p) && repo.len() > p.len())
+        || repo.starts_with('/')
+}
+
+/// True for a full commit id: 40 lowercase hex characters.
+pub fn valid_rev(rev: &str) -> bool {
+    rev.len() == 40
+        && rev
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
 }
 
 /// Which plugin list in `config.toml` an edit applies to.
@@ -77,6 +126,8 @@ pub struct Config {
     pub codex_marketplaces: BTreeMap<String, String>,
     /// `[codex.plugins].enabled`, in file order.
     pub codex_plugins: Vec<String>,
+    /// `[[source]]` entries, in file order.
+    pub sources: Vec<Source>,
 }
 
 impl Config {
@@ -97,6 +148,20 @@ struct Raw {
     plugins: Option<RawPlugins>,
     #[serde(default)]
     codex: Option<RawCodex>,
+    #[serde(default)]
+    source: Vec<RawSource>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSource {
+    name: Spanned<String>,
+    repo: Spanned<String>,
+    rev: Spanned<String>,
+    #[serde(default)]
+    plugin: Option<Spanned<String>>,
+    #[serde(default)]
+    replaces: Vec<Spanned<String>>,
 }
 
 #[derive(Deserialize)]
@@ -160,6 +225,9 @@ pub fn valid_marketplace_source(source: &str) -> bool {
 }
 
 fn valid_exclude(item: &str, kind: Kind) -> bool {
+    if let Some(name) = item.strip_prefix("sources/") {
+        return kind != Kind::Agents && valid_item_name(name);
+    }
     let (instructions, agent_suffix, skills, plugins) = match kind {
         Kind::Claude => (Some("CLAUDE.md"), Some(".md"), true, true),
         Kind::Codex => (Some("AGENTS.md"), Some(".toml"), false, true),
@@ -182,8 +250,10 @@ fn valid_exclude(item: &str, kind: Kind) -> bool {
 
 fn exclude_help(kind: Kind) -> &'static str {
     match kind {
-        Kind::Claude => "CLAUDE.md, skills/<name>, agents/<name>.md or plugins/<id>",
-        Kind::Codex => "AGENTS.md, agents/<name>.toml or plugins/<id>",
+        Kind::Claude => {
+            "CLAUDE.md, skills/<name>, agents/<name>.md, plugins/<id> or sources/<name>"
+        }
+        Kind::Codex => "AGENTS.md, agents/<name>.toml, plugins/<id> or sources/<name>",
         Kind::Agents => "skills/<name>",
     }
 }
@@ -303,6 +373,66 @@ pub fn parse(text: &str, home: &Path) -> Result<Config, String> {
         )?;
         config.codex_marketplaces = marketplaces;
         config.codex_plugins = plugins;
+    }
+    for raw in &raw.source {
+        let name = raw.name.get_ref();
+        if !valid_item_name(name) {
+            return Err(at(
+                raw.name.span(),
+                format!("invalid source name \"{name}\""),
+            ));
+        }
+        if config.sources.iter().any(|s| &s.name == name) {
+            return Err(at(raw.name.span(), format!("duplicate source \"{name}\"")));
+        }
+        if !valid_repo(raw.repo.get_ref()) {
+            return Err(at(
+                raw.repo.span(),
+                format!(
+                    "source repo \"{}\" must be a URL, git@host:path, an absolute path or github:owner/repo",
+                    raw.repo.get_ref()
+                ),
+            ));
+        }
+        if !valid_rev(raw.rev.get_ref()) {
+            return Err(at(
+                raw.rev.span(),
+                format!(
+                    "source rev \"{}\" must be a full 40-character commit",
+                    raw.rev.get_ref()
+                ),
+            ));
+        }
+        let plugin = match &raw.plugin {
+            Some(p) if !valid_item_name(p.get_ref()) => {
+                return Err(at(
+                    p.span(),
+                    format!("invalid source plugin name \"{}\"", p.get_ref()),
+                ));
+            }
+            Some(p) => p.get_ref().clone(),
+            None => name.clone(),
+        };
+        let mut replaces = Vec::new();
+        for id in &raw.replaces {
+            if split_plugin_id(id.get_ref()).is_none() {
+                return Err(at(
+                    id.span(),
+                    format!(
+                        "replaces entry \"{}\" must be name@marketplace",
+                        id.get_ref()
+                    ),
+                ));
+            }
+            replaces.push(id.get_ref().clone());
+        }
+        config.sources.push(Source {
+            name: name.clone(),
+            repo: raw.repo.get_ref().clone(),
+            rev: raw.rev.get_ref().clone(),
+            plugin,
+            replaces,
+        });
     }
     Ok(config)
 }
@@ -479,6 +609,81 @@ pub fn add_plugin(
     marketplace: Option<(&str, &str)>,
 ) -> Result<String, String> {
     add_plugin_to(text, PluginList::Claude, id, marketplace)
+}
+
+/// Appends a `[[source]]` table, leaving every existing line unchanged.
+pub fn add_source(text: &str, source: &Source) -> Result<String, String> {
+    let mut out = text.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "\n[[source]]\nname = {}\nrepo = {}\nrev = {}\n",
+        toml_edit::Value::from(source.name.as_str()),
+        toml_edit::Value::from(source.repo.as_str()),
+        toml_edit::Value::from(source.rev.as_str()),
+    ));
+    if source.plugin != source.name {
+        out.push_str(&format!(
+            "plugin = {}\n",
+            toml_edit::Value::from(source.plugin.as_str())
+        ));
+    }
+    if !source.replaces.is_empty() {
+        let replaces: toml_edit::Array = source.replaces.iter().map(String::as_str).collect();
+        out.push_str(&format!("replaces = {replaces}\n"));
+    }
+    Ok(out)
+}
+
+fn with_source_table(
+    text: &str,
+    name: &str,
+    edit: impl FnOnce(&mut ArrayOfTables, usize),
+) -> Result<String, String> {
+    let mut doc = document(text)?;
+    let tables = doc
+        .get_mut("source")
+        .and_then(Item::as_array_of_tables_mut)
+        .ok_or_else(|| format!("{CONFIG_FILE}: no [[source]] named \"{name}\""))?;
+    let index = tables
+        .iter()
+        .position(|t| t.get("name").and_then(|v| v.as_str()) == Some(name))
+        .ok_or_else(|| format!("{CONFIG_FILE}: no [[source]] named \"{name}\""))?;
+    edit(tables, index);
+    Ok(doc.to_string())
+}
+
+/// Sets a source's pinned `rev`.
+pub fn set_source_rev(text: &str, name: &str, rev: &str) -> Result<String, String> {
+    with_source_table(text, name, |tables, i| {
+        if let Some(t) = tables.get_mut(i) {
+            t["rev"] = value(rev);
+        }
+    })
+}
+
+/// Adds an id to a source's `replaces` (once).
+pub fn add_replaces(text: &str, name: &str, id: &str) -> Result<String, String> {
+    with_source_table(text, name, |tables, i| {
+        if let Some(t) = tables.get_mut(i) {
+            if t.get("replaces").and_then(Item::as_array).is_none() {
+                t["replaces"] = value(toml_edit::Array::new());
+            }
+            if let Some(list) = t["replaces"].as_array_mut()
+                && !list.iter().any(|v| v.as_str() == Some(id))
+            {
+                list.push(id);
+            }
+        }
+    })
+}
+
+/// Removes a `[[source]]` table.
+pub fn remove_source(text: &str, name: &str) -> Result<String, String> {
+    with_source_table(text, name, |tables, i| {
+        tables.remove(i);
+    })
 }
 
 /// Removes a plugin from `[plugins].enabled` (AC-23). Its marketplace stays.
@@ -971,5 +1176,126 @@ enabled = ["superpowers@superpowers-dev", "x@openai-curated"]
             "marketplace stays"
         );
         assert!(add_plugin_to("version = 1\ncodex = 3\n", PluginList::Codex, "p@m", None).is_err());
+    }
+
+    const REV: &str = "8ca22dba9a94f28898bbce59f2537ff4d87c747d";
+
+    fn with_source(body: &str) -> String {
+        format!("version = 1\n\n[[source]]\n{body}\n")
+    }
+
+    #[test]
+    fn ac3_01_sources_load() {
+        let c = ok(&with_source(&format!(
+            "name = \"superpowers\"\nrepo = \"https://github.com/obra/superpowers\"\nrev = \"{REV}\"\nreplaces = [\"superpowers@anthropic-plugin-directory\"]"
+        )));
+        let s = &c.sources[0];
+        assert_eq!(s.name, "superpowers");
+        assert_eq!(s.rev, REV);
+        assert_eq!(s.plugin, "superpowers", "plugin defaults to the name");
+        assert_eq!(s.replaces, vec!["superpowers@anthropic-plugin-directory"]);
+        assert_eq!(s.clone_url(), "https://github.com/obra/superpowers");
+        let gh = ok(&with_source(&format!(
+            "name = \"x\"\nrepo = \"github:o/r\"\nrev = \"{REV}\"\nplugin = \"other\""
+        )));
+        assert_eq!(gh.sources[0].clone_url(), "https://github.com/o/r");
+        assert_eq!(gh.sources[0].plugin, "other");
+        for repo in [
+            "https://h/x",
+            "http://h/x",
+            "ssh://git@h/x",
+            "git@github.com:o/r.git",
+            "file:///tmp/r",
+            "/abs/repo",
+            "github:o/r",
+        ] {
+            assert!(valid_repo(repo), "{repo}");
+        }
+        for repo in ["", "relative/path", "github:o", "ftp://x"] {
+            assert!(!valid_repo(repo), "{repo}");
+        }
+        assert!(valid_rev(REV));
+        assert!(!valid_rev("8ca22db"));
+        assert!(!valid_rev(&REV.to_uppercase()));
+    }
+
+    #[test]
+    fn ac3_01_invalid_sources_are_rejected_with_the_line() {
+        let base = format!("name = \"x\"\nrepo = \"https://h/x\"\nrev = \"{REV}\"");
+        for (body, needle) in [
+            (base.replace(REV, "abc"), "rev"),
+            (base.replace("https://h/x", "relative"), "repo"),
+            (format!("{base}\nplugin = \"bad name\""), "plugin"),
+            (format!("{base}\nreplaces = [\"nomarket\"]"), "replaces"),
+            (format!("{base}\nbogus = 1"), "bogus"),
+        ] {
+            let e = err(&with_source(&body));
+            assert!(e.contains("line") && e.contains(needle), "{body}: {e}");
+        }
+        let dup = format!("{}\n[[source]]\n{base}\n", with_source(&base));
+        assert!(err(&dup).contains("duplicate source"));
+    }
+
+    #[test]
+    fn ac3_02_older_configs_have_no_sources() {
+        assert!(ok(FULL).sources.is_empty());
+        assert!(ok(CYCLE2).sources.is_empty());
+    }
+
+    #[test]
+    fn ac3_03_sources_can_be_excluded_per_harness() {
+        let harness = |kind: &str| {
+            format!(
+                "version = 1\n[[harness]]\nname = \"h\"\nkind = \"{kind}\"\npath = \"/h\"\nexclude = [\"sources/superpowers\"]\n"
+            )
+        };
+        assert!(parse(&harness("claude"), Path::new(HOME)).is_ok());
+        assert!(parse(&harness("codex"), Path::new(HOME)).is_ok());
+        assert!(err(&harness("agents")).contains("exclude entry"));
+    }
+
+    #[test]
+    fn ec3_09_reserved_and_invalid_source_names() {
+        for name in [".manifests", "bad name", ""] {
+            let e = err(&with_source(&format!(
+                "name = \"{name}\"\nrepo = \"https://h/x\"\nrev = \"{REV}\""
+            )));
+            assert!(e.contains("source name"), "{name}: {e}");
+        }
+    }
+
+    #[test]
+    fn source_edits_keep_comments() {
+        let original = "# keep\nversion = 1 # trailing\n";
+        let source = Source {
+            name: "superpowers".into(),
+            repo: "https://github.com/obra/superpowers".into(),
+            rev: REV.into(),
+            plugin: "superpowers".into(),
+            replaces: vec!["superpowers@anthropic-plugin-directory".into()],
+        };
+        let added = add_source(original, &source).unwrap();
+        assert!(added.starts_with(original), "{added}");
+        assert_eq!(ok(&added).sources, vec![source.clone()]);
+
+        let new_rev = "0123456789abcdef0123456789abcdef01234567";
+        let moved = set_source_rev(&added, "superpowers", new_rev).unwrap();
+        assert_eq!(ok(&moved).sources[0].rev, new_rev);
+        assert!(moved.contains("# keep"));
+
+        let more = add_replaces(&moved, "superpowers", "superpowers@other").unwrap();
+        assert_eq!(ok(&more).sources[0].replaces.len(), 2);
+        assert_eq!(
+            add_replaces(&more, "superpowers", "superpowers@other").unwrap(),
+            more,
+            "no duplicates"
+        );
+
+        let removed = remove_source(&more, "superpowers").unwrap();
+        assert!(ok(&removed).sources.is_empty());
+        assert!(removed.contains("# keep"));
+        assert!(set_source_rev(&removed, "nope", new_rev).is_err());
+        assert!(add_replaces(&removed, "nope", "a@b").is_err());
+        assert!(remove_source(&removed, "nope").is_err());
     }
 }
