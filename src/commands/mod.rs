@@ -17,7 +17,7 @@ use crate::vault::{self, CloneState, Vault};
 use std::collections::BTreeMap;
 
 mod quarantine;
-pub use quarantine::{refresh, review, update};
+pub use quarantine::{approve, refresh, review, update};
 
 /// Where source plugin clones live, and colctl-written manifests inside it.
 pub const PLUGINS: &str = "plugins";
@@ -308,7 +308,13 @@ fn origin_changes(ctx: &Ctx, state: &State) -> Vec<(String, PathBuf)> {
             let is_dir = key.starts_with("skills/");
             let now = hash_item(&origin.path, is_dir).ok();
             let ours = hash_item(&ctx.source.join(key.as_str()), is_dir).ok();
-            now.is_some_and(|h| h != origin.hash) && ours.as_ref() == Some(&origin.hash)
+            // Content that's held or was rejected is already decided (AC4-31).
+            let decided = |h: &String| {
+                state.is_rejected(key, h)
+                    || state.quarantine.get(key.as_str()).map(|c| c.version()) == Some(h.as_str())
+            };
+            now.is_some_and(|h| h != origin.hash && !decided(&h))
+                && ours.as_ref() == Some(&origin.hash)
         })
         .map(|(key, origin)| (key.clone(), origin.path.clone()))
         .collect()

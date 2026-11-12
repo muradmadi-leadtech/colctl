@@ -790,3 +790,273 @@ fn ec4_22_review_escapes_control_characters() {
         "subject \u{1b}]0;pwned\u{07}"
     );
 }
+
+// ---------------------------------------------------------------- approve (T6)
+
+fn installed_rev(env: &Env, harness: &str) -> Value {
+    state(env)["harnesses"][harness]["sources"]["superpowers"]["rev"].clone()
+}
+
+#[test]
+fn ac4_23_approving_a_source_plugin() {
+    let (env, _, _, v2) = risky_candidate();
+    let out = env.ok(&["approve", "superpowers"]);
+    assert!(out.contains("approved superpowers:"), "{out}");
+    assert_eq!(pin(&env), v2);
+    assert!(env.commits().contains(&format!(
+        "colctl: approve source superpowers at {}",
+        &v2[..7]
+    )));
+    assert_eq!(held_ref(&env), "");
+    assert_eq!(state(&env)["quarantine"], Value::Null);
+    assert_eq!(head_of(&clone(&env)), v2);
+    for h in ["claude", "kilo-claude", "codex"] {
+        assert_eq!(installed_rev(&env, h), v2.as_str(), "{h}");
+    }
+    assert!(
+        env.log_args()
+            .contains(&"plugin update superpowers@superpowers-dev".to_string())
+    );
+    env.ok(&["status"]);
+}
+
+#[test]
+fn ac4_24_approving_a_skill_and_an_agent() {
+    let env = machine();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    let agent = adopted_agent(&env, "rev", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    fs::write(&agent, "---\nname: rev\ndescription: d\n---\nv2\n").unwrap();
+    env.ok(&["refresh"]);
+    let out = env.ok(&["approve", "skills/twg-jira", "agents/rev.md"]);
+    assert!(
+        out.contains("approved skills/twg-jira from ~/.config/twg/skills/twg-jira"),
+        "{out}"
+    );
+    assert_eq!(source_text(&env, "skills/twg-jira/SKILL.md"), "v2");
+    assert!(source_text(&env, "agents/rev.md").contains("v2"));
+    let st = state(&env);
+    assert_eq!(st["origins"]["skills/twg-jira"]["hash"], hash(&origin));
+    assert_eq!(st["origins"]["agents/rev.md"]["hash"], hash(&agent));
+    assert_eq!(st["quarantine"], Value::Null);
+    let commits = env.commits();
+    assert!(
+        commits.contains(&"colctl: approve skill twg-jira".to_string()),
+        "{commits:?}"
+    );
+    assert!(
+        commits.contains(&"colctl: approve agent rev".to_string()),
+        "{commits:?}"
+    );
+    assert!(
+        !env.source
+            .join(".state/quarantine/skills/twg-jira")
+            .exists()
+    );
+    assert!(!env.source.join(".state/quarantine/agents/rev.md").exists());
+    assert_eq!(env.git(&["status", "--porcelain"]), "");
+    // Codex agent TOML follows the approved content (sync ran).
+    let toml = fs::read_to_string(env.home.join(".codex/agents/rev.toml")).unwrap();
+    assert!(toml.contains("v2"), "{toml}");
+    env.ok(&["status"]);
+}
+
+#[test]
+fn ac4_25_what_is_approved_is_what_was_reviewed() {
+    let (env, repo, _, v2) = risky_candidate();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "reviewed").unwrap();
+    env.ok(&["refresh"]);
+    env.upstream_commit(&repo, "v3");
+    fs::write(origin.join("SKILL.md"), "newer, unreviewed").unwrap();
+    // The origin moved on after review, so sync reports it as origin-changed (exit 1).
+    let out = env.expect(1, &["approve", "--all"]);
+    assert!(out.contains("origin-changed skills/twg-jira"), "{out}");
+    assert_eq!(pin(&env), v2);
+    assert_eq!(source_text(&env, "skills/twg-jira/SKILL.md"), "reviewed");
+}
+
+#[test]
+fn ac4_26_several_at_once_all_and_dry_run() {
+    let (env, _, v1, v2) = risky_candidate();
+    let one = adopted_skill(&env, "one", "v1");
+    let two = adopted_skill(&env, "two", "v1");
+    fs::write(one.join("SKILL.md"), "v2").unwrap();
+    fs::write(two.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh"]);
+    let before = env.snapshot();
+    let out = env.ok(&["approve", "--all", "--dry-run"]);
+    assert!(
+        out.contains(&format!(
+            "would approve sources/superpowers: {} → {}",
+            &v1[..7],
+            &v2[..7]
+        )),
+        "{out}"
+    );
+    assert!(
+        out.contains("would approve skills/one: ~/.config/twg/skills/one"),
+        "{out}"
+    );
+    assert_eq!(env.snapshot(), before);
+    let syncs_before = env.log().len();
+    env.ok(&["approve", "superpowers", "skills/one"]);
+    let commits = env.commits();
+    assert!(commits.contains(&"colctl: approve skill one".to_string()));
+    assert!(
+        commits
+            .iter()
+            .any(|c| c.starts_with("colctl: approve source superpowers"))
+    );
+    assert!(env.log().len() > syncs_before);
+    // EC4-11: the other stays held.
+    assert_eq!(state(&env)["quarantine"]["skills/two"]["kind"], "skill");
+    env.ok(&["approve", "--all"]);
+    assert_eq!(state(&env)["quarantine"], Value::Null);
+    let out = env.ok(&["approve", "--all"]);
+    assert!(out.contains("nothing held"), "{out}");
+}
+
+#[test]
+fn ec4_01_ec4_02_ec4_03_approve_arguments() {
+    let (env, _, _) = with_source();
+    let out = env.ok(&["approve", "--all"]);
+    assert!(out.contains("nothing held"), "{out}");
+    for (args, needle) in [
+        (&["approve"][..], "or use --all"),
+        (&["approve", "superpowers", "--all"], "not both"),
+        (&["approve", "superpowers"], "nothing held for superpowers"),
+        (&["approve", "nope"], "no source named"),
+        (&["approve", "skills/nope"], "no taken-over item"),
+    ] {
+        let (code, _, err) = env.code(args);
+        assert_eq!(code, 2, "{args:?}");
+        assert!(err.contains(needle), "{args:?}: {err}");
+    }
+}
+
+#[test]
+fn ec4_11_approving_one_leaves_the_others() {
+    let (env, _, _, _) = risky_candidate();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh"]);
+    env.ok(&["approve", "skills/twg-jira"]);
+    assert_eq!(
+        state(&env)["quarantine"]["sources/superpowers"]["kind"],
+        "source"
+    );
+    assert_ne!(held_ref(&env), "");
+}
+
+#[test]
+fn ec4_12_approve_refuses_a_tampered_snapshot() {
+    let env = machine();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh"]);
+    fs::write(
+        env.source
+            .join(".state/quarantine/skills/twg-jira/SKILL.md"),
+        "evil",
+    )
+    .unwrap();
+    let commits = env.commits();
+    let out = env.expect(1, &["approve", "skills/twg-jira"]);
+    assert!(
+        out.contains("refused skills/twg-jira: the held copy"),
+        "{out}"
+    );
+    assert!(source_text(&env, "skills/twg-jira/SKILL.md").ends_with("v1"));
+    assert_eq!(env.commits(), commits);
+}
+
+#[test]
+fn ec4_13_approve_refuses_a_missing_commit() {
+    let (env, repo, v1) = with_source();
+    env.upstream_commit(&repo, "v2");
+    env.ok(&["update"]);
+    git_in(&clone(&env), &["update-ref", "-d", "refs/colctl/candidate"]);
+    let out = env.expect(1, &["approve", "superpowers"]);
+    assert!(
+        out.contains("the held commit for superpowers is missing"),
+        "{out}"
+    );
+    assert_eq!(pin(&env), v1);
+}
+
+#[test]
+fn ec4_14_approve_refuses_when_the_pin_changed_by_hand() {
+    let (env, repo, v1) = with_source();
+    let v2 = env.upstream_commit(&repo, "v2");
+    let v3 = env.upstream_commit(&repo, "v3");
+    env.ok(&["update", "superpowers", "--rev", &v2]);
+    env.write_config(&env.config().replace(&v1, &v3));
+    let out = env.expect(1, &["approve", "superpowers"]);
+    assert!(
+        out.contains(
+            "superpowers's pin changed since it was held; run colctl update superpowers again"
+        ),
+        "{out}"
+    );
+    assert_eq!(pin(&env), v3);
+}
+
+#[test]
+fn ec4_15_approve_refuses_a_source_copy_edited_since_it_was_held() {
+    let env = machine();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh"]);
+    fs::write(env.source.join("skills/twg-jira/SKILL.md"), "my edit").unwrap();
+    let out = env.expect(1, &["approve", "skills/twg-jira"]);
+    assert!(out.contains("changed in both places"), "{out}");
+    assert_eq!(source_text(&env, "skills/twg-jira/SKILL.md"), "my edit");
+}
+
+#[test]
+fn ec4_16_approve_refuses_a_dirty_clone() {
+    let (env, repo, v1) = with_source();
+    env.upstream_commit(&repo, "v2");
+    env.ok(&["update"]);
+    fs::write(clone(&env).join("local.txt"), "mine").unwrap();
+    let commits = env.commits();
+    let out = env.expect(1, &["approve", "superpowers"]);
+    assert!(out.contains("has local changes"), "{out}");
+    assert_eq!(pin(&env), v1);
+    assert_eq!(env.commits(), commits);
+}
+
+#[test]
+fn ec4_19_a_sync_failure_after_approve_keeps_the_approval() {
+    let (env, repo, _) = with_source();
+    let v2 = env.upstream_commit(&repo, "v2");
+    env.ok(&["update"]);
+    let env = env.var("FAKE_CLAUDE_FAIL", "plugin update");
+    let (code, out, _) = env.code(&["approve", "superpowers"]);
+    assert_eq!(code, 1, "{out}");
+    assert_eq!(pin(&env), v2);
+    assert_eq!(state(&env)["quarantine"], Value::Null);
+    let env = env.var("FAKE_CLAUDE_FAIL", "");
+    env.ok(&["sync"]);
+    assert_eq!(installed_rev(&env, "claude"), v2.as_str());
+}
+
+// ---------------------------------------------------------------- status (T8)
+
+#[test]
+fn ac4_31_origin_changed_leaves_out_what_is_held_or_rejected() {
+    let env = machine();
+    let held = adopted_skill(&env, "held", "v1");
+    let rejected = adopted_skill(&env, "rejected", "v1");
+    fs::write(held.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh", "skills/held"]);
+    fs::write(rejected.join("SKILL.md"), "no").unwrap();
+    reject_by_hand(&env, "skills/rejected", &hash(&rejected));
+    let v = env.status_json();
+    assert_eq!(v["source"]["origin_changed"], serde_json::json!([]), "{v}");
+    // Changing again makes it origin-changed once more.
+    fs::write(held.join("SKILL.md"), "v3").unwrap();
+    let v = env.status_json();
+    assert_eq!(v["source"]["origin_changed"][0]["item"], "skills/held");
+}

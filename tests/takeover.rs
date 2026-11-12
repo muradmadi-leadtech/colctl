@@ -303,6 +303,16 @@ fn ac2_26_origin_changes_and_refresh() {
         state(&env)["quarantine"]["skills/twg-jira"]["hash"],
         hash(&origin)
     );
+    env.ok(&["approve", "skills/twg-jira"]);
+    assert_eq!(
+        fs::read_to_string(env.source.join("skills/twg-jira/SKILL.md")).unwrap(),
+        "v2"
+    );
+    assert_eq!(
+        state(&env)["origins"]["skills/twg-jira"]["hash"],
+        hash(&origin)
+    );
+    env.ok(&["status"]);
 
     // Changed in both places: refused.
     fs::write(origin.join("SKILL.md"), "v3").unwrap();
