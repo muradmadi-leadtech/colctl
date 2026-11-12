@@ -35,12 +35,23 @@ impl HarnessState {
     }
 }
 
+/// Where an adopted skill or agent came from, and the hash adopted or last refreshed (AC2-25).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Origin {
+    pub path: PathBuf,
+    pub hash: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct State {
     pub version: u32,
     #[serde(default)]
     pub harnesses: BTreeMap<String, HarnessState>,
+    /// Source item (`skills/<name>`, `agents/<name>.md`) → where it was taken over from.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub origins: BTreeMap<String, Origin>,
 }
 
 impl Default for State {
@@ -48,6 +59,7 @@ impl Default for State {
         Self {
             version: 1,
             harnesses: BTreeMap::new(),
+            origins: BTreeMap::new(),
         }
     }
 }

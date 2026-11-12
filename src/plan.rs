@@ -55,7 +55,8 @@ impl ItemState {
             ItemState::Missing => "missing",
             ItemState::Broken => "broken",
             ItemState::Orphaned => "orphaned",
-            ItemState::Foreign | ItemState::ForeignLink => "foreign",
+            ItemState::Foreign => "foreign",
+            ItemState::ForeignLink => "linked-elsewhere",
             ItemState::Edited => "edited",
             ItemState::Invalid => "invalid",
             ItemState::PluginMissing => "plugin-missing",
@@ -75,6 +76,16 @@ pub struct Item {
     /// How `adopt` and hints refer to it in its harness: `skills/foo`, `agents/foo.md` (Claude)
     /// or `agents/foo.toml` (Codex), `CLAUDE.md` / `AGENTS.md`, `plugin p@m`.
     pub address: String,
+    /// For a `linked-elsewhere` item, where its link points.
+    pub target: Option<PathBuf>,
+}
+
+impl Item {
+    /// True for a link adopt can take over: a skill, or a Claude agent (AC2-25).
+    pub fn can_take_over(&self) -> bool {
+        self.kind == ItemKind::Skill
+            || (self.kind == ItemKind::Agent && self.address.ends_with(".md"))
+    }
 }
 
 impl Item {
@@ -225,7 +236,13 @@ fn hint(item: &Item, harness: &str, source_display: &str) -> Option<String> {
         | ItemState::PluginMissing
         | ItemState::MarketplaceMissing => "colctl sync".to_string(),
         ItemState::Foreign => format!("colctl adopt {harness} {address}"),
-        ItemState::ForeignLink => "remove or replace this link yourself".to_string(),
+        ItemState::ForeignLink => match &item.target {
+            Some(target) if item.can_take_over() => format!(
+                "links to {}; colctl adopt {harness} {address}",
+                target.display()
+            ),
+            _ => "remove or replace this link yourself".to_string(),
+        },
         ItemState::Edited if item.kind == ItemKind::Agent => format!(
             "move your changes into {source_display}/agents/{}.md, delete {address}, run colctl sync",
             item.name
@@ -252,6 +269,20 @@ impl Builder<'_> {
             state,
             hint: None,
             address: Item::address_for(kind, self.harness.kind, name),
+            target: None,
+        };
+        item.hint = hint(&item, &self.harness.name, self.inputs.source_display);
+        self.items.push(item);
+    }
+
+    fn linked_elsewhere(&mut self, kind: ItemKind, name: &str, target: &std::path::Path) {
+        let mut item = Item {
+            kind,
+            name: name.to_string(),
+            state: ItemState::ForeignLink,
+            hint: None,
+            address: Item::address_for(kind, self.harness.kind, name),
+            target: Some(target.to_path_buf()),
         };
         item.hint = hint(&item, &self.harness.name, self.inputs.source_display);
         self.items.push(item);
@@ -264,6 +295,7 @@ impl Builder<'_> {
             state: ItemState::Invalid,
             hint: Some(reason.to_string()),
             address: Item::address_for(kind, self.harness.kind, name),
+            target: None,
         });
     }
 
@@ -411,7 +443,7 @@ impl Builder<'_> {
                     self.item(kind, name, ItemState::Orphaned);
                     self.actions.push(Action::Unlink(link));
                 }
-                (Some(Entry::ForeignLink(_)), _) => self.item(kind, name, ItemState::ForeignLink),
+                (Some(Entry::ForeignLink(target)), _) => self.linked_elsewhere(kind, name, target),
                 (Some(Entry::Real), _) => self.item(kind, name, ItemState::Foreign),
             }
         }
@@ -897,7 +929,15 @@ mod tests {
             &Config::default(),
             &source(&["foo", "mine"], &[], false),
         );
-        assert_eq!(states(&p), vec!["skill foo foreign", "skill mine foreign"]);
+        // AC2-24: a link into another folder is "linked-elsewhere" (cycle 1 called it foreign).
+        assert_eq!(
+            states(&p),
+            vec!["skill foo foreign", "skill mine linked-elsewhere"]
+        );
+        assert_eq!(
+            p.items[1].hint.as_deref(),
+            Some("links to /x; colctl adopt h skills/mine")
+        );
         assert!(p.actions.is_empty());
         assert_eq!(
             p.items[0].hint.as_deref(),
@@ -1180,6 +1220,7 @@ mod tests {
             state: ItemState::Ok,
             hint: None,
             address: Item::address_for(ItemKind::Marketplace, Kind::Claude, "m"),
+            target: None,
         };
         assert_eq!(item.address(), "marketplace m");
         assert_eq!(

@@ -3,26 +3,34 @@
 
 use crate::adapter::{self, CLAUDE_MD, Root};
 use crate::apply::{self, Outcome};
-use crate::config::{self, CONFIG_FILE, Config, Harness, PLUGIN_DIRECTORY};
+use crate::config::{self, CONFIG_FILE, Config, Harness, Kind, PluginList};
 use crate::ctx::Ctx;
 use crate::error::{CliError, EXIT_DRIFT};
 use crate::fsx;
 use crate::git::Git;
 use crate::plan::{self, HarnessPlan, Inputs, Item, ItemKind, ItemState};
 use crate::source::{self, AGENTS, AGENTS_MD, SKILLS, Source};
-use crate::state::{self, Lock, STATE_DIR, State};
+use crate::state::{self, Lock, Origin, STATE_DIR, State};
 use crate::tool::Tool;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Harnesses `init` looks for: (name, path relative to home).
-pub const KNOWN_HARNESSES: &[(&str, &str)] = &[
-    ("claude", ".claude"),
+/// Harnesses `init` looks for: (name, path relative to home, kind).
+pub const KNOWN_HARNESSES: &[(&str, &str, Kind)] = &[
+    ("claude", ".claude", Kind::Claude),
     (
         "kilo-claude",
         "Library/Application Support/kilo-proxy-headless/profiles/claude",
+        Kind::Claude,
     ),
+    ("codex", ".codex", Kind::Codex),
+    (
+        "kilo-codex",
+        "Library/Application Support/kilo-proxy-headless/profiles/codex",
+        Kind::Codex,
+    ),
+    ("agents", ".agents", Kind::Agents),
 ];
 
 /// Everything read from the source at one moment.
@@ -31,15 +39,19 @@ struct Workspace {
     config_text: String,
     state: State,
     source: Source,
+    origin_changed: Vec<(String, PathBuf)>,
 }
 
 fn load(ctx: &Ctx) -> Result<Workspace, CliError> {
     let (config, config_text) = config::load(&ctx.source, &ctx.home)?;
+    let state = state::load(&ctx.source)?;
+    let origin_changed = origin_changes(ctx, &state);
     Ok(Workspace {
         config,
         config_text,
-        state: state::load(&ctx.source)?,
+        state,
         source: source::scan(&ctx.source),
+        origin_changed,
     })
 }
 
@@ -157,7 +169,23 @@ fn harness_heading(ctx: &Ctx, p: &Planned) -> String {
 fn in_sync(ws: &Workspace, planned: &[Planned], uncommitted: &[String]) -> bool {
     uncommitted.is_empty()
         && ws.source.invalid.is_empty()
+        && ws.origin_changed.is_empty()
         && planned.iter().all(|p| p.plan.in_sync())
+}
+
+/// Adopted items whose origin moved on while the source copy stayed as adopted (AC2-26).
+fn origin_changes(ctx: &Ctx, state: &State) -> Vec<(String, PathBuf)> {
+    state
+        .origins
+        .iter()
+        .filter(|(key, origin)| {
+            let is_dir = key.starts_with("skills/");
+            let now = hash_item(&origin.path, is_dir).ok();
+            let ours = hash_item(&ctx.source.join(key.as_str()), is_dir).ok();
+            now.is_some_and(|h| h != origin.hash) && ours.as_ref() == Some(&origin.hash)
+        })
+        .map(|(key, origin)| (key.clone(), origin.path.clone()))
+        .collect()
 }
 
 fn uncommitted(ctx: &Ctx, git: Option<&Git>) -> Vec<String> {
@@ -176,6 +204,9 @@ fn status_json(ctx: &Ctx, ws: &Workspace, planned: &[Planned], uncommitted: &[St
             "invalid": ws.source.invalid.iter().map(|i| json!({
                 "kind": i.kind, "name": i.name, "reason": i.reason,
             })).collect::<Vec<_>>(),
+            "origin_changed": ws.origin_changed.iter().map(|(item, origin)| json!({
+                "item": item, "origin": origin,
+            })).collect::<Vec<_>>(),
         },
         "harnesses": planned.iter().map(|p| json!({
             "name": p.harness.name,
@@ -187,6 +218,7 @@ fn status_json(ctx: &Ctx, ws: &Workspace, planned: &[Planned], uncommitted: &[St
                 "name": i.name,
                 "state": i.state.as_str(),
                 "hint": i.hint,
+                "target": i.target,
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
         "in_sync": in_sync(ws, planned, uncommitted),
@@ -202,6 +234,13 @@ fn print_status(ctx: &Ctx, ws: &Workspace, planned: &[Planned], uncommitted: &[S
         println!(
             "  {:<20} {:<13} {}  → {}",
             "invalid", i.kind, i.name, i.reason
+        );
+    }
+    for (item, origin) in &ws.origin_changed {
+        println!(
+            "  {:<20} {item}  → {} changed; colctl refresh {item}",
+            "origin-changed",
+            origin.display()
         );
     }
     if planned.is_empty() {
@@ -343,6 +382,11 @@ fn run_sync(ctx: &Ctx, git: &Git, filter: Option<&str>) -> Result<i32, CliError>
             i.kind, i.name, i.reason
         ));
     }
+    for (item, _) in &after.origin_changed {
+        remaining.push(format!(
+            "source: origin-changed {item}  → colctl refresh {item}"
+        ));
+    }
     if !remaining.is_empty() {
         println!("needs attention:");
         for line in &remaining {
@@ -367,11 +411,18 @@ pub fn sync(ctx: &Ctx, filter: Option<&str>, dry_run: bool) -> Result<i32, CliEr
     run_sync(ctx, &git, filter)
 }
 
-fn detect(ctx: &Ctx) -> Vec<(String, String, PathBuf)> {
+fn detect(ctx: &Ctx) -> Vec<(String, String, PathBuf, Kind)> {
     KNOWN_HARNESSES
         .iter()
-        .map(|(name, rel)| (name.to_string(), format!("~/{rel}"), ctx.home.join(rel)))
-        .filter(|(_, _, path)| fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()))
+        .map(|(name, rel, kind)| {
+            (
+                name.to_string(),
+                format!("~/{rel}"),
+                ctx.home.join(rel),
+                *kind,
+            )
+        })
+        .filter(|(_, _, path, _)| fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()))
         .collect()
 }
 
@@ -408,7 +459,7 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
                 "would create {} with {CONFIG_FILE}, skills/, agents/, .state/, .gitignore and a git repo",
                 ctx.tilde(&ctx.source)
             );
-            for (name, written, _) in &found {
+            for (name, written, _, _) in &found {
                 println!("would register harness {name} ({written})");
             }
             if found.is_empty() {
@@ -420,12 +471,15 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
             .map_err(|e| CliError::usage(format!("creating {}: {e}", ctx.source.display())))?;
         let _lock = Lock::acquire(&ctx.source)?;
         ensure_layout(ctx)?;
-        let pairs: Vec<(String, String)> = found
+        let harnesses: Vec<(String, String, Kind)> = found
             .iter()
-            .map(|(n, w, _)| (n.clone(), w.clone()))
+            .map(|(n, w, _, k)| (n.clone(), w.clone(), *k))
             .collect();
-        fsx::atomic_write(&config_path, config::initial_text(&pairs).as_bytes())
-            .map_err(|e| CliError::usage(format!("{e:#}")))?;
+        fsx::atomic_write(
+            &config_path,
+            config::initial_text_with(&harnesses).as_bytes(),
+        )
+        .map_err(|e| CliError::usage(format!("{e:#}")))?;
         if !Git::is_repo(&ctx.source) {
             git.init(&ctx.source)
                 .map_err(|e| CliError::usage(format!("{e:#}")))?;
@@ -441,7 +495,7 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
             .collect();
         let mut taken: Vec<String> = config.harnesses.iter().map(|h| h.name.clone()).collect();
         let mut additions = Vec::new();
-        for (name, written, path) in &found {
+        for (name, written, path, kind) in &found {
             if registered.contains(&fsx::canonical_or_normal(path)) {
                 continue;
             }
@@ -452,10 +506,10 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
                 n += 1;
             }
             taken.push(unique.clone());
-            additions.push((unique, written.clone()));
+            additions.push((unique, written.clone(), *kind));
         }
         if dry_run {
-            for (name, written) in &additions {
+            for (name, written, _) in &additions {
                 println!("would register harness {name} ({written})");
             }
             if additions.is_empty() {
@@ -470,8 +524,8 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
         ensure_layout(ctx)?;
         if !additions.is_empty() {
             let mut updated = text.clone();
-            for (name, written) in &additions {
-                updated = config::append_harness(&updated, name, written);
+            for (name, written, kind) in &additions {
+                updated = config::append_harness_kind(&updated, name, written, *kind);
                 println!("registered harness {name} ({written})");
             }
             fsx::atomic_write(&config_path, updated.as_bytes())
@@ -606,25 +660,26 @@ fn write_config(ctx: &Ctx, text: &str) -> Result<(), CliError> {
         .map_err(|e| CliError::usage(format!("{e:#}")))
 }
 
-/// `colctl add plugin` (AC-22).
+/// `colctl add plugin` (AC-22), and with `--codex` for the Codex list (AC2-17).
 pub fn add_plugin(
     ctx: &Ctx,
     id: &str,
     marketplace: Option<&str>,
+    list: PluginList,
     dry_run: bool,
 ) -> Result<i32, CliError> {
     let git = Git::find(&ctx.path_var)?;
     let ws = load(ctx)?;
     let (_, market) = config::split_plugin_id(id)
         .ok_or_else(|| CliError::usage(format!("plugin id \"{id}\" must be name@marketplace")))?;
-    if ws.config.plugins.iter().any(|p| p == id) {
+    let (markets, plugins) = ws.config.plugin_list(list);
+    if plugins.iter().any(|p| p == id) {
         return Err(CliError::usage(format!("plugin {id} is already enabled")));
     }
-    let new_market = match (marketplace, ws.config.marketplaces.get(market)) {
-        (Some(_), _) if market == PLUGIN_DIRECTORY => {
-            return Err(CliError::usage(format!(
-                "{PLUGIN_DIRECTORY} needs no --marketplace"
-            )));
+    let builtin = list.builtin();
+    let new_market = match (marketplace, markets.get(market)) {
+        (Some(_), _) if market == builtin => {
+            return Err(CliError::usage(format!("{builtin} needs no --marketplace")));
         }
         (Some(src), Some(existing)) if src != existing => {
             return Err(CliError::usage(format!(
@@ -639,23 +694,32 @@ pub fn add_plugin(
             }
             Some((market, src))
         }
-        (None, None) if market != PLUGIN_DIRECTORY => {
+        (None, None) if market != builtin => {
             return Err(CliError::usage(format!(
                 "unknown marketplace \"{market}\"; pass --marketplace <github:owner/repo | URL | path>"
             )));
         }
         _ => None,
     };
-    let text = config::add_plugin(&ws.config_text, id, new_market).map_err(CliError::usage)?;
-    if dry_or_write(dry_run, &format!("enable plugin {id} in {CONFIG_FILE}")) {
+    let text =
+        config::add_plugin_to(&ws.config_text, list, id, new_market).map_err(CliError::usage)?;
+    let label = plugin_label(list);
+    if dry_or_write(dry_run, &format!("enable {label} {id} in {CONFIG_FILE}")) {
         return Ok(0);
     }
     let _lock = Lock::acquire(&ctx.source)?;
     commit_pending(&git, ctx)?;
     write_config(ctx, &text)?;
-    commit(&git, ctx, &format!("colctl: add plugin {id}"))?;
-    println!("added plugin {id}");
+    commit(&git, ctx, &format!("colctl: add {label} {id}"))?;
+    println!("added {label} {id}");
     run_sync(ctx, &git, None)
+}
+
+fn plugin_label(list: PluginList) -> &'static str {
+    match list {
+        PluginList::Claude => "plugin",
+        PluginList::Codex => "codex plugin",
+    }
 }
 
 /// What `rm` removes.
@@ -667,20 +731,29 @@ pub enum RmKind {
 }
 
 /// `colctl rm` (AC-23).
-pub fn rm(ctx: &Ctx, kind: RmKind, name: &str, dry_run: bool) -> Result<i32, CliError> {
+pub fn rm(
+    ctx: &Ctx,
+    kind: RmKind,
+    name: &str,
+    list: PluginList,
+    dry_run: bool,
+) -> Result<i32, CliError> {
     let git = Git::find(&ctx.path_var)?;
     let ws = load(ctx)?;
+    if list == PluginList::Codex && kind != RmKind::Plugin {
+        return Err(CliError::usage("--codex only applies to plugins"));
+    }
     let (label, path) = match kind {
         RmKind::Skill => ("skill", Some(ctx.source.join(SKILLS).join(name))),
         RmKind::Agent => (
             "agent",
             Some(ctx.source.join(AGENTS).join(format!("{name}.md"))),
         ),
-        RmKind::Plugin => ("plugin", None),
+        RmKind::Plugin => (plugin_label(list), None),
     };
     let known = match &path {
         Some(p) => config::valid_item_name(name) && fsx::exists_any(p),
-        None => ws.config.plugins.iter().any(|p| p == name),
+        None => ws.config.plugin_list(list).1.iter().any(|p| p == name),
     };
     if !known {
         return Err(CliError::usage(format!(
@@ -695,7 +768,8 @@ pub fn rm(ctx: &Ctx, kind: RmKind, name: &str, dry_run: bool) -> Result<i32, Cli
     match &path {
         Some(p) => fsx::remove_any(p).map_err(|e| CliError::usage(format!("{e:#}")))?,
         None => {
-            let text = config::remove_plugin(&ws.config_text, name).map_err(CliError::usage)?;
+            let text =
+                config::remove_plugin_from(&ws.config_text, list, name).map_err(CliError::usage)?;
             write_config(ctx, &text)?;
         }
     }
@@ -711,10 +785,14 @@ pub enum Adoption {
     Adopted,
     /// Already identical in the source; replaced with a link.
     Linked,
+    /// A tool's link pointed back at the source copy; the note says what's left to do (AC2-27).
+    Relinked(String),
     Refused(String),
 }
 
 type Copier = dyn Fn(&Path, &Path) -> anyhow::Result<()>;
+type ReadPlugins = fn(&Path) -> Result<adapter::Plugins, String>;
+type ToSource = fn(&Value) -> Option<String>;
 
 fn hash_item(path: &Path, is_dir: bool) -> anyhow::Result<String> {
     if is_dir {
@@ -781,7 +859,37 @@ fn real_copy(is_dir: bool) -> impl Fn(&Path, &Path) -> anyhow::Result<()> {
     }
 }
 
+/// A Codex profile's real `AGENTS.md`: its text becomes the source's, and it becomes a link (AC2-06).
+fn adopt_codex_instructions(ctx: &Ctx, harness: &Harness) -> Adoption {
+    let item = harness.path.join(crate::adapter::codex::AGENTS_MD);
+    let agents_md = ctx.source.join(AGENTS_MD);
+    let content = match fs::read(&item) {
+        Ok(c) => c,
+        Err(e) => return Adoption::Refused(format!("reading {}: {e}", item.display())),
+    };
+    let mut result = Adoption::Adopted;
+    if agents_md.exists() {
+        if fs::read(&agents_md).ok().as_deref() != Some(content.as_slice()) {
+            return Adoption::Refused(format!(
+                "{AGENTS_MD} already exists with different text; both kept: {} and {}",
+                item.display(),
+                agents_md.display()
+            ));
+        }
+        result = Adoption::Linked;
+    } else if let Err(e) = fsx::atomic_write(&agents_md, &content) {
+        return Adoption::Refused(format!("{e:#}"));
+    }
+    match fsx::replace_with_link(&item, &agents_md) {
+        Ok(()) => result,
+        Err(e) => Adoption::Refused(format!("{e:#}")),
+    }
+}
+
 fn adopt_instructions(ctx: &Ctx, harness: &Harness) -> Adoption {
+    if harness.kind == Kind::Codex {
+        return adopt_codex_instructions(ctx, harness);
+    }
     let claude_md = harness.path.join(CLAUDE_MD);
     let agents_md = ctx.source.join(AGENTS_MD);
     let content = match fs::read(&claude_md) {
@@ -827,13 +935,24 @@ fn adopt_plugin(ctx: &Ctx, harness: &Harness, id: &str) -> Adoption {
     let Some((_, market)) = config::split_plugin_id(id) else {
         return Adoption::Refused(format!("\"{id}\" isn't a plugin id"));
     };
+    let Some(list) = PluginList::for_kind(harness.kind) else {
+        return Adoption::Refused(format!(
+            "{} harnesses have no plugins",
+            harness.kind.as_str()
+        ));
+    };
     let mut new_market = None;
-    if market != PLUGIN_DIRECTORY && !ws.config.marketplaces.contains_key(market) {
-        let source = adapter::read_plugins(&harness.path).ok().and_then(|p| {
-            p.marketplaces
-                .get(market)
-                .and_then(adapter::marketplace_source)
-        });
+    if market != list.builtin() && !ws.config.plugin_list(list).0.contains_key(market) {
+        let (read, to_source): (ReadPlugins, ToSource) = match list {
+            PluginList::Claude => (adapter::read_plugins, adapter::marketplace_source),
+            PluginList::Codex => (
+                adapter::codex::read_plugins,
+                adapter::codex::marketplace_source,
+            ),
+        };
+        let source = read(&harness.path)
+            .ok()
+            .and_then(|p| p.marketplaces.get(market).and_then(to_source));
         match source {
             Some(src) if config::valid_marketplace_source(&src) => new_market = Some(src),
             _ => {
@@ -843,8 +962,9 @@ fn adopt_plugin(ctx: &Ctx, harness: &Harness, id: &str) -> Adoption {
             }
         }
     }
-    let text = match config::add_plugin(
+    let text = match config::add_plugin_to(
         &ws.config_text,
+        list,
         id,
         new_market.as_deref().map(|s| (market, s)),
     ) {
@@ -857,7 +977,102 @@ fn adopt_plugin(ctx: &Ctx, harness: &Harness, id: &str) -> Adoption {
     }
 }
 
+fn codex_agent_refusal(ctx: &Ctx) -> Adoption {
+    Adoption::Refused(format!(
+        "Codex agents can't be converted back to .md; recreate it in {}/agents",
+        ctx.source_display()
+    ))
+}
+
+/// Takes over a skill or agent that a tool linked in from its own folder (AC2-25…28).
+fn take_over(ctx: &Ctx, item: &Item, link: &Path) -> Adoption {
+    let is_dir = item.kind == ItemKind::Skill;
+    let key = if is_dir {
+        format!("{SKILLS}/{}", item.name)
+    } else {
+        format!("{AGENTS}/{}.md", item.name)
+    };
+    let shown = fsx::link_target(link)
+        .map(|t| t.display().to_string())
+        .unwrap_or_default();
+    let Ok(target) = fs::canonicalize(link) else {
+        return Adoption::Refused(format!("it links to {shown}, which doesn't exist"));
+    };
+    if target.is_dir() != is_dir {
+        return Adoption::Refused(if is_dir {
+            "it links to a file, not a skill folder".into()
+        } else {
+            "it links to a folder, not an agent file".into()
+        });
+    }
+    let refuse = |e: anyhow::Error| Adoption::Refused(format!("{e:#}"));
+    let theirs = match hash_item(&target, is_dir) {
+        Ok(h) => h,
+        Err(e) => return refuse(e),
+    };
+    let mut st = match state::load(&ctx.source) {
+        Ok(s) => s,
+        Err(e) => return Adoption::Refused(e.message),
+    };
+    let source_item = ctx.source.join(&key);
+    let outcome = if fsx::exists_any(&source_item) {
+        let ours = hash_item(&source_item, is_dir).ok();
+        if ours.as_ref() == Some(&theirs) {
+            Adoption::Linked
+        } else if st.origins.get(&key).is_some_and(|o| o.path == target) {
+            Adoption::Relinked(format!("origin has changes; run colctl refresh {key}"))
+        } else {
+            return Adoption::Refused(format!(
+                "differs from the source copy; both kept: {} and {}",
+                target.display(),
+                source_item.display()
+            ));
+        }
+    } else {
+        let staging = source_item.with_file_name(format!("{}adopt-{}", fsx::TMP_PREFIX, item.name));
+        let _ = fsx::remove_any(&staging);
+        if let Err(e) = real_copy(is_dir)(&target, &staging) {
+            let _ = fsx::remove_any(&staging);
+            return refuse(e);
+        }
+        if hash_item(&staging, is_dir).ok().as_ref() != Some(&theirs) {
+            let _ = fsx::remove_any(&staging);
+            return Adoption::Refused("the copy didn't match the original; nothing changed".into());
+        }
+        if let Err(e) = fs::rename(&staging, &source_item) {
+            let _ = fsx::remove_any(&staging);
+            return Adoption::Refused(format!("moving the copy into place: {e}"));
+        }
+        Adoption::Adopted
+    };
+    if let Err(e) = fsx::atomic_symlink(&source_item, link) {
+        return refuse(e);
+    }
+    st.origins.entry(key).or_insert(Origin {
+        path: target,
+        hash: theirs,
+    });
+    match state::save(&ctx.source, &st) {
+        Ok(()) => outcome,
+        Err(e) => refuse(e),
+    }
+}
+
+fn adopt_link(ctx: &Ctx, harness: &Harness, item: &Item) -> Adoption {
+    if item.kind == ItemKind::Agent && harness.kind == Kind::Codex {
+        return codex_agent_refusal(ctx);
+    }
+    if !item.can_take_over() {
+        return Adoption::Refused("remove or replace this link yourself".into());
+    }
+    let link = harness.path.join(&item.address);
+    take_over(ctx, item, &link)
+}
+
 fn adopt_item(ctx: &Ctx, harness: &Harness, item: &Item) -> Adoption {
+    if item.kind == ItemKind::Agent && harness.kind == Kind::Codex {
+        return codex_agent_refusal(ctx);
+    }
     match item.kind {
         ItemKind::Skill => adopt_entry(
             &harness.path.join(SKILLS).join(&item.name),
@@ -882,12 +1097,17 @@ fn adopt_item(ctx: &Ctx, harness: &Harness, item: &Item) -> Adoption {
 fn parse_item(words: &[String]) -> Result<Option<String>, CliError> {
     match words {
         [] => Ok(None),
-        [one] if one == CLAUDE_MD || one.starts_with("skills/") || one.starts_with("agents/") => {
+        [one]
+            if one == CLAUDE_MD
+                || one == AGENTS_MD
+                || one.starts_with("skills/")
+                || one.starts_with("agents/") =>
+        {
             Ok(Some(one.clone()))
         }
         [kind, id] if kind == "plugin" => Ok(Some(format!("plugin {id}"))),
         _ => Err(CliError::usage(format!(
-            "unknown item \"{}\"; use skills/<name>, agents/<name>.md, CLAUDE.md or plugin <id>",
+            "unknown item \"{}\"; use skills/<name>, agents/<name>.md|.toml, CLAUDE.md, AGENTS.md or plugin <id>",
             words.join(" ")
         ))),
     }
@@ -912,13 +1132,22 @@ pub fn adopt(
     let matches = |i: &Item| wanted.as_ref().is_none_or(|w| *w == i.address());
     if dry_run {
         for p in plan_all(ctx, &ws, harness)? {
-            for i in p
-                .plan
-                .items
-                .iter()
-                .filter(|i| i.state == ItemState::Foreign && matches(i))
-            {
-                println!("would adopt {} from {}", i.address(), p.harness.name);
+            for i in p.plan.items.iter().filter(|i| matches(i)) {
+                match i.state {
+                    ItemState::Foreign => {
+                        println!("would adopt {} from {}", i.address(), p.harness.name)
+                    }
+                    ItemState::ForeignLink if i.can_take_over() => println!(
+                        "would take over {} in {} from {}",
+                        i.address(),
+                        p.harness.name,
+                        i.target
+                            .as_ref()
+                            .map(|t| t.display().to_string())
+                            .unwrap_or_default()
+                    ),
+                    _ => {}
+                }
             }
         }
         println!("then sync");
@@ -943,29 +1172,39 @@ pub fn adopt(
             seen = true;
             let outcome = match i.state {
                 ItemState::Foreign => adopt_item(ctx, &p.harness, i),
-                ItemState::ForeignLink => {
-                    Adoption::Refused("remove or replace this link yourself".into())
-                }
+                ItemState::ForeignLink => adopt_link(ctx, &p.harness, i),
                 other if wanted.is_some() => {
                     Adoption::Refused(format!("not a foreign item (state: {})", other.as_str()))
                 }
                 _ => continue,
             };
             match outcome {
-                Adoption::Adopted | Adoption::Linked => {
-                    let kind = i.kind.as_str();
+                Adoption::Adopted | Adoption::Linked | Adoption::Relinked(_) => {
+                    let kind = match (i.kind, p.harness.kind) {
+                        (ItemKind::Plugin, Kind::Codex) => "codex plugin",
+                        (k, _) => k.as_str(),
+                    };
                     let label = if i.kind == ItemKind::Instructions {
                         p.harness.name.as_str()
                     } else {
                         i.name.as_str()
                     };
                     commit(&git, ctx, &format!("colctl: adopt {kind} {label}"))?;
-                    let verb = if outcome == Adoption::Adopted {
-                        "adopted"
-                    } else {
-                        "linked (already identical)"
-                    };
-                    println!("{verb} {} from {}", i.address(), p.harness.name);
+                    match &outcome {
+                        Adoption::Adopted => {
+                            println!("adopted {} from {}", i.address(), p.harness.name)
+                        }
+                        Adoption::Relinked(note) => println!(
+                            "relinked {} in {} to the source copy; {note}",
+                            i.address(),
+                            p.harness.name
+                        ),
+                        _ => println!(
+                            "linked (already identical) {} from {}",
+                            i.address(),
+                            p.harness.name
+                        ),
+                    }
                 }
                 Adoption::Refused(reason) => {
                     refused += 1;
@@ -977,6 +1216,99 @@ pub fn adopt(
     if let (Some(w), false) = (&wanted, seen) {
         refused += 1;
         println!("refused {w}: not found in {}", harness.unwrap_or_default());
+    }
+    let code = run_sync(ctx, &git, None)?;
+    Ok(if refused > 0 { EXIT_DRIFT } else { code })
+}
+
+/// `colctl refresh` (AC2-26): pulls adopted items' origins into the source.
+pub fn refresh(ctx: &Ctx, items: &[String], dry_run: bool) -> Result<i32, CliError> {
+    let git = Git::find(&ctx.path_var)?;
+    let ws = load(ctx)?;
+    let keys: Vec<String> = if items.is_empty() {
+        ws.state.origins.keys().cloned().collect()
+    } else {
+        items.to_vec()
+    };
+    for key in &keys {
+        if !ws.state.origins.contains_key(key) {
+            return Err(CliError::usage(format!("{key} has no recorded origin")));
+        }
+    }
+    if keys.is_empty() {
+        println!("nothing to refresh: no adopted item has a recorded origin");
+    }
+    if dry_run {
+        for (key, origin) in ws.origin_changed.iter().filter(|(k, _)| keys.contains(k)) {
+            println!("would refresh {key} from {}", origin.display());
+        }
+        return Ok(0);
+    }
+    let _lock = Lock::acquire(&ctx.source)?;
+    commit_pending(&git, ctx)?;
+    let mut refused = 0;
+    for key in &keys {
+        let mut st = state::load(&ctx.source)?;
+        let Some(origin) = st.origins.get(key).cloned() else {
+            continue;
+        };
+        let is_dir = key.starts_with("skills/");
+        let source_item = ctx.source.join(key);
+        let mut refuse = |why: String| {
+            refused += 1;
+            println!("refused {key}: {why}");
+        };
+        if !fsx::exists_any(&origin.path) {
+            refuse(format!("origin is gone ({})", origin.path.display()));
+            continue;
+        }
+        let (Ok(theirs), Ok(ours)) = (
+            hash_item(&origin.path, is_dir),
+            hash_item(&source_item, is_dir),
+        ) else {
+            refuse("couldn't read the origin or the source copy".into());
+            continue;
+        };
+        if theirs == origin.hash {
+            println!("{key} is up to date with {}", origin.path.display());
+            continue;
+        }
+        if ours != origin.hash {
+            refuse(format!(
+                "changed in both places; compare {} and {}, keep one, then adopt again",
+                origin.path.display(),
+                source_item.display()
+            ));
+            continue;
+        }
+        let name = source_item
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let staging = source_item.with_file_name(format!("{}refresh-{name}", fsx::TMP_PREFIX));
+        let _ = fsx::remove_any(&staging);
+        let copied = real_copy(is_dir)(&origin.path, &staging)
+            .ok()
+            .and_then(|()| hash_item(&staging, is_dir).ok());
+        if copied.as_ref() != Some(&theirs) {
+            let _ = fsx::remove_any(&staging);
+            refuse("the copy didn't match the origin; nothing changed".into());
+            continue;
+        }
+        fsx::remove_any(&source_item)
+            .and_then(|()| fs::rename(&staging, &source_item).map_err(Into::into))
+            .map_err(|e| CliError::usage(format!("{e:#}")))?;
+        if let Some(o) = st.origins.get_mut(key) {
+            o.hash = theirs;
+        }
+        state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))?;
+        let (kind, stem) = match key.split_once('/') {
+            Some((SKILLS, n)) => ("skill", n.to_string()),
+            Some((_, n)) => ("agent", n.trim_end_matches(".md").to_string()),
+            None => ("item", key.clone()),
+        };
+        commit(&git, ctx, &format!("colctl: refresh {kind} {stem}"))?;
+        println!("refreshed {key} from {}", origin.path.display());
     }
     let code = run_sync(ctx, &git, None)?;
     Ok(if refused > 0 { EXIT_DRIFT } else { code })
