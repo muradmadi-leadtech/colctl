@@ -6,6 +6,7 @@ use crate::adapter::{CLAUDE_MD, Entry, Instructions, Root, Scan};
 use crate::config::{Config, Harness};
 use crate::source::{AGENTS, SKILLS, Source};
 use crate::state::HarnessState;
+use crate::tool::Tool;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -98,15 +99,20 @@ pub enum Action {
     },
     /// Remove an owned symlink.
     Unlink(PathBuf),
-    /// Write the generated `CLAUDE.md`.
-    WriteInstructions {
+    /// Write a file colctl generates (`CLAUDE.md`, a Codex agent); `rel` is its path in the harness.
+    WriteGenerated {
+        rel: String,
         path: PathBuf,
         content: Vec<u8>,
     },
-    /// Remove a generated `CLAUDE.md`.
-    RemoveInstructions(PathBuf),
-    /// Record the hash of a `CLAUDE.md` that already has the generated content.
-    RecordInstructions {
+    /// Remove a generated file.
+    RemoveGenerated {
+        rel: String,
+        path: PathBuf,
+    },
+    /// Record the hash of a file that already has the generated content.
+    RecordGenerated {
+        rel: String,
         hash: String,
     },
     AddMarketplace {
@@ -133,32 +139,31 @@ pub enum Action {
 }
 
 impl Action {
-    /// A one-line description for output.
-    pub fn describe(&self) -> String {
+    /// A one-line description for output; plugin actions are shown as the `tool` command.
+    pub fn describe(&self, tool: Option<Tool>) -> String {
+        if let Some(argv) = tool.and_then(|t| t.argv(self).map(|a| (t, a))) {
+            return format!("{} {}", argv.0.program(), argv.1.join(" "));
+        }
         match self {
             Action::CleanupTemp(p) => format!("remove leftover {}", p.display()),
             Action::Link { link, target } => {
                 format!("link {} -> {}", link.display(), target.display())
             }
             Action::Unlink(p) => format!("unlink {}", p.display()),
-            Action::WriteInstructions { path, .. } => format!("write {}", path.display()),
-            Action::RemoveInstructions(p) => format!("remove {}", p.display()),
-            Action::RecordInstructions { .. } => format!("record {CLAUDE_MD} as generated"),
-            Action::AddMarketplace { source, .. } => {
-                format!("claude plugin marketplace add {}", marketplace_arg(source))
-            }
-            Action::RemoveMarketplace { name } => {
-                format!("claude plugin marketplace remove {name}")
-            }
+            Action::WriteGenerated { path, .. } => format!("write {}", path.display()),
+            Action::RemoveGenerated { path, .. } => format!("remove {}", path.display()),
+            Action::RecordGenerated { rel, .. } => format!("record {rel} as generated"),
+            Action::AddMarketplace { source, .. } => format!("add marketplace {source}"),
+            Action::RemoveMarketplace { name } => format!("remove marketplace {name}"),
             Action::ForgetMarketplace { name } => format!("forget marketplace {name}"),
-            Action::Install { id } => format!("claude plugin install {id}"),
-            Action::Uninstall { id } => format!("claude plugin uninstall {id}"),
+            Action::Install { id } => format!("install plugin {id}"),
+            Action::Uninstall { id } => format!("uninstall plugin {id}"),
             Action::ForgetPlugin { id } => format!("forget plugin {id}"),
         }
     }
 
-    /// True for actions that run `claude`.
-    pub fn needs_claude(&self) -> bool {
+    /// True for actions that run the harness's plugin CLI.
+    pub fn needs_tool(&self) -> bool {
         matches!(
             self,
             Action::AddMarketplace { .. }
@@ -169,7 +174,7 @@ impl Action {
     }
 }
 
-/// The argument `claude plugin marketplace add` gets for a config source.
+/// The argument `<tool> plugin marketplace add` gets for a config source.
 pub fn marketplace_arg(source: &str) -> &str {
     source.strip_prefix("github:").unwrap_or(source)
 }
@@ -290,7 +295,10 @@ impl Builder<'_> {
             if let Instructions::File { hash, .. } = scan
                 && recorded == Some(hash)
             {
-                self.actions.push(Action::RemoveInstructions(path));
+                self.actions.push(Action::RemoveGenerated {
+                    rel: CLAUDE_MD.into(),
+                    path,
+                });
             }
             return;
         }
@@ -298,7 +306,8 @@ impl Builder<'_> {
         match (scan, self.inputs.source.agents_md) {
             (Instructions::Absent, true) => {
                 self.item(kind, CLAUDE_MD, ItemState::Missing);
-                self.actions.push(Action::WriteInstructions {
+                self.actions.push(Action::WriteGenerated {
+                    rel: CLAUDE_MD.into(),
                     path,
                     content: generated.to_vec(),
                 });
@@ -309,12 +318,15 @@ impl Builder<'_> {
                 if content == generated {
                     self.item(kind, CLAUDE_MD, ItemState::Ok);
                     if recorded != Some(hash) {
-                        self.actions
-                            .push(Action::RecordInstructions { hash: hash.clone() });
+                        self.actions.push(Action::RecordGenerated {
+                            rel: CLAUDE_MD.into(),
+                            hash: hash.clone(),
+                        });
                     }
                 } else if recorded == Some(hash) {
                     self.item(kind, CLAUDE_MD, ItemState::Broken);
-                    self.actions.push(Action::WriteInstructions {
+                    self.actions.push(Action::WriteGenerated {
+                        rel: CLAUDE_MD.into(),
                         path,
                         content: generated.to_vec(),
                     });
@@ -327,7 +339,10 @@ impl Builder<'_> {
             (Instructions::File { content, hash }, false) => {
                 if recorded == Some(hash) || content == generated {
                     self.item(kind, CLAUDE_MD, ItemState::Orphaned);
-                    self.actions.push(Action::RemoveInstructions(path));
+                    self.actions.push(Action::RemoveGenerated {
+                        rel: CLAUDE_MD.into(),
+                        path,
+                    });
                 } else if recorded.is_some() {
                     self.item(kind, CLAUDE_MD, ItemState::Edited);
                 } else {
@@ -553,7 +568,8 @@ mod tests {
         assert_eq!(states(&p), vec!["instructions CLAUDE.md missing"]);
         assert_eq!(
             p.actions,
-            vec![Action::WriteInstructions {
+            vec![Action::WriteGenerated {
+                rel: CLAUDE_MD.into(),
                 path: PathBuf::from("/h/CLAUDE.md"),
                 content: GEN.to_vec()
             }]
@@ -575,7 +591,10 @@ mod tests {
         assert_eq!(states(&p), vec!["instructions CLAUDE.md ok"]);
         assert_eq!(
             p.actions,
-            vec![Action::RecordInstructions { hash: hash.clone() }]
+            vec![Action::RecordGenerated {
+                rel: CLAUDE_MD.into(),
+                hash: hash.clone()
+            }]
         );
         st.generated.insert(CLAUDE_MD.into(), hash.clone());
         let p = run(&harness(&[]), &s, &st, &Config::default(), &src);
@@ -654,7 +673,10 @@ mod tests {
         assert_eq!(states(&p), vec!["instructions CLAUDE.md orphaned"]);
         assert_eq!(
             p.actions,
-            vec![Action::RemoveInstructions(PathBuf::from("/h/CLAUDE.md"))]
+            vec![Action::RemoveGenerated {
+                rel: CLAUDE_MD.into(),
+                path: PathBuf::from("/h/CLAUDE.md")
+            }]
         );
         // A symlinked CLAUDE.md is foreign (EC-31).
         s.instructions = Instructions::Link;
@@ -782,7 +804,10 @@ mod tests {
         assert_eq!(states(&p), vec!["skill baz missing"]);
         assert_eq!(
             p.actions[0],
-            Action::RemoveInstructions("/h/CLAUDE.md".into())
+            Action::RemoveGenerated {
+                rel: CLAUDE_MD.into(),
+                path: "/h/CLAUDE.md".into()
+            }
         );
         assert!(p.actions.contains(&Action::Unlink("/h/skills/foo".into())));
         assert_eq!(p.actions.len(), 3, "{:?}", p.actions);
@@ -824,10 +849,10 @@ mod tests {
             ]
         );
         assert_eq!(
-            p.actions[0].describe(),
+            p.actions[0].describe(Some(Tool::Claude)),
             "claude plugin marketplace add muradmadi/sadr"
         );
-        assert!(p.actions.iter().all(Action::needs_claude));
+        assert!(p.actions.iter().all(Action::needs_tool));
         assert_eq!(
             states(&p),
             vec![
@@ -966,12 +991,19 @@ mod tests {
                 target: "/t".into(),
             },
             Action::Unlink("/l".into()),
-            Action::WriteInstructions {
+            Action::WriteGenerated {
+                rel: CLAUDE_MD.into(),
                 path: "/c".into(),
                 content: vec![],
             },
-            Action::RemoveInstructions("/c".into()),
-            Action::RecordInstructions { hash: "h".into() },
+            Action::RemoveGenerated {
+                rel: "CLAUDE.md".into(),
+                path: "/c".into(),
+            },
+            Action::RecordGenerated {
+                rel: "CLAUDE.md".into(),
+                hash: "h".into(),
+            },
             Action::AddMarketplace {
                 name: "m".into(),
                 source: "https://x".into(),
@@ -982,11 +1014,13 @@ mod tests {
             Action::Uninstall { id: "p@m".into() },
             Action::ForgetPlugin { id: "p@m".into() },
         ];
-        let text: Vec<String> = all.iter().map(Action::describe).collect();
+        let text: Vec<String> = all.iter().map(|a| a.describe(Some(Tool::Claude))).collect();
+        assert_eq!(all[6].describe(None), "add marketplace https://x");
+        assert_eq!(all[9].describe(None), "install plugin p@m");
         assert_eq!(text[1], "link /l -> /t");
         assert_eq!(text[6], "claude plugin marketplace add https://x");
         assert_eq!(text[10], "claude plugin uninstall p@m");
-        assert_eq!(all.iter().filter(|a| a.needs_claude()).count(), 4);
+        assert_eq!(all.iter().filter(|a| a.needs_tool()).count(), 4);
         for (kind, s) in [
             (ItemKind::Instructions, "instructions"),
             (ItemKind::Skill, "skill"),

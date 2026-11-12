@@ -1,13 +1,13 @@
 //! Executes a harness's planned actions. A failing action never stops the others (AC-30), and the
 //! state only records what actually succeeded.
 
-use crate::adapter::{CLAUDE_MD, read_plugins};
 use crate::config::{Harness, split_plugin_id};
 use crate::ctx::Ctx;
 use crate::fsx;
-use crate::plan::{Action, marketplace_arg};
-use crate::runner::{self, Cmd};
+use crate::plan::Action;
+use crate::runner;
 use crate::state::HarnessState;
+use crate::tool::Tool;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -32,40 +32,19 @@ pub struct Applied {
     pub outcome: Outcome,
 }
 
-/// True when `harness` is the default Claude profile, which must run without `CLAUDE_CONFIG_DIR`.
-pub fn is_native(ctx: &Ctx, harness: &Harness) -> bool {
-    fsx::canonical_or_normal(&harness.path) == fsx::canonical_or_normal(&ctx.home.join(".claude"))
-}
-
-/// Builds a `claude` call for `harness` with exactly its own environment (EC-28).
-pub fn claude_cmd(ctx: &Ctx, program: PathBuf, harness: &Harness, args: &[&str]) -> Cmd {
-    let mut cmd = Cmd::new(program, args);
-    cmd.env_remove = ["CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR"]
-        .iter()
-        .map(|s| s.to_string())
-        .chain(
-            ctx.env_keys
-                .iter()
-                .filter(|k| k.starts_with("ANTHROPIC_"))
-                .cloned(),
-        )
-        .collect();
-    if !is_native(ctx, harness) {
-        cmd.env_set.push((
-            "CLAUDE_CONFIG_DIR".into(),
-            harness.path.display().to_string(),
-        ));
-    }
-    cmd.cwd = Some(ctx.home.clone());
-    cmd.timeout = Some(ctx.claude_timeout);
-    cmd
-}
-
-fn run_claude(ctx: &Ctx, claude: &Option<PathBuf>, harness: &Harness, args: &[&str]) -> Outcome {
-    let Some(program) = claude else {
-        return Outcome::Skipped("claude not found".into());
+/// Runs one plugin action with the harness's tool; `program` is `None` when it isn't on `PATH`.
+fn run_tool(
+    ctx: &Ctx,
+    tool: Tool,
+    program: &Option<PathBuf>,
+    harness: &Harness,
+    action: &Action,
+) -> Outcome {
+    let Some(program) = program else {
+        return Outcome::Skipped(format!("{} not found", tool.program()));
     };
-    let cmd = claude_cmd(ctx, program.clone(), harness, args);
+    let args = tool.argv(action).unwrap_or_default();
+    let cmd = tool.command(ctx, program.clone(), harness, &args);
     match cmd.run() {
         Err(err) => Outcome::Failed(format!("{}: {err}", cmd.display())),
         Ok(out) if out.timed_out => Outcome::Failed(format!(
@@ -97,10 +76,16 @@ pub fn apply(
     actions: &[Action],
     state: &mut HarnessState,
 ) -> Vec<Applied> {
-    let claude = if actions.iter().any(Action::needs_claude) {
-        runner::find_program("claude", &ctx.path_var)
-    } else {
-        None
+    let tool = Tool::for_kind(harness.kind);
+    let program = match tool {
+        Some(t) if actions.iter().any(Action::needs_tool) => {
+            runner::find_program(t.program(), &ctx.path_var)
+        }
+        _ => None,
+    };
+    let run = |action: &Action| match tool {
+        Some(t) => run_tool(ctx, t, &program, harness, action),
+        None => Outcome::Skipped(format!("{} has no plugin tool", harness.kind.as_str())),
     };
     let mut failed_markets: BTreeSet<String> = BTreeSet::new();
     let mut results = Vec::new();
@@ -109,40 +94,35 @@ pub fn apply(
             Action::CleanupTemp(path) => file_outcome(fsx::remove_any(path)),
             Action::Link { link, target } => file_outcome(fsx::atomic_symlink(target, link)),
             Action::Unlink(link) => file_outcome(fsx::remove_link(link)),
-            Action::WriteInstructions { path, content } => {
+            Action::WriteGenerated { rel, path, content } => {
                 let outcome = file_outcome(fsx::atomic_write(path, content));
                 if outcome.is_done() {
                     state
                         .generated
-                        .insert(CLAUDE_MD.into(), fsx::hash_bytes(content));
+                        .insert(rel.clone(), fsx::hash_bytes(content));
                 }
                 outcome
             }
-            Action::RemoveInstructions(path) => {
+            Action::RemoveGenerated { rel, path } => {
                 let outcome = file_outcome(fsx::remove_any(path));
                 if outcome.is_done() {
-                    state.generated.remove(CLAUDE_MD);
+                    state.generated.remove(rel);
                 }
                 outcome
             }
-            Action::RecordInstructions { hash } => {
-                state.generated.insert(CLAUDE_MD.into(), hash.clone());
+            Action::RecordGenerated { rel, hash } => {
+                state.generated.insert(rel.clone(), hash.clone());
                 Outcome::Done
             }
-            Action::AddMarketplace { name, source } => {
-                let before: BTreeSet<String> = read_plugins(&harness.path)
-                    .map(|p| p.marketplaces.into_keys().collect())
-                    .unwrap_or_default();
-                let mut outcome = run_claude(
-                    ctx,
-                    &claude,
-                    harness,
-                    &["plugin", "marketplace", "add", marketplace_arg(source)],
-                );
+            Action::AddMarketplace { name, .. } => {
+                let known = |t: Option<Tool>| {
+                    t.map(|t| t.known_marketplaces(&harness.path))
+                        .unwrap_or_default()
+                };
+                let before: BTreeSet<String> = known(tool);
+                let mut outcome = run(action);
                 if outcome.is_done() {
-                    let after: BTreeSet<String> = read_plugins(&harness.path)
-                        .map(|p| p.marketplaces.into_keys().collect())
-                        .unwrap_or_default();
+                    let after: BTreeSet<String> = known(tool);
                     if after.contains(name) {
                         state.marketplaces.insert(name.clone());
                     } else {
@@ -167,10 +147,10 @@ pub fn apply(
             }
             Action::Install { id } => {
                 let market = split_plugin_id(id).map(|(_, m)| m).unwrap_or_default();
-                if claude.is_some() && failed_markets.contains(market) {
+                if program.is_some() && failed_markets.contains(market) {
                     Outcome::Skipped(format!("marketplace \"{market}\" wasn't added"))
                 } else {
-                    let outcome = run_claude(ctx, &claude, harness, &["plugin", "install", id]);
+                    let outcome = run(action);
                     if outcome.is_done() {
                         state.plugins.insert(id.clone());
                     }
@@ -178,19 +158,14 @@ pub fn apply(
                 }
             }
             Action::Uninstall { id } => {
-                let outcome = run_claude(ctx, &claude, harness, &["plugin", "uninstall", id]);
+                let outcome = run(action);
                 if outcome.is_done() {
                     state.plugins.remove(id);
                 }
                 outcome
             }
             Action::RemoveMarketplace { name } => {
-                let outcome = run_claude(
-                    ctx,
-                    &claude,
-                    harness,
-                    &["plugin", "marketplace", "remove", name],
-                );
+                let outcome = run(action);
                 if outcome.is_done() {
                     state.marketplaces.remove(name);
                 }
@@ -206,7 +181,7 @@ pub fn apply(
             }
         };
         results.push(Applied {
-            description: action.describe(),
+            description: action.describe(tool),
             outcome,
         });
     }
@@ -216,6 +191,7 @@ pub fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapter::CLAUDE_MD;
     use crate::config::Kind;
     use std::ffi::OsString;
     use std::fs;
@@ -302,7 +278,8 @@ exit 0
                     link: link.clone(),
                     target: src.clone(),
                 },
-                Action::WriteInstructions {
+                Action::WriteGenerated {
+                    rel: CLAUDE_MD.into(),
                     path: claude_md.clone(),
                     content: b"gen".to_vec(),
                 },
@@ -319,7 +296,10 @@ exit 0
             &f.harness,
             &[
                 Action::Unlink(link.clone()),
-                Action::RemoveInstructions(claude_md.clone()),
+                Action::RemoveGenerated {
+                    rel: CLAUDE_MD.into(),
+                    path: claude_md.clone(),
+                },
             ],
             &mut state,
         );
@@ -330,7 +310,10 @@ exit 0
         apply(
             &f.ctx,
             &f.harness,
-            &[Action::RecordInstructions { hash: "x".into() }],
+            &[Action::RecordGenerated {
+                rel: CLAUDE_MD.into(),
+                hash: "x".into(),
+            }],
             &mut state,
         );
         assert_eq!(state.generated[CLAUDE_MD], "x");
@@ -355,8 +338,12 @@ exit 0
                     link: f.harness.path.join("skills/ok"),
                     target: "/x".into(),
                 },
-                Action::RemoveInstructions(f.harness.path.join("CLAUDE.md")),
-                Action::WriteInstructions {
+                Action::RemoveGenerated {
+                    rel: CLAUDE_MD.into(),
+                    path: f.harness.path.join("CLAUDE.md"),
+                },
+                Action::WriteGenerated {
+                    rel: CLAUDE_MD.into(),
                     path: real.clone(),
                     content: vec![],
                 },
@@ -403,7 +390,7 @@ exit 0
     #[test]
     fn ec_20_native_profile_runs_without_claude_config_dir() {
         let f = fixture(true, true);
-        assert!(is_native(&f.ctx, &f.harness));
+        assert!(Tool::Claude.is_native(&f.ctx, &f.harness));
         let mut state = HarnessState::default();
         apply(
             &f.ctx,
@@ -550,7 +537,13 @@ exit 0
     fn spawn_failure_is_reported() {
         let f = fixture(false, false);
         let missing = Some(Path::new("/no/such/claude").to_path_buf());
-        match run_claude(&f.ctx, &missing, &f.harness, &["plugin", "install", "x"]) {
+        match run_tool(
+            &f.ctx,
+            Tool::Claude,
+            &missing,
+            &f.harness,
+            &Action::Install { id: "x".into() },
+        ) {
             Outcome::Failed(m) => assert!(m.starts_with("claude plugin install x:")),
             other => panic!("{other:?}"),
         }
