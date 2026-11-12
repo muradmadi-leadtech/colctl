@@ -37,11 +37,12 @@ Harnesses link to that source instead of keeping their own copies. Public repo:
 
 ## Operating policy (autonomous)
 
-Set by the user on 2026-11-12 for cycle 1: run Generate to completion without pausing, open PRs and squash-auto-merge
-them once `check` passes, and cut the v1 release.
+Set by the user on 2026-11-12 for cycle 1, and extended to cycle 2 (codex-cli-support) the same day: run Generate to
+completion without pausing, open PRs and squash-auto-merge them once `check` passes, and cut the release (v1.0.0 for
+cycle 1, v1.1.0 for cycle 2). The owner then evaluates.
 
 - **Always autonomous:** phase docs, tests, RED → GREEN → REFACTOR, refactors, PRs into `main`, merging green PRs,
   release-please release PRs, phase advancement.
-- **STOP and get a human:** anything touching the user's real `~/.claude` or kilo profile beyond read-only checks
+- **STOP and get a human:** anything touching the user's real `~/.claude`, `~/.codex`, `~/.agents` or kilo profiles beyond read-only checks
   (the Evaluate smoke test runs against a copy), deleting the repo or rewriting `main` history, changing repo
   settings beyond what `sadr init` sets, secrets or tokens.
