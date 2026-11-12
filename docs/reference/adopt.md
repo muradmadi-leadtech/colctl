@@ -56,3 +56,8 @@ manifest that points at the plugin's repo or a folder in its own repo, or a Code
 
 The same plugin from another aggregator, in another harness, just joins that source's `replaces`. A plugin whose
 source can't be found is adopted into the plugin list as before.
+
+**Plugins already in a list.** A plugin you adopted into `[plugins]`/`[codex.plugins]` earlier is `ok`, but if its source
+can be found, `status` adds the hint `source available: <repo>; colctl adopt <harness> plugin <id>`. Adopting it (or
+`colctl adopt` with no arguments) moves it to its source in one step: the `[[source]]` is added and the list entry
+removed in one commit, and one sync swaps the plugin in every profile, uninstalling the old copy once per profile.

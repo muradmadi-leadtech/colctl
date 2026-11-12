@@ -39,3 +39,9 @@ T1–T5 are independent of each other.
 | T6 | AC3-10, 11, 12, 23, 24, 25 | EC3-01, 07, 10, 12, 13 |
 | T7 | AC3-13–18, 21, 22 | EC3-15 |
 | T8 | AC3-26, 27, 28 | — |
+
+## Revise (after Evaluate)
+
+| Task | Criteria |
+|---|---|
+| T10 | AC3-29, AC3-30, EC3-19: adopt converts list plugins with a known source; status hint. Patch release v1.2.1 |

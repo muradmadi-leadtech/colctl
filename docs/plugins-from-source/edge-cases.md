@@ -41,3 +41,9 @@ IDs are `EC3-NN`; each needs a test whose name contains `ec3_NN`.
 | EC3-16 | Upstream force-pushed so the pinned commit is gone remotely, but it's still in the local clone | sync works offline as before; `update` moves to the new head |
 | EC3-17 | A 1.1 `state.json` | Loads; `sources` entries are added beside it |
 | EC3-18 | A Codex marketplace snapshot that isn't a git checkout (local marketplace) during adopt | Pins to the source repo's default-branch head and says so ("installed commit unknown; pinned to <short>") |
+
+## Revise
+
+| ID | Case | Expected |
+|---|---|---|
+| EC3-19 | A list plugin whose source can't be found | `adopt <harness> plugin <id>` still refuses: "not a foreign item (state: ok)"; status shows no hint |

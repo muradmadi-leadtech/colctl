@@ -203,6 +203,31 @@ When I run colctl adopt <harness> plugin <id>
 Then it is adopted into [plugins] / [codex.plugins] exactly as in 1.1
 ```
 
+## Revise: plugins already in a list
+
+Added after Evaluate on the owner's real profiles: superpowers had been adopted into `[plugins]` in cycle 1, so it
+showed as `ok` and `adopt` refused it. A plugin colctl already manages through a list must be able to move to its
+source in one step.
+
+**AC3-29 adopt converts a list plugin whose source is known**
+```gherkin
+Given p@m is in [plugins] (or [codex.plugins]) and installed in a harness, and its source can be found
+When I run colctl adopt <harness> plugin p@m (or colctl adopt)
+Then a [[source]] is added as in AC3-18 (pinned to the installed commit, replaces [p@m]),
+  and p@m leaves the list in the same commit
+And one sync, in each harness, uninstalls p@m and installs the source plugin, with no sync in between where the
+  harness has neither
+And p@m is uninstalled once per harness, whether colctl or the user installed it there
+```
+
+**AC3-30 status says a list plugin has a source**
+```gherkin
+Given a list plugin, installed and ok, whose source can be found
+When I run colctl status
+Then it stays "ok" (the exit code isn't affected), with the hint
+  "source available: <repo>; colctl adopt <harness> plugin <id>"
+```
+
 ## status
 
 **AC3-23 from-aggregator**

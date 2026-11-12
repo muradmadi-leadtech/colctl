@@ -211,8 +211,8 @@ fn ac_35_ac2_23_ac3_28_every_criterion_and_edge_case_has_a_named_test() {
         ("EC-", 31),
         ("AC2-", 28),
         ("EC2-", 28),
-        ("AC3-", 28),
-        ("EC3-", 18),
+        ("AC3-", 30),
+        ("EC3-", 19),
     ] {
         assert_eq!(
             defined.iter().filter(|i| i.starts_with(prefix)).count(),

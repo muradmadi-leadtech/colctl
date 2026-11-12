@@ -1297,6 +1297,11 @@ pub fn adopt(
                     ItemState::Foreign | ItemState::FromAggregator => {
                         println!("would adopt {} from {}", i.address(), p.harness.name)
                     }
+                    ItemState::Ok if i.kind == ItemKind::Plugin && i.target.is_some() => println!(
+                        "would move {} in {} to its source",
+                        i.address(),
+                        p.harness.name
+                    ),
                     ItemState::ForeignLink if i.can_take_over() => println!(
                         "would take over {} in {} from {}",
                         i.address(),
@@ -1332,6 +1337,10 @@ pub fn adopt(
             seen = true;
             let outcome = match i.state {
                 ItemState::Foreign | ItemState::FromAggregator => adopt_item(ctx, &p.harness, i),
+                // AC3-29: a list plugin whose source is known moves to that source.
+                ItemState::Ok if i.kind == ItemKind::Plugin && i.target.is_some() => {
+                    adopt_item(ctx, &p.harness, i)
+                }
                 ItemState::ForeignLink => adopt_link(ctx, &p.harness, i),
                 other if wanted.is_some() => {
                     Adoption::Refused(format!("not a foreign item (state: {})", other.as_str()))

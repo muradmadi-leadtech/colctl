@@ -14,7 +14,7 @@ invalid config, corrupt state, unknown `--harness`).
 
 | State | Meaning | Fix |
 |---|---|---|
-| `ok` | As it should be | — |
+| `ok` | As it should be. A list plugin whose source can be found also gets the hint `source available: …` | — (or `colctl adopt …` to move it to its source) |
 | `missing` | colctl should have put it there and hasn't | `colctl sync` |
 | `broken` | colctl's link or `CLAUDE.md` is wrong (points elsewhere, stale content) | `colctl sync` |
 | `orphaned` | colctl's item whose source is gone | `colctl sync` removes it |
