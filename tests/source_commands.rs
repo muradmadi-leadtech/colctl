@@ -167,27 +167,24 @@ fn ac3_14_update_check_reports_and_changes_nothing() {
 
 #[test]
 fn ac3_15_update_moves_pins_and_every_harness() {
+    // Cycle 4: update holds the new commit; the pin and the harnesses move only on approve.
     let env = machine();
-    let (repo, url, _) = env.upstream("superpowers", true, true, Some("superpowers-dev"));
+    let (repo, url, v1) = env.upstream("superpowers", true, true, Some("superpowers-dev"));
     env.ok(&["add", "source", &url]);
     let new = env.upstream_commit(&repo, "v2");
     env.ok(&["update"]);
-    assert_eq!(sources(&env)[0]["rev"], new.as_str());
-    assert!(env.commits().contains(&format!(
-        "colctl: update source superpowers to {}",
-        &new[..7]
-    )));
-    assert_eq!(head_of(&env.source.join("plugins/superpowers")), new);
+    assert_eq!(sources(&env)[0]["rev"], v1.as_str());
+    assert_eq!(head_of(&env.source.join("plugins/superpowers")), v1);
     assert_eq!(
-        state(&env)["harnesses"]["codex"]["sources"]["superpowers"]["rev"],
+        state(&env)["quarantine"]["sources/superpowers"]["to"],
         new.as_str()
     );
     assert!(
-        env.log_args()
+        !env.log_args()
             .contains(&"plugin update superpowers@superpowers-dev".to_string())
     );
     let out = env.ok(&["update", "superpowers"]);
-    assert!(out.contains("up to date"), "{out}");
+    assert!(out.contains("already held for review"), "{out}");
 }
 
 #[test]
@@ -204,7 +201,11 @@ fn ac3_16_update_rev() {
     env.upstream_commit(&repo, "v2");
     env.ok(&["add", "source", &url]);
     env.ok(&["update", "superpowers", "--rev", "v1.0"]);
-    assert_eq!(sources(&env)[0]["rev"], v1.as_str());
+    // Cycle 4: --rev holds the commit instead of pinning it.
+    assert_eq!(
+        state(&env)["quarantine"]["sources/superpowers"]["to"],
+        v1.as_str()
+    );
     for args in [
         &["update", "--rev", "v1.0"][..],
         &["update", "a", "b", "--rev", "v1.0"],
