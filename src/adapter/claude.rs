@@ -1,116 +1,38 @@
 //! Reading a Claude Code profile (the `claude` harness kind) into a [`Scan`].
-//!
-//! Only the read side lives here; deciding what to do is [`crate::plan`] and doing it is
-//! [`crate::apply`].
 
+use super::{Instructions, Plugins, Root, Scan, link_entries, owned_by, root_of, temps_in};
 use crate::fsx;
-use crate::source::{AGENTS, SKILLS, SYNCED, visible_entries};
+use crate::source::{AGENTS, SKILLS, SYNCED};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub const CLAUDE_MD: &str = "CLAUDE.md";
 const INSTALLED_PLUGINS: &str = "plugins/installed_plugins.json";
 const KNOWN_MARKETPLACES: &str = "plugins/known_marketplaces.json";
 
-/// The harness folder itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Root {
-    Ok,
-    /// Doesn't exist (EC-06).
-    Missing,
-    /// Exists but isn't a real folder (EC-07).
-    Invalid,
-}
-
-/// One `skills/<name>` or `agents/<name>.md` entry in a harness.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Entry {
-    /// A symlink into the source. `correct` when it points at the item of the same name and that
-    /// item exists.
-    Owned { target: PathBuf, correct: bool },
-    /// A symlink pointing anywhere else (EC-14).
-    ForeignLink(PathBuf),
-    /// A real file or folder.
-    Real,
-}
-
-/// The harness's `CLAUDE.md`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Instructions {
-    Absent,
-    Link,
-    File { content: Vec<u8>, hash: String },
-}
-
-/// Plugins and marketplaces as Claude recorded them.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Plugins {
-    pub installed: BTreeSet<String>,
-    /// Marketplace name → its entry in `known_marketplaces.json`.
-    pub marketplaces: BTreeMap<String, Value>,
-}
-
-/// Everything colctl needs to know about one harness.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Scan {
-    pub root: Root,
-    pub instructions: Instructions,
-    pub skills: BTreeMap<String, Entry>,
-    pub agents: BTreeMap<String, Entry>,
-    /// `Err` with the reason when Claude's plugin files can't be read (EC-13).
-    pub plugins: Result<Plugins, String>,
-    /// Leftovers from an interrupted run (EC-21).
-    pub temps: Vec<PathBuf>,
-}
-
-impl Scan {
-    fn empty(root: Root) -> Self {
-        Self {
-            root,
-            instructions: Instructions::Absent,
-            skills: BTreeMap::new(),
-            agents: BTreeMap::new(),
-            plugins: Ok(Plugins::default()),
-            temps: Vec::new(),
-        }
-    }
-}
-
 /// Reads a harness. `source` is used to tell owned links from foreign ones.
 pub fn scan(harness: &Path, source: &Path) -> Scan {
-    match fs::symlink_metadata(harness) {
-        Err(_) => return Scan::empty(Root::Missing),
-        Ok(meta) if !meta.is_dir() => return Scan::empty(Root::Invalid),
-        Ok(_) => {}
+    if let Some(root) = root_of(harness) {
+        return Scan::empty(root);
     }
-    let canonical_source = fsx::canonical_or_normal(source);
-    let owned_root =
-        |target: &Path| target.starts_with(source) || target.starts_with(&canonical_source);
-
-    let mut skills = BTreeMap::new();
-    for name in visible_entries(&harness.join(SKILLS)) {
-        if name == SYNCED {
-            continue;
-        }
-        let path = harness.join(SKILLS).join(&name);
-        let expected = source.join(SKILLS).join(&name);
-        skills.insert(name, entry(&path, &expected, &owned_root, |p| p.is_dir()));
-    }
-
-    let mut agents = BTreeMap::new();
-    for file in visible_entries(&harness.join(AGENTS)) {
-        let Some(stem) = file.strip_suffix(".md") else {
-            continue;
-        };
-        let path = harness.join(AGENTS).join(&file);
-        let expected = source.join(AGENTS).join(&file);
-        agents.insert(
-            stem.to_string(),
-            entry(&path, &expected, &owned_root, |p| p.is_file()),
-        );
-    }
+    let owned = owned_by(source);
+    let skills = link_entries(
+        &harness.join(SKILLS),
+        &source.join(SKILLS),
+        "",
+        &[SYNCED],
+        &owned,
+        |p| p.is_dir(),
+    );
+    let agents = link_entries(
+        &harness.join(AGENTS),
+        &source.join(AGENTS),
+        ".md",
+        &[],
+        &owned,
+        |p| p.is_file(),
+    );
 
     let claude_md = harness.join(CLAUDE_MD);
     let instructions = if fsx::is_symlink(&claude_md) {
@@ -125,35 +47,13 @@ pub fn scan(harness: &Path, source: &Path) -> Scan {
         }
     };
 
-    let mut temps = fsx::find_temps(harness);
-    temps.extend(fsx::find_temps(&harness.join(SKILLS)));
-    temps.extend(fsx::find_temps(&harness.join(AGENTS)));
-
     Scan {
         root: Root::Ok,
         instructions,
         skills,
         agents,
         plugins: read_plugins(harness),
-        temps,
-    }
-}
-
-fn entry(
-    path: &Path,
-    expected: &Path,
-    owned_root: &dyn Fn(&Path) -> bool,
-    kind_ok: fn(&Path) -> bool,
-) -> Entry {
-    match fsx::link_target(path) {
-        Some(target) if owned_root(&target) => {
-            let correct = (target == expected
-                || fsx::canonical_or_normal(&target) == fsx::canonical_or_normal(expected))
-                && kind_ok(expected);
-            Entry::Owned { target, correct }
-        }
-        Some(target) => Entry::ForeignLink(target),
-        None => Entry::Real,
+        temps: temps_in(harness, &[SKILLS, AGENTS]),
     }
 }
 
@@ -210,8 +110,10 @@ pub fn generated_claude_md(source_display: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapter::Entry;
     use serde_json::json;
     use std::os::unix::fs::symlink;
+    use std::path::PathBuf;
 
     struct Fixture {
         _t: tempfile::TempDir,

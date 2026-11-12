@@ -124,15 +124,22 @@ fn defined_ids() -> BTreeSet<String> {
     ids
 }
 
+fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rs(&path, out);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            out.push(path);
+        }
+    }
+}
+
 /// IDs named by test functions (`fn ac_09_ac_10_…`, `fn ec_14_…`) in src/ and tests/.
 fn tested_ids() -> BTreeSet<String> {
     let mut files = Vec::new();
     for dir in ["src", "tests"] {
-        for entry in fs::read_dir(repo().join(dir)).unwrap().flatten() {
-            if entry.path().extension().is_some_and(|e| e == "rs") {
-                files.push(entry.path());
-            }
-        }
+        collect_rs(&repo().join(dir), &mut files);
     }
     let mut ids = BTreeSet::new();
     for file in files {

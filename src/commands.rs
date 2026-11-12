@@ -11,6 +11,7 @@ use crate::git::Git;
 use crate::plan::{self, HarnessPlan, Inputs, Item, ItemKind, ItemState};
 use crate::source::{self, AGENTS, AGENTS_MD, SKILLS, Source};
 use crate::state::{self, Lock, STATE_DIR, State};
+use crate::tool::Tool;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -229,7 +230,10 @@ fn print_plan(ctx: &Ctx, planned: &[Planned]) {
             println!("  nothing to do");
         }
         for action in &p.plan.actions {
-            println!("  would {}", action.describe());
+            println!(
+                "  would {}",
+                action.describe(Tool::for_kind(p.harness.kind))
+            );
         }
     }
 }
