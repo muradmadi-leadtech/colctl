@@ -502,3 +502,291 @@ fn refresh_dry_run_holds_nothing() {
     assert!(out.contains("would hold skills/twg-jira from"), "{out}");
     assert_eq!(state(&env)["quarantine"], Value::Null);
 }
+
+// ---------------------------------------------------------------- review (T5)
+
+/// Commits files to an upstream repo: (path, content, executable). Returns the new head.
+fn commit_files(repo: &Path, files: &[(&str, &str, bool)], message: &str) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    for (path, content, exec) in files {
+        let p = repo.join(path);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, content).unwrap();
+        let mode = if *exec { 0o755 } else { 0o644 };
+        fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+    }
+    let g = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["-c", "user.name=Ann Author", "-c", "user.email=a@a"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    g(&["add", "-A"]);
+    g(&["commit", "-qm", message]);
+    head_of(repo)
+}
+
+/// superpowers held at a commit that adds a hook, an executable script and changes the manifest.
+fn risky_candidate() -> (Env, PathBuf, String, String) {
+    let (env, repo, v1) = with_source();
+    let v2 = commit_files(
+        &repo,
+        &[
+            ("hooks/hooks.json", "{\"SessionStart\": []}", false),
+            ("scripts/session-start.sh", "#!/bin/sh\necho hi\n", true),
+            (
+                ".claude-plugin/plugin.json",
+                "{\"name\": \"superpowers\", \"version\": \"2\"}",
+                false,
+            ),
+        ],
+        "Add a session hook",
+    );
+    env.ok(&["update"]);
+    (env, repo, v1, v2)
+}
+
+#[test]
+fn ac4_19_review_lists_what_is_held() {
+    let env = machine();
+    let out = env.ok(&["review"]);
+    assert!(out.contains("nothing held for review"), "{out}");
+    let (env, _, v1, v2) = risky_candidate();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    fs::write(origin.join("run.sh"), "echo").unwrap();
+    env.ok(&["refresh"]);
+    let out = env.expect(1, &["review"]);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 2, "{out}");
+    assert!(lines[0].starts_with("skills/twg-jira"), "{out}");
+    assert!(lines[0].contains("~/.config/twg/skills/twg-jira"), "{out}");
+    assert!(
+        lines[0].contains("2 files") && lines[0].contains("1 flag"),
+        "{out}"
+    );
+    assert!(lines[1].starts_with("sources/superpowers"), "{out}");
+    assert!(
+        lines[1].contains(&format!("{} → {}", &v1[..7], &v2[..7]))
+            && lines[1].contains("1 commit")
+            && lines[1].contains("4 flags"),
+        "{out}"
+    );
+}
+
+#[test]
+fn ac4_20_reviewing_a_source_plugin() {
+    let (env, _, v1, v2) = risky_candidate();
+    let before = env.snapshot();
+    let out = env.ok(&["review", "superpowers"]);
+    for want in [
+        format!("superpowers  {} → {}", &v1[..7], &v2[..7]),
+        "commits (1)".into(),
+        format!("  {} Add a session hook", &v2[..7]),
+        "files (3)".into(),
+        "  A  hooks/hooks.json".into(),
+        "  A  scripts/session-start.sh    (+x)".into(),
+        "  M  .claude-plugin/plugin.json".into(),
+        "flags (4)".into(),
+        "adds hooks".into(),
+        "new executable file".into(),
+        "new script".into(),
+        "plugin manifest changed".into(),
+        "diff".into(),
+        "+echo hi".into(),
+    ] {
+        assert!(out.contains(&want), "{want:?} in:\n{out}");
+    }
+    assert_eq!(env.snapshot(), before, "review writes nothing");
+}
+
+#[test]
+fn ac4_21_reviewing_a_skill() {
+    let env = machine();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(
+        origin.join("SKILL.md"),
+        "---\nname: twg-jira\nallowed-tools: Bash\n---\nv2\n",
+    )
+    .unwrap();
+    env.ok(&["refresh"]);
+    let out = env.ok(&["review", "skills/twg-jira"]);
+    assert!(
+        out.contains("skills/twg-jira  from ~/.config/twg/skills/twg-jira"),
+        "{out}"
+    );
+    assert!(
+        out.contains("files (1)") && out.contains("  M  SKILL.md"),
+        "{out}"
+    );
+    assert!(
+        out.contains("allowed-tools") && out.contains("grants Bash: Bash"),
+        "{out}"
+    );
+    assert!(out.contains("+allowed-tools: Bash"), "{out}");
+    assert!(!out.contains("commits ("), "{out}");
+}
+
+#[test]
+fn ac4_22_review_json() {
+    let (env, _, v1, v2) = risky_candidate();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh"]);
+    let (code, out, _) = env.code(&["review", "--json"]);
+    assert_eq!(code, 1);
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["version"], 1);
+    let list = v["candidates"].as_array().unwrap();
+    assert_eq!(list.len(), 2);
+    let src = list.iter().find(|c| c["kind"] == "source").unwrap();
+    assert_eq!(src["key"], "sources/superpowers");
+    assert_eq!(src["name"], "superpowers");
+    assert_eq!(src["from"], v1.as_str());
+    assert_eq!(src["to"], v2.as_str());
+    assert_eq!(src["direction"], "forward");
+    assert_eq!(src["commits"][0]["subject"], "Add a session hook");
+    assert_eq!(src["commits"][0]["author"], "Ann Author");
+    assert_eq!(src["files"].as_array().unwrap().len(), 3);
+    assert_eq!(src["flags"].as_array().unwrap().len(), 4);
+    assert_eq!(src["error"], Value::Null);
+    assert!(src.get("diff").is_none(), "no diff in the list");
+    let skill = list.iter().find(|c| c["kind"] == "skill").unwrap();
+    assert_eq!(skill["name"], "twg-jira");
+    assert_eq!(skill["origin"], origin.display().to_string());
+    let one: Value = serde_json::from_str(&env.ok(&["review", "superpowers", "--json"])).unwrap();
+    assert!(
+        one["candidates"][0]["diff"]
+            .as_str()
+            .unwrap()
+            .contains("+echo hi")
+    );
+}
+
+#[test]
+fn ec4_02_ec4_03_review_names() {
+    let (env, _, _) = with_source();
+    let (code, _, err) = env.code(&["review", "superpowers"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("nothing held for superpowers"), "{err}");
+    let (code, _, err) = env.code(&["review", "nope"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("no source named \"nope\""), "{err}");
+    let (code, _, err) = env.code(&["review", "skills/nope"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("no taken-over item"), "{err}");
+}
+
+#[test]
+fn ec4_08_review_of_an_older_commit_goes_back() {
+    let (env, repo, v1) = with_source();
+    env.upstream_commit(&repo, "v2");
+    let v3 = env.upstream_commit(&repo, "v3");
+    env.write_config(&env.config().replace(&v1, &v3));
+    env.ok(&["sync"]);
+    env.ok(&["update", "superpowers", "--rev", &v1]);
+    let out = env.ok(&["review", "superpowers"]);
+    assert!(out.contains("goes back 2 commits (removed)"), "{out}");
+    assert!(out.contains("-v3"), "{out}");
+    let list = env.expect(1, &["review"]);
+    assert!(list.contains("goes back 2 commits"), "{list}");
+}
+
+#[test]
+fn ec4_09_review_covers_the_whole_repo() {
+    let env = machine();
+    let (repo, url, _) = env.upstream("tools", true, false, Some("tools-m"));
+    // A second plugin in the same repo; the source picks "tools" but review shows everything.
+    env.ok(&["add", "source", &url]);
+    commit_files(&repo, &[("other-plugin/run.sh", "echo", false)], "other");
+    env.ok(&["update"]);
+    let out = env.ok(&["review", "tools"]);
+    assert!(out.contains("  A  other-plugin/run.sh"), "{out}");
+    assert!(out.contains("new script"), "{out}");
+}
+
+#[test]
+fn ec4_12_a_tampered_snapshot_is_refused() {
+    let env = machine();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh"]);
+    fs::write(
+        env.source
+            .join(".state/quarantine/skills/twg-jira/SKILL.md"),
+        "evil",
+    )
+    .unwrap();
+    let out = env.expect(1, &["review", "skills/twg-jira"]);
+    assert!(
+        out.contains("the held copy of skills/twg-jira changed since it was held; reject it and refresh again"),
+        "{out}"
+    );
+    let list = env.expect(1, &["review"]);
+    assert!(list.contains("error: the held copy"), "{list}");
+}
+
+#[test]
+fn ec4_13_a_missing_held_commit_is_refused() {
+    let (env, repo, _) = with_source();
+    env.upstream_commit(&repo, "v2");
+    env.ok(&["update"]);
+    git_in(&clone(&env), &["update-ref", "-d", "refs/colctl/candidate"]);
+    let out = env.expect(1, &["review", "superpowers"]);
+    assert!(
+        out.contains("the held commit for superpowers is missing; run colctl update superpowers"),
+        "{out}"
+    );
+    let v: Value = serde_json::from_str(&env.code(&["review", "--json"]).1).unwrap();
+    assert!(
+        v["candidates"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("missing")
+    );
+}
+
+#[test]
+fn ec4_14_review_warns_when_the_pin_changed_by_hand() {
+    let (env, repo, v1) = with_source();
+    let v2 = env.upstream_commit(&repo, "v2");
+    env.upstream_commit(&repo, "v3");
+    env.ok(&["update", "superpowers", "--rev", &v2]);
+    let v3 = head_of(&repo);
+    env.write_config(&env.config().replace(&v1, &v3));
+    let out = env.ok(&["review", "superpowers"]);
+    assert!(
+        out.contains("warning: superpowers's pin changed since it was held"),
+        "{out}"
+    );
+}
+
+#[test]
+fn ec4_22_review_escapes_control_characters() {
+    let (env, repo, _) = with_source();
+    commit_files(
+        &repo,
+        &[("evil\u{1b}[2Jname", "x", false)],
+        "subject \u{1b}]0;pwned\u{07}",
+    );
+    env.ok(&["update"]);
+    let out = env.ok(&["review", "superpowers"]);
+    assert!(
+        !out.contains('\u{1b}') && !out.contains('\u{07}'),
+        "{out:?}"
+    );
+    assert!(out.contains("subject \\x1b]0;pwned\\x07"), "{out}");
+    let v: Value = serde_json::from_str(&env.ok(&["review", "superpowers", "--json"])).unwrap();
+    assert_eq!(
+        v["candidates"][0]["commits"][0]["subject"],
+        "subject \u{1b}]0;pwned\u{07}"
+    );
+}

@@ -36,6 +36,25 @@ impl Git {
         Ok(out.stdout)
     }
 
+    /// Runs `git -C <dir> <args>` and returns stdout as bytes, for content that may not be text.
+    /// Exit codes in `ok` count as success (`git diff --no-index` exits 1 when files differ).
+    pub(crate) fn bytes(&self, dir: &Path, args: &[&str], ok: &[i32]) -> Result<Vec<u8>> {
+        let out = std::process::Command::new(&self.program)
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()?;
+        match out.status.code() {
+            Some(code) if ok.contains(&code) => Ok(out.stdout),
+            _ => bail!(
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        }
+    }
+
     pub fn is_repo(dir: &Path) -> bool {
         dir.join(".git").exists()
     }
