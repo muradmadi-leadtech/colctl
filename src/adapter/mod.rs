@@ -10,6 +10,17 @@ pub mod codex;
 
 pub use claude::{CLAUDE_MD, generated_claude_md, marketplace_source, read_plugins, scan};
 
+use crate::config::Kind;
+
+/// Reads a harness of any kind.
+pub fn scan_harness(kind: Kind, harness: &Path, source: &Path) -> Scan {
+    match kind {
+        Kind::Claude => claude::scan(harness, source),
+        Kind::Codex => codex::scan(harness, source),
+        Kind::Agents => agents_dir::scan(harness, source),
+    }
+}
+
 use crate::fsx;
 use crate::source::visible_entries;
 use serde_json::Value;

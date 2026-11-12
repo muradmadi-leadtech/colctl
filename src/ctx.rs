@@ -22,8 +22,8 @@ pub struct Ctx {
     pub path_var: OsString,
     /// Names of every environment variable set for this process.
     pub env_keys: Vec<String>,
-    /// How long one `claude` call may run.
-    pub claude_timeout: Duration,
+    /// How long one `claude` or `codex` call may run.
+    pub tool_timeout: Duration,
 }
 
 impl Ctx {
@@ -44,9 +44,13 @@ impl Ctx {
             }
             None => (home.join(".colctl"), true),
         };
-        let claude_timeout = get("COLCTL_CLAUDE_TIMEOUT_SECS")
-            .and_then(|v| v.to_str().and_then(|s| s.parse::<u64>().ok()))
-            .map(Duration::from_secs)
+        let secs = |name: &str| {
+            get(name)
+                .and_then(|v| v.to_str().and_then(|s| s.parse::<u64>().ok()))
+                .map(Duration::from_secs)
+        };
+        let tool_timeout = secs("COLCTL_TOOL_TIMEOUT_SECS")
+            .or_else(|| secs("COLCTL_CLAUDE_TIMEOUT_SECS"))
             .unwrap_or(DEFAULT_CLAUDE_TIMEOUT);
         Ok(Self {
             home,
@@ -54,7 +58,7 @@ impl Ctx {
             default_source,
             path_var: get("PATH").unwrap_or_default(),
             env_keys: vars.iter().map(|(k, _)| k.clone()).collect(),
-            claude_timeout,
+            tool_timeout,
         })
     }
 
@@ -102,7 +106,7 @@ mod tests {
         assert_eq!(ctx.source, PathBuf::from("/h/.colctl"));
         assert!(ctx.default_source);
         assert_eq!(ctx.source_display(), "~/.colctl");
-        assert_eq!(ctx.claude_timeout, DEFAULT_CLAUDE_TIMEOUT);
+        assert_eq!(ctx.tool_timeout, DEFAULT_CLAUDE_TIMEOUT);
         assert_eq!(ctx.path_var, OsString::from("/bin"));
     }
 
@@ -128,7 +132,7 @@ mod tests {
             ("COLCTL_CLAUDE_TIMEOUT_SECS", "2"),
         ]))
         .unwrap();
-        assert_eq!(ctx.claude_timeout, Duration::from_secs(2));
+        assert_eq!(ctx.tool_timeout, Duration::from_secs(2));
         assert_eq!(ctx.tilde(Path::new("/h/.claude")), "~/.claude");
         assert_eq!(ctx.tilde(Path::new("/h")), "~");
         assert_eq!(ctx.tilde(Path::new("/other")), "/other");

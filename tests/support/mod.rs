@@ -13,6 +13,7 @@ use std::process::Output;
 use tempfile::TempDir;
 
 pub const KILO: &str = "Library/Application Support/kilo-proxy-headless/profiles/claude";
+pub const KILO_CODEX: &str = "Library/Application Support/kilo-proxy-headless/profiles/codex";
 
 pub struct Env {
     _tmp: TempDir,
@@ -20,38 +21,31 @@ pub struct Env {
     pub source: PathBuf,
     pub bin: PathBuf,
     pub log: PathBuf,
+    pub codex_log: PathBuf,
     pub path: OsString,
     pub vars: Vec<(String, String)>,
 }
 
-/// Builds examples/fake_claude.rs into this test run's target folder, once per run. Plain
+/// Builds `examples/<name>.rs` into this test run's target folder, once per run. Plain
 /// `cargo test` builds examples anyway; coverage runs (`cargo llvm-cov`) don't.
-fn fake_claude() -> PathBuf {
-    static FAKE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    FAKE.get_or_init(|| {
-        let exe = std::env::current_exe().unwrap();
-        let profile_dir = exe.parent().unwrap().parent().unwrap();
+fn fake(name: &'static str) -> PathBuf {
+    static BUILT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    let exe = std::env::current_exe().unwrap();
+    let profile_dir = exe.parent().unwrap().parent().unwrap().to_path_buf();
+    BUILT.get_or_init(|| {
         let target_dir = profile_dir.parent().unwrap();
         let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
         let status = std::process::Command::new(cargo)
-            .args([
-                "build",
-                "--quiet",
-                "--locked",
-                "--example",
-                "fake_claude",
-                "--target-dir",
-            ])
+            .args(["build", "--quiet", "--locked", "--examples", "--target-dir"])
             .arg(target_dir)
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .status()
-            .expect("running cargo to build the fake claude");
-        assert!(status.success(), "building examples/fake_claude.rs failed");
-        let fake = profile_dir.join("examples/fake_claude");
-        assert!(fake.is_file(), "{}", fake.display());
-        fake
-    })
-    .clone()
+            .expect("running cargo to build the fakes");
+        assert!(status.success(), "building examples/ failed");
+    });
+    let fake = profile_dir.join("examples").join(name);
+    assert!(fake.is_file(), "{}", fake.display());
+    fake
 }
 
 fn real_git() -> PathBuf {
@@ -64,18 +58,22 @@ fn real_git() -> PathBuf {
 
 impl Env {
     pub fn new() -> Self {
-        Self::build(true, true)
+        Self::build(true, true, true)
     }
 
     pub fn without_claude() -> Self {
-        Self::build(false, true)
+        Self::build(false, true, true)
+    }
+
+    pub fn without_codex() -> Self {
+        Self::build(true, false, true)
     }
 
     pub fn without_git() -> Self {
-        Self::build(true, false)
+        Self::build(true, true, false)
     }
 
-    fn build(claude: bool, git: bool) -> Self {
+    fn build(claude: bool, codex: bool, git: bool) -> Self {
         let tmp = tempfile::tempdir().unwrap();
         let root = fs::canonicalize(tmp.path()).unwrap();
         let home = root.join("home");
@@ -83,7 +81,10 @@ impl Env {
         fs::create_dir_all(&home).unwrap();
         fs::create_dir_all(&bin).unwrap();
         if claude {
-            symlink(fake_claude(), bin.join("claude")).unwrap();
+            symlink(fake("fake_claude"), bin.join("claude")).unwrap();
+        }
+        if codex {
+            symlink(fake("fake_codex"), bin.join("codex")).unwrap();
         }
         if git {
             symlink(real_git(), bin.join("git")).unwrap();
@@ -91,6 +92,7 @@ impl Env {
         Self {
             source: home.join(".colctl"),
             log: root.join("claude.log"),
+            codex_log: root.join("codex.log"),
             path: OsString::from(&bin),
             bin,
             home,
@@ -113,6 +115,81 @@ impl Env {
         p
     }
 
+    /// Creates and returns the native Codex profile (`~/.codex`).
+    pub fn codex(&self) -> PathBuf {
+        let p = self.home.join(".codex");
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// Creates and returns kilo's Codex profile.
+    pub fn kilo_codex(&self) -> PathBuf {
+        let p = self.home.join(KILO_CODEX);
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// Creates and returns the shared `~/.agents` folder.
+    pub fn agents_dir(&self) -> PathBuf {
+        let p = self.home.join(".agents");
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// Plugin ids in a Codex profile's `config.toml`.
+    pub fn codex_installed(&self, profile: &Path) -> Vec<String> {
+        let Ok(text) = fs::read_to_string(profile.join("config.toml")) else {
+            return Vec::new();
+        };
+        let t: toml::Table = toml::from_str(&text).unwrap();
+        t.get("plugins")
+            .and_then(|p| p.as_table())
+            .map(|p| p.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn codex_log(&self) -> Vec<Value> {
+        fs::read_to_string(&self.codex_log)
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    pub fn codex_log_args(&self) -> Vec<String> {
+        self.codex_log()
+            .iter()
+            .map(|l| {
+                l["args"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|a| a.as_str().unwrap())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect()
+    }
+
+    /// Replaces the harness list in config.toml with `(name, kind, path-as-written)` blocks,
+    /// keeping the rest of the file.
+    pub fn set_harnesses(&self, harnesses: &[(&str, &str, &str)]) {
+        let config = self.config();
+        let rest = config
+            .split("\n[marketplaces]")
+            .nth(1)
+            .map(|r| format!("\n[marketplaces]{r}"))
+            .unwrap_or_default();
+        let mut text = String::from("version = 1\n");
+        for (name, kind, path) in harnesses {
+            text.push_str(&format!(
+                "\n[[harness]]\nname = \"{name}\"\nkind = \"{kind}\"\npath = \"{path}\"\n"
+            ));
+        }
+        text.push_str(&rest);
+        self.write_config(&text);
+    }
+
     pub fn var(mut self, key: &str, value: &str) -> Self {
         self.vars.push((key.into(), value.into()));
         self
@@ -124,6 +201,7 @@ impl Env {
             .env("HOME", &self.home)
             .env("PATH", &self.path)
             .env("FAKE_CLAUDE_LOG", &self.log)
+            .env("FAKE_CODEX_LOG", &self.codex_log)
             .current_dir(&self.home);
         // Coverage runs write their profiles where this says.
         for key in [

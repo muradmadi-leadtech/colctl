@@ -2,12 +2,13 @@
 //! state plus the ordered actions that would fix it. Pure: no I/O, so `--dry-run` is just printing
 //! the plan.
 
-use crate::adapter::{CLAUDE_MD, Entry, Instructions, Root, Scan};
-use crate::config::{Config, Harness};
-use crate::source::{AGENTS, SKILLS, Source};
+use crate::adapter::codex::AGENTS_MD as CODEX_AGENTS_MD;
+use crate::adapter::{CLAUDE_MD, Entry, Generated, Instructions, Root, Scan};
+use crate::config::{Config, Harness, Kind, PluginList};
+use crate::source::{AGENTS, AGENTS_MD, SKILLS, Source};
 use crate::state::HarnessState;
 use crate::tool::Tool;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,23 +68,30 @@ impl ItemState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
     pub kind: ItemKind,
-    /// Skill or agent name, plugin id, marketplace name, or `CLAUDE.md`.
+    /// Skill or agent name, plugin id, marketplace name, or the instructions file's name.
     pub name: String,
     pub state: ItemState,
     pub hint: Option<String>,
+    /// How `adopt` and hints refer to it in its harness: `skills/foo`, `agents/foo.md` (Claude)
+    /// or `agents/foo.toml` (Codex), `CLAUDE.md` / `AGENTS.md`, `plugin p@m`.
+    pub address: String,
 }
 
 impl Item {
-    /// How `adopt` and hints refer to this item: `skills/foo`, `agents/foo.md`, `CLAUDE.md`,
-    /// `plugin p@m`.
-    pub fn address(&self) -> String {
-        match self.kind {
-            ItemKind::Instructions => CLAUDE_MD.to_string(),
-            ItemKind::Skill => format!("skills/{}", self.name),
-            ItemKind::Agent => format!("agents/{}.md", self.name),
-            ItemKind::Plugin => format!("plugin {}", self.name),
-            ItemKind::Marketplace => format!("marketplace {}", self.name),
+    /// The item's address in a harness of `kind`.
+    pub fn address_for(kind: ItemKind, harness: Kind, name: &str) -> String {
+        match kind {
+            ItemKind::Instructions => name.to_string(),
+            ItemKind::Skill => format!("skills/{name}"),
+            ItemKind::Agent if harness == Kind::Codex => format!("agents/{name}.toml"),
+            ItemKind::Agent => format!("agents/{name}.md"),
+            ItemKind::Plugin => format!("plugin {name}"),
+            ItemKind::Marketplace => format!("marketplace {name}"),
         }
+    }
+
+    pub fn address(&self) -> String {
+        self.address.clone()
     }
 }
 
@@ -203,10 +211,13 @@ pub struct Inputs<'a> {
     pub source_display: &'a str,
     /// The exact bytes of a generated `CLAUDE.md`.
     pub generated: &'a [u8],
+    /// Each source agent rendered as Codex TOML, or why it can't be (AC2-08, AC2-11).
+    pub codex_agents: &'a BTreeMap<String, Result<Vec<u8>, String>>,
 }
 
-fn hint(state: ItemState, harness: &str, address: &str, source_display: &str) -> Option<String> {
-    Some(match state {
+fn hint(item: &Item, harness: &str, source_display: &str) -> Option<String> {
+    let address = &item.address;
+    Some(match item.state {
         ItemState::Ok => return None,
         ItemState::Missing
         | ItemState::Broken
@@ -215,8 +226,12 @@ fn hint(state: ItemState, harness: &str, address: &str, source_display: &str) ->
         | ItemState::MarketplaceMissing => "colctl sync".to_string(),
         ItemState::Foreign => format!("colctl adopt {harness} {address}"),
         ItemState::ForeignLink => "remove or replace this link yourself".to_string(),
+        ItemState::Edited if item.kind == ItemKind::Agent => format!(
+            "move your changes into {source_display}/agents/{}.md, delete {address}, run colctl sync",
+            item.name
+        ),
         ItemState::Edited => format!(
-            "move your text into {source_display}/AGENTS.md, delete {CLAUDE_MD}, run colctl sync"
+            "move your text into {source_display}/AGENTS.md, delete {address}, run colctl sync"
         ),
         ItemState::Invalid => return None,
     })
@@ -236,14 +251,129 @@ impl Builder<'_> {
             name: name.to_string(),
             state,
             hint: None,
+            address: Item::address_for(kind, self.harness.kind, name),
         };
-        item.hint = hint(
-            state,
-            &self.harness.name,
-            &item.address(),
-            self.inputs.source_display,
-        );
+        item.hint = hint(&item, &self.harness.name, self.inputs.source_display);
         self.items.push(item);
+    }
+
+    fn invalid(&mut self, kind: ItemKind, name: &str, reason: &str) {
+        self.items.push(Item {
+            kind,
+            name: name.to_string(),
+            state: ItemState::Invalid,
+            hint: Some(reason.to_string()),
+            address: Item::address_for(kind, self.harness.kind, name),
+        });
+    }
+
+    /// A Codex profile's `AGENTS.md`: a link to the source's (AC2-05, AC2-06).
+    fn instructions_link(&mut self, scan: &Instructions) {
+        let link = self.harness.path.join(CODEX_AGENTS_MD);
+        let target = self.inputs.source_dir.join(AGENTS_MD);
+        let kind = ItemKind::Instructions;
+        let name = CODEX_AGENTS_MD;
+        if self.harness.excludes(name) {
+            if matches!(scan, Instructions::Linked(Entry::Owned { .. })) {
+                self.actions.push(Action::Unlink(link));
+            }
+            return;
+        }
+        match (scan, self.inputs.source.agents_md) {
+            (Instructions::Absent, true) => {
+                self.item(kind, name, ItemState::Missing);
+                self.actions.push(Action::Link { link, target });
+            }
+            (Instructions::Absent, false) => {}
+            (Instructions::Linked(Entry::Owned { correct: true, .. }), true) => {
+                self.item(kind, name, ItemState::Ok)
+            }
+            (Instructions::Linked(Entry::Owned { .. }), true) => {
+                self.item(kind, name, ItemState::Broken);
+                self.actions.push(Action::Link { link, target });
+            }
+            (Instructions::Linked(Entry::Owned { .. }), false) => {
+                self.item(kind, name, ItemState::Orphaned);
+                self.actions.push(Action::Unlink(link));
+            }
+            (Instructions::Linked(_) | Instructions::Link, _) => {
+                self.item(kind, name, ItemState::ForeignLink)
+            }
+            (Instructions::File { .. }, _) => self.item(kind, name, ItemState::Foreign),
+        }
+    }
+
+    /// A Codex profile's `agents/<name>.toml`, generated from the source agents (AC2-08…11).
+    fn generated_agents(&mut self, scan: &BTreeMap<String, Generated>, state: &HarnessState) {
+        let wanted = self.inputs.codex_agents;
+        let names: BTreeSet<&String> = wanted.keys().chain(scan.keys()).collect();
+        for name in names {
+            let rel = format!("{AGENTS}/{name}.toml");
+            let path = self.harness.path.join(&rel);
+            let recorded = state.generated.get(&rel);
+            let desired = wanted.get(name);
+            let entry = scan.get(name);
+            let owned = |hash: &String, content: &[u8]| {
+                recorded == Some(hash) || matches!(desired, Some(Ok(b)) if b == content)
+            };
+            if self.harness.excludes(&rel) {
+                if let Some(Generated::File { content, hash }) = entry
+                    && owned(hash, content)
+                {
+                    self.actions.push(Action::RemoveGenerated { rel, path });
+                }
+                continue;
+            }
+            let kind = ItemKind::Agent;
+            match (entry, desired) {
+                (None, Some(Ok(content))) => {
+                    self.item(kind, name, ItemState::Missing);
+                    self.actions.push(Action::WriteGenerated {
+                        rel,
+                        path,
+                        content: content.clone(),
+                    });
+                }
+                (None, Some(Err(reason))) => self.invalid(kind, name, reason),
+                (None, None) => {}
+                (Some(Generated::Link(_)), _) => self.item(kind, name, ItemState::ForeignLink),
+                (Some(Generated::File { content, hash }), desired) => {
+                    if !owned(hash, content) {
+                        let state = if recorded.is_some() {
+                            ItemState::Edited
+                        } else {
+                            ItemState::Foreign
+                        };
+                        self.item(kind, name, state);
+                        continue;
+                    }
+                    match desired {
+                        Some(Ok(want)) if want == content => {
+                            self.item(kind, name, ItemState::Ok);
+                            if recorded != Some(hash) {
+                                self.actions.push(Action::RecordGenerated {
+                                    rel,
+                                    hash: hash.clone(),
+                                });
+                            }
+                        }
+                        Some(Ok(want)) => {
+                            self.item(kind, name, ItemState::Broken);
+                            self.actions.push(Action::WriteGenerated {
+                                rel,
+                                path,
+                                content: want.clone(),
+                            });
+                        }
+                        Some(Err(reason)) => self.invalid(kind, name, reason),
+                        None => {
+                            self.item(kind, name, ItemState::Orphaned);
+                            self.actions.push(Action::RemoveGenerated { rel, path });
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn links(&mut self, kind: ItemKind, entries: &std::collections::BTreeMap<String, Entry>) {
@@ -354,24 +484,24 @@ impl Builder<'_> {
         }
     }
 
-    fn plugins(&mut self, scan: &Result<crate::adapter::Plugins, String>, state: &HarnessState) {
+    fn plugins(
+        &mut self,
+        scan: &Result<crate::adapter::Plugins, String>,
+        state: &HarnessState,
+        list: PluginList,
+    ) {
         let plugins = match scan {
             Ok(p) => p,
             Err(reason) => {
-                self.items.push(Item {
-                    kind: ItemKind::Plugin,
-                    name: "*".to_string(),
-                    state: ItemState::Invalid,
-                    hint: Some(reason.clone()),
-                });
+                self.invalid(ItemKind::Plugin, "*", reason);
                 return;
             }
         };
-        let config = self.inputs.config;
+        let (config_markets, config_plugins) = self.inputs.config.plugin_list(list);
         let excluded = |id: &str| self.harness.excludes(&format!("plugins/{id}"));
-        let wanted: Vec<&String> = config.plugins.iter().filter(|id| !excluded(id)).collect();
+        let wanted: Vec<&String> = config_plugins.iter().filter(|id| !excluded(id)).collect();
         let mut adds = Vec::new();
-        for (name, source) in &config.marketplaces {
+        for (name, source) in config_markets {
             if plugins.marketplaces.contains_key(name) {
                 self.item(ItemKind::Marketplace, name, ItemState::Ok);
             } else {
@@ -406,7 +536,7 @@ impl Builder<'_> {
             }
         }
         for name in &state.marketplaces {
-            if config.marketplaces.contains_key(name) {
+            if config_markets.contains_key(name) {
                 continue;
             }
             if plugins.marketplaces.contains_key(name) {
@@ -418,7 +548,7 @@ impl Builder<'_> {
         }
 
         for id in &plugins.installed {
-            let ours = config.plugins.contains(id) || state.plugins.contains(id);
+            let ours = config_plugins.contains(id) || state.plugins.contains(id);
             if !ours && !excluded(id) {
                 self.item(ItemKind::Plugin, id, ItemState::Foreign);
             }
@@ -441,10 +571,20 @@ pub fn plan(harness: &Harness, scan: &Scan, state: &HarnessState, inputs: &Input
     if scan.root == Root::Ok {
         b.actions
             .extend(scan.temps.iter().cloned().map(Action::CleanupTemp));
-        b.instructions(&scan.instructions, state);
-        b.links(ItemKind::Skill, &scan.skills);
-        b.links(ItemKind::Agent, &scan.agents);
-        b.plugins(&scan.plugins, state);
+        match harness.kind {
+            Kind::Claude => {
+                b.instructions(&scan.instructions, state);
+                b.links(ItemKind::Skill, &scan.skills);
+                b.links(ItemKind::Agent, &scan.agents);
+                b.plugins(&scan.plugins, state, PluginList::Claude);
+            }
+            Kind::Codex => {
+                b.instructions_link(&scan.instructions);
+                b.generated_agents(&scan.generated, state);
+                b.plugins(&scan.plugins, state, PluginList::Codex);
+            }
+            Kind::Agents => b.links(ItemKind::Skill, &scan.skills),
+        }
     }
     HarnessPlan {
         root: scan.root,
@@ -501,6 +641,7 @@ mod tests {
             source_dir: Path::new("/src"),
             source_display: "~/.colctl",
             generated: GEN,
+            codex_agents: &BTreeMap::new(),
         };
         plan(h, s, st, &inputs)
     }
@@ -1038,7 +1179,16 @@ mod tests {
             name: "m".into(),
             state: ItemState::Ok,
             hint: None,
+            address: Item::address_for(ItemKind::Marketplace, Kind::Claude, "m"),
         };
         assert_eq!(item.address(), "marketplace m");
+        assert_eq!(
+            Item::address_for(ItemKind::Agent, Kind::Codex, "r"),
+            "agents/r.toml"
+        );
+        assert_eq!(
+            Item::address_for(ItemKind::Agent, Kind::Claude, "r"),
+            "agents/r.md"
+        );
     }
 }
