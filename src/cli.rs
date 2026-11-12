@@ -95,6 +95,14 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// List held new versions, or show one: commits, changed files, risk flags and the diff
+    Review {
+        /// A source name, skills/<name> or agents/<name>.md
+        name: Option<String>,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the version
     Version,
 }
@@ -226,6 +234,7 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             rev,
             dry_run,
         } => commands::update(ctx, &names, check, rev.as_deref(), dry_run),
+        Command::Review { name, json } => commands::review(ctx, name.as_deref(), json),
         Command::Version => {
             println!("colctl {}", env!("CARGO_PKG_VERSION"));
             Ok(0)

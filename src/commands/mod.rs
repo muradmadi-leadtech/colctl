@@ -17,7 +17,7 @@ use crate::vault::{self, CloneState, Vault};
 use std::collections::BTreeMap;
 
 mod quarantine;
-pub use quarantine::{refresh, update};
+pub use quarantine::{refresh, review, update};
 
 /// Where source plugin clones live, and colctl-written manifests inside it.
 pub const PLUGINS: &str = "plugins";

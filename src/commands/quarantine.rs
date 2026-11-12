@@ -7,8 +7,10 @@ use crate::ctx::Ctx;
 use crate::error::CliError;
 use crate::fsx;
 use crate::git::Git;
+use crate::review::{self, Direction, Review, escape, escape_body};
 use crate::state::{self, Candidate, HeldCommit, HeldCopy, Lock, State};
 use crate::vault::{self, Vault};
+use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
 
@@ -318,6 +320,300 @@ pub fn refresh(ctx: &Ctx, items: &[String], dry_run: bool) -> Result<i32, CliErr
     }
     state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))?;
     Ok(if refused > 0 { EXIT_DRIFT } else { 0 })
+}
+
+/// A held candidate as `review`, `status` and `approve` see it.
+pub(super) struct View {
+    pub key: String,
+    pub name: String,
+    pub candidate: Candidate,
+    pub repo: Option<String>,
+    pub review: Option<Review>,
+    /// Why the candidate can't be used (EC4-12, EC4-13).
+    pub error: Option<String>,
+    /// Something to know before approving (EC4-14).
+    pub warning: Option<String>,
+}
+
+/// The short name shown for a key: the source name, or the key itself for skills and agents.
+fn name_of(key: &str) -> String {
+    key.strip_prefix("sources/").unwrap_or(key).to_string()
+}
+
+/// Turns a name from the command line into a candidate key, checking it names something colctl
+/// knows (EC4-03).
+pub(super) fn resolve(ws: &Workspace, name: &str) -> Result<String, CliError> {
+    if name.contains('/') {
+        if ws.state.origins.contains_key(name) || ws.state.quarantine.contains_key(name) {
+            return Ok(name.to_string());
+        }
+        return Err(CliError::usage(format!(
+            "no taken-over item \"{name}\"; use a source name, skills/<name> or agents/<name>.md"
+        )));
+    }
+    if ws.config.sources.iter().any(|s| s.name == name) {
+        return Ok(source_key(name));
+    }
+    Err(CliError::usage(format!("no source named \"{name}\"")))
+}
+
+/// Reads one candidate: checks it's intact, and gathers its review (with the diff when asked).
+pub(super) fn inspect(
+    ctx: &Ctx,
+    ws: &Workspace,
+    git: &Git,
+    key: &str,
+    candidate: &Candidate,
+    with_diff: bool,
+) -> View {
+    let name = name_of(key);
+    let mut view = View {
+        key: key.to_string(),
+        name: name.clone(),
+        candidate: candidate.clone(),
+        repo: None,
+        review: None,
+        error: None,
+        warning: None,
+    };
+    let result = match candidate {
+        Candidate::Source(c) => {
+            let declared = ws.config.sources.iter().find(|s| s.name == name);
+            view.repo = declared.map(|s| s.repo.clone());
+            if let Some(s) = declared.filter(|s| s.rev != c.from) {
+                view.warning = Some(format!(
+                    "{name}'s pin changed since it was held (now {}); run colctl update {name} again",
+                    vault::short(&s.rev)
+                ));
+            }
+            let vault = Vault {
+                git,
+                dir: plugins_dir(ctx),
+            };
+            if vault.held(&name).as_deref() != Some(c.to.as_str()) {
+                Err(format!(
+                    "the held commit for {name} is missing; run colctl update {name}"
+                ))
+            } else {
+                review::commits(git, &vault.path(&name), &c.from, &c.to, with_diff)
+            }
+        }
+        Candidate::Skill(c) | Candidate::Agent(c) => {
+            let is_dir = matches!(candidate, Candidate::Skill(_));
+            let held = state::snapshot_path(&ctx.source, key);
+            if hash_item(&held, is_dir).ok().as_deref() != Some(c.hash.as_str()) {
+                Err(format!(
+                    "the held copy of {key} changed since it was held; reject it and refresh again"
+                ))
+            } else {
+                review::copies(
+                    git,
+                    &ctx.source,
+                    &ctx.source.join(key),
+                    &held,
+                    is_dir,
+                    with_diff,
+                )
+            }
+        }
+    };
+    match result {
+        Ok(r) => view.review = Some(r),
+        Err(e) => view.error = Some(e),
+    }
+    view
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// "from → to" for a candidate: short commits, or the origin for a held copy.
+fn change_text(ctx: &Ctx, c: &Candidate) -> String {
+    match c {
+        Candidate::Source(c) => format!("{} → {}", vault::short(&c.from), vault::short(&c.to)),
+        Candidate::Skill(c) | Candidate::Agent(c) => ctx.tilde(&c.origin),
+    }
+}
+
+fn summary_line(ctx: &Ctx, v: &View) -> String {
+    let what = change_text(ctx, &v.candidate);
+    let Some(r) = &v.review else {
+        return format!(
+            "{:<22}{what}   error: {}",
+            escape(&v.key),
+            escape(v.error.as_deref().unwrap_or_default())
+        );
+    };
+    let size = match (&v.candidate, r.direction) {
+        (Candidate::Source(_), Direction::Back) => {
+            format!("goes back {}", plural(r.commits.len(), "commit", "commits"))
+        }
+        (Candidate::Source(_), Direction::Forward) => plural(r.commits.len(), "commit", "commits"),
+        _ => plural(r.files.len(), "file", "files"),
+    };
+    format!(
+        "{:<22}{what}   {size}   {}",
+        escape(&v.key),
+        plural(r.flags.len(), "flag", "flags")
+    )
+}
+
+fn print_detail(ctx: &Ctx, v: &View) {
+    match &v.candidate {
+        Candidate::Source(c) => println!(
+            "{}  {} → {}  ({})",
+            escape(&v.name),
+            vault::short(&c.from),
+            vault::short(&c.to),
+            escape(v.repo.as_deref().unwrap_or("not declared"))
+        ),
+        Candidate::Skill(c) | Candidate::Agent(c) => {
+            println!("{}  from {}", escape(&v.key), escape(&ctx.tilde(&c.origin)));
+        }
+    }
+    if let Some(w) = &v.warning {
+        println!("warning: {}", escape(w));
+    }
+    let Some(r) = &v.review else { return };
+    if let Candidate::Source(_) = v.candidate {
+        let heading = match r.direction {
+            Direction::Forward => format!("commits ({})", r.commits.len()),
+            Direction::Back => format!(
+                "goes back {} (removed)",
+                plural(r.commits.len(), "commit", "commits")
+            ),
+        };
+        println!("\n{heading}");
+        for c in &r.commits {
+            println!("  {} {}", vault::short(&c.rev), escape(&c.subject));
+        }
+    }
+    println!("\nfiles ({})", r.files.len());
+    for f in &r.files {
+        let mut extra = String::new();
+        if let Some(t) = &f.symlink {
+            extra = format!("    -> {}", escape(t));
+        } else if f.executable {
+            extra = "    (+x)".into();
+        }
+        let renamed = f
+            .old_path
+            .as_ref()
+            .map(|o| format!("{} → ", escape(o)))
+            .unwrap_or_default();
+        println!(
+            "  {}  {renamed}{}{extra}",
+            f.status.letter(),
+            escape(&f.path)
+        );
+    }
+    println!("\nflags ({})", r.flags.len());
+    for f in &r.flags {
+        println!(
+            "  {:<14}{:<32} {}",
+            f.kind.as_str(),
+            escape(&f.path),
+            escape(&f.reason)
+        );
+    }
+    if let Some(diff) = &r.diff {
+        println!("\ndiff");
+        print!("{}", escape_body(diff));
+    }
+}
+
+/// The JSON object for one candidate (interfaces.md § JSON).
+pub(super) fn view_json(v: &View, full: bool) -> Value {
+    let (from, to, origin, held_at) = match &v.candidate {
+        Candidate::Source(c) => (c.from.clone(), c.to.clone(), None, c.held_at),
+        Candidate::Skill(c) | Candidate::Agent(c) => (
+            c.base.clone(),
+            c.hash.clone(),
+            Some(c.origin.display().to_string()),
+            c.held_at,
+        ),
+    };
+    let mut out = json!({
+        "key": v.key,
+        "kind": v.candidate.kind(),
+        "name": match &v.candidate {
+            Candidate::Source(_) => v.name.clone(),
+            _ => v.key.rsplit('/').next().unwrap_or_default().trim_end_matches(".md").to_string(),
+        },
+        "from": from,
+        "to": to,
+        "held_at": held_at,
+        "error": v.error,
+        "warning": v.warning,
+    });
+    if let Candidate::Source(_) = v.candidate {
+        out["repo"] = json!(v.repo);
+        out["direction"] = json!(v.review.as_ref().map(|r| r.direction));
+    } else {
+        out["origin"] = json!(origin);
+    }
+    let r = v.review.as_ref();
+    if full {
+        out["commits"] = json!(r.map(|r| r.commits.clone()).unwrap_or_default());
+        out["files"] = json!(r.map(|r| r.files.clone()).unwrap_or_default());
+        out["flags"] = json!(r.map(|r| r.flags.clone()).unwrap_or_default());
+    } else {
+        out["flags"] = json!(r.map_or(0, |r| r.flags.len()));
+    }
+    if let Some(diff) = r.and_then(|r| r.diff.clone()) {
+        out["diff"] = json!(diff);
+    }
+    out
+}
+
+/// `colctl review [<name>] [--json]` (AC4-19…22): offline, read-only.
+pub fn review(ctx: &Ctx, name: Option<&str>, as_json: bool) -> Result<i32, CliError> {
+    let git = Git::find(&ctx.path_var)?;
+    let ws = load(ctx)?;
+    let Some(name) = name else {
+        let views: Vec<View> = ws
+            .state
+            .quarantine
+            .iter()
+            .map(|(k, c)| inspect(ctx, &ws, &git, k, c, false))
+            .collect();
+        if as_json {
+            let list: Vec<Value> = views.iter().map(|v| view_json(v, true)).collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({"version": 1, "candidates": list}))
+                    .unwrap_or_default()
+            );
+        } else if views.is_empty() {
+            println!("nothing held for review");
+        } else {
+            for v in &views {
+                println!("{}", summary_line(ctx, v));
+            }
+        }
+        return Ok(if views.is_empty() { 0 } else { EXIT_DRIFT });
+    };
+    let key = resolve(&ws, name)?;
+    let Some(candidate) = ws.state.quarantine.get(&key) else {
+        return Err(CliError::usage(format!("nothing held for {name}")));
+    };
+    let view = inspect(ctx, &ws, &git, &key, candidate, true);
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &json!({"version": 1, "candidates": [view_json(&view, true)]})
+            )
+            .unwrap_or_default()
+        );
+    } else {
+        print_detail(ctx, &view);
+        if let Some(e) = &view.error {
+            println!("refused {}: {}", escape(&view.key), escape(e));
+        }
+    }
+    Ok(if view.error.is_some() { EXIT_DRIFT } else { 0 })
 }
 
 #[cfg(test)]
