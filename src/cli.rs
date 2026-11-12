@@ -106,6 +106,17 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Drop held new versions and don't offer them again
+    Reject {
+        /// Source names, skills/<name> or agents/<name>.md
+        names: Vec<String>,
+        /// Every held version
+        #[arg(long)]
+        all: bool,
+        /// Print what would be rejected without changing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// List held new versions, or show one: commits, changed files, risk flags and the diff
     Review {
         /// A source name, skills/<name> or agents/<name>.md
@@ -250,6 +261,11 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             all,
             dry_run,
         } => commands::approve(ctx, &names, all, dry_run),
+        Command::Reject {
+            names,
+            all,
+            dry_run,
+        } => commands::reject(ctx, &names, all, dry_run),
         Command::Review { name, json } => commands::review(ctx, name.as_deref(), json),
         Command::Version => {
             println!("colctl {}", env!("CARGO_PKG_VERSION"));

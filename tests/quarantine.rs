@@ -1060,3 +1060,142 @@ fn ac4_31_origin_changed_leaves_out_what_is_held_or_rejected() {
     let v = env.status_json();
     assert_eq!(v["source"]["origin_changed"][0]["item"], "skills/held");
 }
+
+// ---------------------------------------------------------------- reject (T7)
+
+#[test]
+fn ac4_27_rejecting() {
+    let (env, repo, v1, v2) = risky_candidate();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "unwanted").unwrap();
+    env.ok(&["refresh"]);
+    let h = hash(&origin);
+    let calls = (env.log().len(), env.codex_log().len());
+    let out = env.ok(&["reject", "superpowers", "skills/twg-jira"]);
+    assert!(out.contains("rejected sources/superpowers:"), "{out}");
+    assert!(out.contains("rejected skills/twg-jira:"), "{out}");
+    let st = state(&env);
+    assert_eq!(st["quarantine"], Value::Null);
+    assert_eq!(
+        st["rejected"]["sources/superpowers"],
+        serde_json::json!([v2])
+    );
+    assert_eq!(st["rejected"]["skills/twg-jira"], serde_json::json!([h]));
+    assert_eq!(held_ref(&env), "");
+    assert!(
+        !env.source
+            .join(".state/quarantine/skills/twg-jira")
+            .exists()
+    );
+    assert_eq!(pin(&env), v1);
+    assert_eq!(
+        (env.log().len(), env.codex_log().len()),
+        calls,
+        "nothing installs"
+    );
+
+    let out = env.ok(&["update"]);
+    assert!(
+        out.contains(&format!(
+            "superpowers: {} was rejected; nothing held",
+            &v2[..7]
+        )),
+        "{out}"
+    );
+    let out = env.ok(&["refresh"]);
+    assert!(
+        out.contains("skills/twg-jira: this version was rejected; nothing held"),
+        "{out}"
+    );
+    assert_eq!(state(&env)["quarantine"], Value::Null);
+    env.ok(&["status"]);
+
+    // Newer versions are held as usual.
+    let v3 = env.upstream_commit(&repo, "v3");
+    fs::write(origin.join("SKILL.md"), "better").unwrap();
+    env.ok(&["update"]);
+    env.ok(&["refresh"]);
+    let st = state(&env);
+    assert_eq!(st["quarantine"]["sources/superpowers"]["to"], v3.as_str());
+    assert_eq!(st["quarantine"]["skills/twg-jira"]["kind"], "skill");
+
+    env.ok(&["reject", "--all"]);
+    assert_eq!(state(&env)["quarantine"], Value::Null);
+    assert_eq!(
+        state(&env)["rejected"]["sources/superpowers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn ac4_28_removing_an_item_drops_its_candidate() {
+    let (env, repo, _, _) = risky_candidate();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh"]);
+    env.ok(&["reject", "--all"]);
+    env.upstream_commit(&repo, "v3");
+    fs::write(origin.join("SKILL.md"), "v3").unwrap();
+    env.ok(&["update"]);
+    env.ok(&["refresh"]);
+    env.ok(&["rm", "source", "superpowers"]);
+    env.ok(&["rm", "skill", "twg-jira"]);
+    let st = state(&env);
+    assert_eq!(st["quarantine"], Value::Null, "{st}");
+    assert_eq!(st["rejected"], Value::Null, "{st}");
+    assert!(
+        !env.source
+            .join(".state/quarantine/skills/twg-jira")
+            .exists()
+    );
+}
+
+#[test]
+fn ec4_01_ec4_02_ec4_03_reject_arguments_and_dry_run() {
+    let (env, repo, _) = with_source();
+    let out = env.ok(&["reject", "--all"]);
+    assert!(out.contains("nothing held"), "{out}");
+    for (args, needle) in [
+        (&["reject"][..], "or use --all"),
+        (&["reject", "superpowers", "--all"], "not both"),
+        (&["reject", "superpowers"], "nothing held for superpowers"),
+        (&["reject", "nope"], "no source named"),
+    ] {
+        let (code, _, err) = env.code(args);
+        assert_eq!(code, 2, "{args:?}");
+        assert!(err.contains(needle), "{args:?}: {err}");
+    }
+    env.upstream_commit(&repo, "v2");
+    env.ok(&["update"]);
+    let before = state(&env);
+    let out = env.ok(&["reject", "superpowers", "--dry-run"]);
+    assert!(out.contains("would reject sources/superpowers:"), "{out}");
+    assert_eq!(state(&env), before);
+}
+
+#[test]
+fn ec4_20_reject_and_approve_wait_for_the_lock() {
+    let (env, repo, _) = with_source();
+    env.upstream_commit(&repo, "v2");
+    env.ok(&["update"]);
+    fs::write(
+        env.source.join(".state/lock"),
+        std::process::id().to_string(),
+    )
+    .unwrap();
+    for args in [
+        &["reject", "--all"][..],
+        &["approve", "--all"],
+        &["refresh"],
+    ] {
+        let (code, _, err) = env.code(args);
+        assert_eq!(code, 3, "{args:?}: {err}");
+    }
+    // review and status read without the lock.
+    assert_eq!(env.code(&["review"]).0, 1);
+    assert_ne!(env.code(&["status"]).0, 3);
+    fs::remove_file(env.source.join(".state/lock")).unwrap();
+}

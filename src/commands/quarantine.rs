@@ -815,6 +815,73 @@ pub fn approve(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<
     Ok(if refused > 0 { EXIT_DRIFT } else { code })
 }
 
+/// `colctl reject` (AC4-27): drops held candidates and remembers their versions, so `update` and
+/// `refresh` don't hold them again.
+pub fn reject(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<i32, CliError> {
+    let git = Git::find(&ctx.path_var)?;
+    let ws = load(ctx)?;
+    let keys = chosen(&ws, names, all, "reject")?;
+    if keys.is_empty() {
+        println!("nothing held");
+        return Ok(0);
+    }
+    if dry_run {
+        for key in &keys {
+            println!(
+                "would reject {key}: {}",
+                change_text(ctx, &ws.state.quarantine[key])
+            );
+        }
+        return Ok(0);
+    }
+    let _lock = Lock::acquire(&ctx.source)?;
+    let mut st = state::load(&ctx.source)?;
+    let vault = Vault {
+        git: &git,
+        dir: plugins_dir(ctx),
+    };
+    for key in &keys {
+        let Some(candidate) = st.quarantine.remove(key) else {
+            continue;
+        };
+        st.rejected
+            .entry(key.clone())
+            .or_default()
+            .insert(candidate.version().to_string());
+        drop_held(ctx, &vault, key);
+        println!("rejected {key}: {}", change_text(ctx, &candidate));
+    }
+    state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))?;
+    Ok(0)
+}
+
+/// Deletes what keeps a candidate: the clone's ref, or the snapshot.
+fn drop_held(ctx: &Ctx, vault: &Vault, key: &str) {
+    match key.strip_prefix("sources/") {
+        Some(name) => {
+            let _ = vault.release(name);
+        }
+        None => {
+            let _ = fsx::remove_any(&state::snapshot_path(&ctx.source, key));
+        }
+    }
+}
+
+/// Forgets everything held or rejected for an item that's being removed (AC4-28).
+pub(super) fn forget(ctx: &Ctx, git: &Git, key: &str) -> Result<(), CliError> {
+    let mut st = state::load(&ctx.source)?;
+    if !st.quarantine.contains_key(key) && !st.rejected.contains_key(key) {
+        return Ok(());
+    }
+    let vault = Vault {
+        git,
+        dir: plugins_dir(ctx),
+    };
+    drop_held(ctx, &vault, key);
+    st.forget(key);
+    state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
