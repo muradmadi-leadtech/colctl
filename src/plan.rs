@@ -1550,4 +1550,49 @@ mod tests {
             "agents/r.md"
         );
     }
+
+    #[test]
+    fn ac3_24_a_pending_replacement_shows_in_status() {
+        let mut s = scan();
+        let mut plugins = Plugins::default();
+        plugins
+            .installed
+            .insert("superpowers@anthropic-plugin-directory".into());
+        s.plugins = Ok(plugins);
+        let src = SourceInput {
+            name: "superpowers".into(),
+            repo: "https://github.com/obra/superpowers".into(),
+            rev: "a".repeat(40),
+            replaces: vec!["superpowers@anthropic-plugin-directory".into()],
+            claude: SourceTarget::Unsupported("x".into()),
+            codex: SourceTarget::Unsupported("x".into()),
+        };
+        let inputs = Inputs {
+            config: &Config::default(),
+            source: &source(&[], &[], false),
+            source_dir: Path::new("/src"),
+            source_display: "~/.colctl",
+            generated: GEN,
+            codex_agents: &BTreeMap::new(),
+            sources: std::slice::from_ref(&src),
+        };
+        let mut ready = src.clone();
+        ready.claude = SourceTarget::Ready(crate::packaging::Target {
+            marketplace_dir: "/src/plugins/superpowers".into(),
+            marketplace: "superpowers-dev".into(),
+            id: "superpowers@superpowers-dev".into(),
+        });
+        let inputs_ready = Inputs {
+            sources: std::slice::from_ref(&ready),
+            ..inputs
+        };
+        let p = plan(&harness(&[]), &s, &HarnessState::default(), &inputs_ready);
+        assert!(
+            states(&p)
+                .contains(&"plugin superpowers@anthropic-plugin-directory orphaned".to_string()),
+            "{:?}",
+            states(&p)
+        );
+        assert!(!p.in_sync());
+    }
 }

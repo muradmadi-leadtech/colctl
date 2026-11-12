@@ -329,4 +329,27 @@ mod tests {
             "<!-- Managed by colctl. Edit ~/.colctl/AGENTS.md instead; this file is regenerated. -->\n@~/.colctl/AGENTS.md\n"
         );
     }
+
+    #[test]
+    fn ac3_12_only_user_scope_installs_count() {
+        let f = fixture();
+        fs::create_dir_all(f.harness.join("plugins")).unwrap();
+        fs::write(
+            f.harness.join(INSTALLED_PLUGINS),
+            json!({"version": 2, "plugins": {
+                "both@m": [{"scope": "user"}, {"scope": "project", "projectPath": "/p"}],
+                "project-only@m": [{"scope": "project", "projectPath": "/p", "gitCommitSha": "abc"}],
+                "local-only@m": [{"scope": "local", "projectPath": "/p"}],
+                "no-scope@m": [{}]
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        let p = read_plugins(&f.harness).unwrap();
+        assert_eq!(
+            p.installed.iter().map(String::as_str).collect::<Vec<_>>(),
+            vec!["both@m", "no-scope@m"]
+        );
+        assert!(!p.revs.contains_key("project-only@m"));
+    }
 }
