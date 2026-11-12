@@ -4,6 +4,7 @@
 colctl add skill <path | git-url> [--subdir <path>] [--name <name>] [--dry-run]
 colctl add agent <file.md> [--dry-run]
 colctl add plugin <name@marketplace> [--codex] [--marketplace <source>] [--dry-run]
+colctl add source <repo> [--rev <commit-ish>] [--name <name>] [--plugin <plugin>] [--dry-run]
 ```
 
 Each adds one item to the source, commits (`colctl: add <kind> <name>`), then runs [sync](sync.md).
@@ -33,3 +34,13 @@ colctl add plugin superpowers@superpowers-dev --codex --marketplace github:obra/
 
 Exit 2, with nothing changed, when the item is already managed, the name or id is invalid, the folder has no
 `SKILL.md`, the clone fails, or the marketplace is unknown and `--marketplace` is missing.
+
+**source** (`colctl add source`): clones the repo into `~/.colctl/plugins/<name>`, pins `--rev` (a tag, branch or
+commit) or the default branch's head, and checks that it packages the plugin for Claude or Codex. Then it adds a
+`[[source]]` entry, commits `colctl: add source <name>`, and syncs. The name defaults to the repo's name, and the
+plugin to the repo's name. A repo with no packaging for the plugin is refused (exit 2) and its clone removed.
+
+```sh
+colctl add source https://github.com/obra/superpowers
+colctl add source github:owner/repo --rev v2.1.0 --plugin the-plugin
+```

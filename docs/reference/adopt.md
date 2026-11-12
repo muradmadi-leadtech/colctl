@@ -40,3 +40,19 @@ Each adopted item is committed as `colctl: adopt <kind> <name>` (`colctl: adopt 
 Output: one line per item, `adopted …`, `linked (already identical) …` or `refused …: <reason>`.
 Exit code: **1** if anything was refused or the sync afterwards isn't clean, otherwise **0**; **2** for an unknown
 harness or item.
+
+## Plugins with a known source
+
+When `adopt` meets a plugin (or a `from-aggregator` one) whose own repo it can find, it makes it a **source plugin**
+instead of adding it to a plugin list. It can find the repo through Claude's plugin-directory bindings, a marketplace
+manifest that points at the plugin's repo or a folder in its own repo, or a Codex marketplace.
+
+1. The repo is cloned and pinned to the **commit that's installed now** (or, if no tool recorded one, to the default
+   branch's head, which adopt says).
+2. A `[[source]]` is added with the adopted id in `replaces`, and the id leaves `[plugins]`/`[codex.plugins]` if it was
+   listed. Commit: `colctl: adopt plugin <id> from source`.
+3. Sync installs the source everywhere its repo packages for and uninstalls the aggregator's copy. If the plugin's
+   marketplace was the plugin's own repo served remotely, that marketplace is re-pointed at the clone.
+
+The same plugin from another aggregator, in another harness, just joins that source's `replaces`. A plugin whose
+source can't be found is adopted into the plugin list as before.

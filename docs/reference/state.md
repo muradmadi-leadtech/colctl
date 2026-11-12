@@ -44,3 +44,14 @@ installed are no longer uninstalled automatically.
 ## lock
 
 Holds the pid of the colctl run that changes things. A lock whose pid isn't running is reclaimed with a notice.
+
+## sources (per harness)
+
+```json
+"harnesses": { "codex": { "sources": {
+  "superpowers": { "id": "superpowers@superpowers-dev", "marketplace": "superpowers-dev", "rev": "8ca22db…" }
+} } }
+```
+
+What colctl installed for each source plugin in that harness, and at which commit. A failed update leaves the old
+commit here, so the next sync retries. When a source is removed, colctl uninstalls exactly what's recorded.

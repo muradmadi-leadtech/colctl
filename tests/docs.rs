@@ -82,6 +82,11 @@ fn ac_34_docs_exist_for_everything_shipped() {
         "docs/how-to/add-codex.md",
         "docs/how-to/take-over-skills-a-tool-installed.md",
         "docs/explanation/codex-and-the-shared-skills-folder.md",
+        // Cycle 3 (AC3-27)
+        "docs/reference/update.md",
+        "docs/how-to/move-a-plugin-to-its-source.md",
+        "docs/how-to/update-plugins.md",
+        "docs/explanation/plugins-from-source.md",
     ];
     for page in pages {
         assert!(read(page).starts_with("# "), "{page} needs a title");
@@ -140,6 +145,7 @@ fn defined_ids() -> BTreeSet<String> {
     for (dir, ac, ec) in [
         ("claude-profile-sync", "AC", "EC"),
         ("codex-cli-support", "AC2", "EC2"),
+        ("plugins-from-source", "AC3", "EC3"),
     ] {
         for (file, prefix, id) in [
             ("acceptance-criteria.md", format!("**{ac}-"), ac),
@@ -185,7 +191,7 @@ fn tested_ids() -> BTreeSet<String> {
                 .collect();
             let parts: Vec<&str> = name.split('_').collect();
             for pair in parts.windows(2) {
-                if ["ac", "ec", "ac2", "ec2"].contains(&pair[0])
+                if ["ac", "ec", "ac2", "ec2", "ac3", "ec3"].contains(&pair[0])
                     && pair[1].len() == 2
                     && pair[1].chars().all(|c| c.is_ascii_digit())
                 {
@@ -198,9 +204,16 @@ fn tested_ids() -> BTreeSet<String> {
 }
 
 #[test]
-fn ac_35_ac2_23_every_criterion_and_edge_case_has_a_named_test() {
+fn ac_35_ac2_23_ac3_28_every_criterion_and_edge_case_has_a_named_test() {
     let defined = defined_ids();
-    for (prefix, count) in [("AC-", 35), ("EC-", 31), ("AC2-", 28), ("EC2-", 28)] {
+    for (prefix, count) in [
+        ("AC-", 35),
+        ("EC-", 31),
+        ("AC2-", 28),
+        ("EC2-", 28),
+        ("AC3-", 28),
+        ("EC3-", 18),
+    ] {
         assert_eq!(
             defined.iter().filter(|i| i.starts_with(prefix)).count(),
             count,
@@ -218,4 +231,42 @@ fn ac2_21_the_cycle_1_suite_is_still_complete() {
     let cli = read("tests/cli.rs");
     assert_eq!(cli.matches("#[test]").count(), 55);
     assert!(!cli.contains("#[ignore"));
+}
+
+#[test]
+fn ac3_27_docs_cover_source_plugins() {
+    let config = read("docs/reference/config.md");
+    for needle in ["[[source]]", "rev =", "replaces", "sources/<name>"] {
+        assert!(
+            config.contains(needle),
+            "reference/config.md lacks {needle}"
+        );
+    }
+    assert!(read("docs/reference/add.md").contains("add source"));
+    assert!(read("docs/reference/rm.md").contains("rm source"));
+    assert!(read("docs/reference/update.md").contains("--check"));
+    assert!(read("docs/reference/adopt.md").contains("source plugin"));
+    let status = read("docs/reference/status.md");
+    for needle in ["outdated", "unsupported", "from-aggregator", "\"sources\""] {
+        assert!(
+            status.contains(needle),
+            "reference/status.md lacks {needle}"
+        );
+    }
+    assert!(read("docs/reference/state.md").contains("sources"));
+    assert!(read("docs/reference/commands.md").contains("colctl update"));
+    assert!(read("README.md").contains("source"));
+}
+
+#[test]
+fn ac3_26_earlier_suites_are_still_complete() {
+    for (file, count) in [
+        ("tests/cli.rs", 55),
+        ("tests/codex.rs", 19),
+        ("tests/takeover.rs", 16),
+    ] {
+        let text = read(file);
+        assert_eq!(text.matches("#[test]").count(), count, "{file}");
+        assert!(!text.contains("#[ignore"), "{file}");
+    }
 }

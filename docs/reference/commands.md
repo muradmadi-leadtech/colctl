@@ -9,6 +9,7 @@
 | `colctl rm skill\|agent\|plugin <name> [--dry-run]` | [rm](rm.md) | yes |
 | `colctl adopt [<harness> [<item>]] [--dry-run]` | [adopt](adopt.md) | yes |
 | `colctl refresh [<item>…] [--dry-run]` | [refresh](refresh.md) | yes |
+| `colctl update [<name>…] [--check] [--rev <commit-ish>] [--dry-run]` | [update](update.md) | yes (not with `--check`) |
 | `colctl version`, `colctl --version` | — | never |
 
 Every command that changes something:
@@ -32,3 +33,8 @@ colctl removes `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR` and every 
 `claude`, then sets `CLAUDE_CONFIG_DIR` to the profile being synced (except for `~/.claude`). Running colctl from
 inside a Claude Code session is safe. For `codex` it removes `CODEX_HOME` and every `OPENAI_*` variable, then sets
 `CODEX_HOME` to the profile (except for `~/.codex`), so running inside a Codex session is safe too.
+
+## Network
+
+Only `colctl update`, `colctl adopt` (when it clones a plugin's source), `colctl add source`, and the first `sync` after a
+source is declared contact upstream repos. `status` and every other `sync` work offline.

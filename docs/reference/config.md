@@ -58,3 +58,21 @@ the `codex` ones. See [Codex and the shared skills folder](../explanation/codex-
 | `codex.plugins.enabled` | `name@marketplace`; the marketplace must be in `[codex.marketplaces]` unless it is `openai-curated`. A Claude marketplace doesn't count. |
 
 `colctl add plugin`, `rm plugin`, `adopt` and `init` edit this file in place and keep its comments and formatting.
+
+## Source plugins
+
+A plugin installed from its own repo, pinned to a commit. See [plugins from source](../explanation/plugins-from-source.md).
+
+```toml
+[[source]]
+name = "superpowers"                                  # [A-Za-z0-9][A-Za-z0-9._-]*, unique; the clone's folder name
+repo = "https://github.com/obra/superpowers"           # URL, git@host:path, file://, absolute path, or github:owner/repo
+rev = "8ca22dba9a94f28898bbce59f2537ff4d87c747d"       # the pinned commit, all 40 hex characters
+plugin = "superpowers"                                # optional: its name in the repo's manifests (default: name)
+path = "plugins/superpowers"                          # optional: its folder inside the repo, if not the root
+replaces = ["superpowers@anthropic-plugin-directory"] # optional: ids uninstalled wherever they're installed
+```
+
+colctl clones each source into `~/.colctl/plugins/<name>` (git-ignored) at `rev`, and installs it in every claude and
+codex harness its repo packages for. Change `rev` with [`colctl update`](update.md) rather than by hand. A claude or
+codex harness can opt out of one source with `exclude = ["sources/<name>"]`.
