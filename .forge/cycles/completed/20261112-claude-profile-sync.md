@@ -116,11 +116,11 @@ only #7 has a recorded RED → GREEN. See `docs/claude-profile-sync/cycle-review
 - [x] Code review: Security review completed
 - [x] Code review: Integration and interface contracts verified
 - [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
-- [ ] Disposition decision made
+- [x] Disposition decision made
 
 ### Disposition
 
-Proposed: **Accept with issues** (see cycle-review.md). Awaiting the owner's sign-off. No HTML sibling of the
+**Accept.** Signed off by the owner on 2026-11-12 after testing and evaluating it themselves. No HTML sibling of the
 review: the project doesn't render its docs.
 
 ---
