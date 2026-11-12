@@ -16,6 +16,11 @@ Cycle 1 Focus probes (2026-11-12, Claude Code 2.1.322): symlinked skill folders 
 
 GitHub holds workflows on PRs opened by the Actions token; gh api -X POST repos/<o>/<r>/actions/runs/<id>/approve releases them without the web button.
 
+### Codex probes (cycle 2)
+*Added: 2026-11-12*
+
+2026-11-12, codex-cli 0.167.2 via kilo-codex: a symlinked $CODEX_HOME/AGENTS.md is read; a symlinked folder in $HOME/.agents/skills is discovered (skills are per-HOME, shared by every Codex profile); a TOML in $CODEX_HOME/agents/ (name, description, developer_instructions) is a usable custom agent. codex plugin marketplace add <src> records [marketplaces.<manifest-name>] in $CODEX_HOME/config.toml (name from the marketplace manifest, e.g. obra/superpowers -> superpowers-dev); codex plugin add <id> records [plugins."<id>"] enabled = true and caches under plugins/cache; remove commands delete both. openai/plugins is reserved (built in). kilo-proxy merges its own keys into profiles/codex/config.toml and keeps the rest.
+
 ## Anti-Patterns
 
 <!-- Approaches to avoid -->
