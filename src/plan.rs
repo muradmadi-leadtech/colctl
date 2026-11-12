@@ -798,6 +798,9 @@ impl Builder<'_> {
             let own_id_replaced = source.replaces.contains(&target.id) && !own_id_taken_over;
             for id in &source.replaces {
                 if plugins.installed.contains(id) && (id != &target.id || own_id_replaced) {
+                    if id != &target.id {
+                        self.item(ItemKind::Plugin, id, ItemState::Orphaned);
+                    }
                     self.actions.push(Action::Uninstall { id: id.clone() });
                 }
             }
