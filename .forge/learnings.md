@@ -36,6 +36,11 @@ Cycle 2: each feature PR's first commit (tests + compiling stubs) was pushed so 
 
 Cycle 3's smoke on copies of real profiles found plugins installed in both user and project scope; unit and e2e fixtures never had that. Keep smoke tests on copies of real state before every release.
 
+### Open the PR on the RED commit
+*Added: 2026-11-12*
+
+CI only runs on pull requests, so a RED commit pushed before the PR exists never shows as failing. Push RED, open the PR, wait for check to fail, then push GREEN (pushing GREEN early cancels the RED run).
+
 ## Anti-Patterns
 
 <!-- Approaches to avoid -->
@@ -60,6 +65,11 @@ Copying only config.toml of kilo's Codex profile left out models.json (reference
 
 A python str.replace aimed at code cargo fmt had already reflowed silently did nothing (fake CLIs). Assert the old text exists before replacing, or use the Edit tool.
 
+### Pushing docs without the gate
+*Added: 2026-11-12*
+
+Docs-only pushes still run typos and link checks; the cycle 4 plan PR failed on a crate name. Run just check before every push, docs included.
+
 ## Decisions
 
 <!-- Key decisions and their rationale -->
@@ -74,6 +84,11 @@ release-please's release-as pinned v1.0.0 for cycle 1, then a follow-up PR remov
 
 Cycle 4: quarantine plugins/skills, human approves a new version before it installs. Later: convert a plugin for tools its repo doesn't package (e.g. Codex from a Claude-only plugin).
 
+### in_sync excludes pending reviews
+*Added: 2026-11-12*
+
+Pending reviews raise status's exit code but not in_sync, so sync and approve aren't held back by other held versions.
+
 ## Tools
 
 <!-- Useful tools and techniques -->
@@ -82,3 +97,8 @@ Cycle 4: quarantine plugins/skills, human approves a new version before it insta
 *Added: 2026-11-12*
 
 github.com/scottfeltham/forge-skill (commit ffca6bf), installed at ~/.claude/skills/forge.
+
+### Release-please and CI
+*Added: 2026-11-12*
+
+Its CHANGELOG holds short hashes that typos flags (exclude it), its PR runs need approval, and a chore commit doesn't refresh its PR: close and reopen it to rerun CI against current main.
