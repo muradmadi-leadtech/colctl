@@ -1,7 +1,10 @@
 //! Quarantine (cycle 4): `update` and `refresh` hold new versions as candidates; `review`, `approve`
 //! and `reject` decide them. Nothing held reaches a harness until it's approved.
 
-use super::{Copier, EXIT_DRIFT, Workspace, hash_item, load, plugins_dir, real_copy};
+use super::{
+    Copier, EXIT_DRIFT, Workspace, commit, commit_pending, hash_item, load, plugins_dir, real_copy,
+    run_sync, write_config,
+};
 use crate::config;
 use crate::ctx::Ctx;
 use crate::error::CliError;
@@ -9,7 +12,7 @@ use crate::fsx;
 use crate::git::Git;
 use crate::review::{self, Direction, Review, escape, escape_body};
 use crate::state::{self, Candidate, HeldCommit, HeldCopy, Lock, State};
-use crate::vault::{self, Vault};
+use crate::vault::{self, CloneState, Vault};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
@@ -614,6 +617,202 @@ pub fn review(ctx: &Ctx, name: Option<&str>, as_json: bool) -> Result<i32, CliEr
         }
     }
     Ok(if view.error.is_some() { EXIT_DRIFT } else { 0 })
+}
+
+/// The candidate keys named on the command line, or every held one with `--all` (EC4-02, EC4-03).
+fn chosen(
+    ws: &Workspace,
+    names: &[String],
+    all: bool,
+    verb: &str,
+) -> Result<Vec<String>, CliError> {
+    match (names.is_empty(), all) {
+        (true, false) => {
+            return Err(CliError::usage(format!(
+                "name what to {verb} (a source name, skills/<name> or agents/<name>.md), or use --all"
+            )));
+        }
+        (false, true) => {
+            return Err(CliError::usage(format!(
+                "{verb} takes names or --all, not both"
+            )));
+        }
+        (true, true) => return Ok(ws.state.quarantine.keys().cloned().collect()),
+        (false, false) => {}
+    }
+    let mut keys = Vec::new();
+    for name in names {
+        let key = resolve(ws, name)?;
+        if !ws.state.quarantine.contains_key(&key) {
+            return Err(CliError::usage(format!("nothing held for {name}")));
+        }
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    Ok(keys)
+}
+
+/// Approves one candidate: checks it, then moves the pin or replaces the source copy, and commits.
+fn approve_one(
+    ctx: &Ctx,
+    ws: &Workspace,
+    git: &Git,
+    st: &mut State,
+    config_text: &mut String,
+    key: &str,
+) -> Result<String, String> {
+    let Some(candidate) = st.quarantine.get(key).cloned() else {
+        return Err("nothing held".into());
+    };
+    let view = inspect(ctx, ws, git, key, &candidate, false);
+    if let Some(e) = view.error {
+        return Err(e);
+    }
+    let commit_err = |e: CliError| e.message;
+    match &candidate {
+        Candidate::Source(c) => {
+            let name = &view.name;
+            if view.warning.is_some() {
+                return Err(format!(
+                    "{name}'s pin changed since it was held; run colctl update {name} again"
+                ));
+            }
+            let declared = ws
+                .config
+                .sources
+                .iter()
+                .find(|s| &s.name == name)
+                .ok_or_else(|| format!("no source named {name}"))?;
+            let vault = Vault {
+                git,
+                dir: plugins_dir(ctx),
+            };
+            match vault.inspect(name, &declared.clone_url(), &declared.rev) {
+                CloneState::Dirty => {
+                    return Err(format!(
+                        "the clone at {} has local changes",
+                        ctx.tilde(&vault.path(name))
+                    ));
+                }
+                CloneState::Invalid(reason) => return Err(reason),
+                _ => {}
+            }
+            let text = config::set_source_rev(config_text, name, &c.to)?;
+            write_config(ctx, &text).map_err(commit_err)?;
+            *config_text = text;
+            commit(
+                git,
+                ctx,
+                &format!("colctl: approve source {name} at {}", vault::short(&c.to)),
+            )
+            .map_err(commit_err)?;
+            st.quarantine.remove(key);
+            Ok(format!(
+                "approved {name}: {} → {}",
+                vault::short(&c.from),
+                vault::short(&c.to)
+            ))
+        }
+        Candidate::Skill(c) | Candidate::Agent(c) => {
+            let is_dir = matches!(candidate, Candidate::Skill(_));
+            let item = ctx.source.join(key);
+            if hash_item(&item, is_dir).ok().as_deref() != Some(c.base.as_str()) {
+                return Err(format!(
+                    "changed in both places; {} was edited since {key} was held. Reject it, then refresh",
+                    ctx.tilde(&item)
+                ));
+            }
+            let held = state::snapshot_path(&ctx.source, key);
+            snapshot(
+                &held,
+                &staging_for(&item),
+                is_dir,
+                &c.hash,
+                &real_copy(is_dir),
+            )?;
+            fsx::remove_any(&item)
+                .and_then(|()| fs::rename(staging_for(&item), &item).map_err(Into::into))
+                .map_err(|e| format!("{e:#}"))?;
+            let _ = fsx::remove_any(&held);
+            if let Some(o) = st.origins.get_mut(key) {
+                o.hash = c.hash.clone();
+            }
+            st.quarantine.remove(key);
+            state::save(&ctx.source, st).map_err(|e| format!("{e:#}"))?;
+            let (kind, stem) = if is_dir {
+                ("skill", key.trim_start_matches("skills/"))
+            } else {
+                (
+                    "agent",
+                    key.trim_start_matches("agents/").trim_end_matches(".md"),
+                )
+            };
+            commit(git, ctx, &format!("colctl: approve {kind} {stem}")).map_err(commit_err)?;
+            Ok(format!("approved {key} from {}", ctx.tilde(&c.origin)))
+        }
+    }
+}
+
+/// Where an approved copy is staged before it replaces the source copy.
+fn staging_for(item: &Path) -> std::path::PathBuf {
+    let name = item
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    item.with_file_name(format!("{}approve-{name}", fsx::TMP_PREFIX))
+}
+
+/// `colctl approve` (AC4-23…26): installs exactly the held candidates, one commit each, then syncs.
+pub fn approve(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<i32, CliError> {
+    let git = Git::find(&ctx.path_var)?;
+    let ws = load(ctx)?;
+    let keys = chosen(&ws, names, all, "approve")?;
+    if keys.is_empty() {
+        println!("nothing held");
+        return Ok(0);
+    }
+    if dry_run {
+        for key in &keys {
+            println!(
+                "would approve {key}: {}",
+                change_text(ctx, &ws.state.quarantine[key])
+            );
+        }
+        return Ok(0);
+    }
+    let _lock = Lock::acquire(&ctx.source)?;
+    commit_pending(&git, ctx)?;
+    let ws = load(ctx)?;
+    let mut st = ws.state.clone();
+    let mut text = ws.config_text.clone();
+    let mut refused = 0;
+    let mut approved = Vec::new();
+    for key in &keys {
+        match approve_one(ctx, &ws, &git, &mut st, &mut text, key) {
+            Ok(line) => {
+                println!("{line}");
+                approved.push(key.clone());
+            }
+            Err(why) => {
+                refused += 1;
+                println!("refused {key}: {why}");
+            }
+        }
+    }
+    state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))?;
+    if approved.is_empty() {
+        return Ok(EXIT_DRIFT);
+    }
+    let code = run_sync(ctx, &git, None)?;
+    let vault = Vault {
+        git: &git,
+        dir: plugins_dir(ctx),
+    };
+    for key in approved.iter().filter_map(|k| k.strip_prefix("sources/")) {
+        let _ = vault.release(key);
+    }
+    Ok(if refused > 0 { EXIT_DRIFT } else { code })
 }
 
 #[cfg(test)]

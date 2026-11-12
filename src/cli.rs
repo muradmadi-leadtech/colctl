@@ -95,6 +95,17 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Install held new versions exactly as reviewed, then sync
+    Approve {
+        /// Source names, skills/<name> or agents/<name>.md
+        names: Vec<String>,
+        /// Every held version
+        #[arg(long)]
+        all: bool,
+        /// Print what would be approved without changing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// List held new versions, or show one: commits, changed files, risk flags and the diff
     Review {
         /// A source name, skills/<name> or agents/<name>.md
@@ -234,6 +245,11 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             rev,
             dry_run,
         } => commands::update(ctx, &names, check, rev.as_deref(), dry_run),
+        Command::Approve {
+            names,
+            all,
+            dry_run,
+        } => commands::approve(ctx, &names, all, dry_run),
         Command::Review { name, json } => commands::review(ctx, name.as_deref(), json),
         Command::Version => {
             println!("colctl {}", env!("CARGO_PKG_VERSION"));
