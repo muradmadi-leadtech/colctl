@@ -52,7 +52,7 @@ T7 commands · T8 docs · T9 evaluate + v1.2.0. New components vault, packaging,
 
 ---
 
-<!-- FORGE_PHASE:Refine:Complete -->
+<!-- FORGE_PHASE:Refine:Active -->
 ## Phase 3: Refine
 
 **Purpose**: Define exactly what "done" looks like.
@@ -62,6 +62,7 @@ T7 commands · T8 docs · T9 evaluate + v1.2.0. New components vault, packaging,
 - [x] Interface specifications documented
 - [x] Edge cases enumerated by category
 - [x] Constraints vs criteria documented
+- [ ] Revise: AC3-29, AC3-30, EC3-19 written (list plugins with a known source)
 
 **CRITICAL**: No code in this phase - specifications only.
 
@@ -72,18 +73,18 @@ packaging detection; calls; finding a plugin's source; state; status JSON). **Aw
 
 ---
 
-<!-- FORGE_PHASE:Generate:Complete -->
+<!-- FORGE_PHASE:Generate:Pending -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.
 
 ### Process
-- [x] RED: Write failing tests
-- [x] GREEN: Minimal code to pass
-- [x] REFACTOR: Improve while green
-- [x] Code review: Linter and type checks pass
-- [x] Code review: TDD compliance verified
-- [x] Code review: Acceptance criteria alignment checked
+- [ ] RED: Write failing tests
+- [ ] GREEN: Minimal code to pass
+- [ ] REFACTOR: Improve while green
+- [ ] Code review: Linter and type checks pass
+- [ ] Code review: TDD compliance verified
+- [ ] Code review: Acceptance criteria alignment checked
 
 ### Implementation Notes
 
@@ -93,23 +94,26 @@ than on its tests (see cycle-review.md). 228 tests, 95.7% lines.
 
 ---
 
-<!-- FORGE_PHASE:Evaluate:Active -->
+<!-- FORGE_PHASE:Evaluate:Pending -->
 ## Phase 5: Evaluate
 
 **Purpose**: Verify output matches intent.
 
 ### Checklist
-- [x] Criteria verified line-by-line
-- [x] Edge cases tested
-- [x] Code review: Full test suite passes with coverage threshold met
-- [x] Code review: Security review completed
-- [x] Code review: Integration and interface contracts verified
-- [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
+- [ ] Criteria verified line-by-line
+- [ ] Edge cases tested
+- [ ] Code review: Full test suite passes with coverage threshold met
+- [ ] Code review: Security review completed
+- [ ] Code review: Integration and interface contracts verified
+- [ ] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
 - [ ] Disposition decision made
 
 ### Disposition
 
-<!-- Accept / Accept with issues / Revise / Reject -->
+**Revise** (owner, 2026-11-12). Evaluating on the real profiles showed a gap: superpowers was adopted into
+`[plugins]` in cycle 1, so status reports it `ok` (not `from-aggregator`) and `adopt` refuses it ("not a foreign
+item"). There was no one-step path from a list plugin to a source plugin. Back to Refine (AC3-29, AC3-30, EC3-19),
+then Generate, then Evaluate again; patch release v1.2.1.
 
 ---
 
