@@ -6,6 +6,7 @@ mod support;
 
 use serde_json::Value;
 use std::fs;
+use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use support::Env;
 
@@ -14,6 +15,7 @@ fn machine() -> Env {
     env.native();
     env.kilo();
     env.codex();
+    env.agents_dir();
     env.ok(&["init"]);
     env
 }
@@ -326,4 +328,177 @@ fn update_dry_run_holds_nothing() {
     assert!(out.contains(&v2[..7]), "{out}");
     assert_eq!(state(&env)["quarantine"], Value::Null);
     assert_eq!(held_ref(&env), "");
+}
+
+// ---------------------------------------------------------------- refresh holds (T4)
+
+fn hash(path: &Path) -> String {
+    if path.is_dir() {
+        colctl::fsx::hash_tree(path).unwrap()
+    } else {
+        colctl::fsx::hash_file(path).unwrap()
+    }
+}
+
+/// A skill twg keeps in its own folder and links into ~/.agents/skills, taken over by colctl.
+fn adopted_skill(env: &Env, name: &str, body: &str) -> PathBuf {
+    let origin = env.skill_dir(&env.home.join(".config/twg/skills"), name, body);
+    let skills = env.home.join(".agents/skills");
+    fs::create_dir_all(&skills).unwrap();
+    symlink(&origin, skills.join(name)).unwrap();
+    env.ok(&["adopt", "agents", &format!("skills/{name}")]);
+    origin
+}
+
+/// An agent file another tool keeps elsewhere and links into ~/.claude/agents, taken over.
+fn adopted_agent(env: &Env, name: &str, body: &str) -> PathBuf {
+    let dir = env.home.join(".config/tool/agents");
+    fs::create_dir_all(&dir).unwrap();
+    let origin = dir.join(format!("{name}.md"));
+    fs::write(
+        &origin,
+        format!("---\nname: {name}\ndescription: d\n---\n{body}\n"),
+    )
+    .unwrap();
+    let agents = env.home.join(".claude/agents");
+    fs::create_dir_all(&agents).unwrap();
+    symlink(&origin, agents.join(format!("{name}.md"))).unwrap();
+    env.ok(&["adopt", "claude", &format!("agents/{name}.md")]);
+    origin
+}
+
+fn source_text(env: &Env, rel: &str) -> String {
+    fs::read_to_string(env.source.join(rel)).unwrap()
+}
+
+#[test]
+fn ac4_02_held_content_is_never_committed() {
+    let env = machine();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    let commits = env.commits();
+    env.ok(&["refresh"]);
+    let snap = env.source.join(".state/quarantine/skills/twg-jira");
+    assert_eq!(fs::read_to_string(snap.join("SKILL.md")).unwrap(), "v2");
+    assert_eq!(env.git(&["status", "--porcelain"]), "");
+    assert_eq!(env.commits(), commits);
+}
+
+#[test]
+fn ac4_17_refresh_holds_instead_of_copying() {
+    let env = machine();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    let agent = adopted_agent(&env, "rev", "v1");
+    let base_skill = hash(&env.source.join("skills/twg-jira"));
+    let base_agent = hash(&env.source.join("agents/rev.md"));
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    fs::write(&agent, "---\nname: rev\ndescription: d\n---\nv2\n").unwrap();
+    let commits = env.commits();
+    let calls = (env.log().len(), env.codex_log().len());
+    let out = env.ok(&["refresh"]);
+    assert!(
+        out.contains("held skills/twg-jira for review; colctl review skills/twg-jira"),
+        "{out}"
+    );
+    assert!(out.contains("held agents/rev.md for review"), "{out}");
+    assert!(source_text(&env, "skills/twg-jira/SKILL.md").ends_with("v1"));
+    assert!(source_text(&env, "agents/rev.md").contains("v1"));
+    assert_eq!(env.commits(), commits);
+    assert_eq!((env.log().len(), env.codex_log().len()), calls, "no sync");
+    let st = state(&env);
+    assert_eq!(st["origins"]["skills/twg-jira"]["hash"], base_skill);
+    let held = &st["quarantine"]["skills/twg-jira"];
+    assert_eq!(held["kind"], "skill");
+    assert_eq!(held["origin"], origin.display().to_string());
+    assert_eq!(held["base"], base_skill);
+    assert_eq!(held["hash"], hash(&origin));
+    let held = &st["quarantine"]["agents/rev.md"];
+    assert_eq!(held["kind"], "agent");
+    assert_eq!(held["base"], base_agent);
+    assert_eq!(held["hash"], hash(&agent));
+    assert_eq!(
+        hash(&env.source.join(".state/quarantine/agents/rev.md")),
+        hash(&agent)
+    );
+}
+
+#[test]
+fn ac4_18_refusals_stay_and_held_items_are_known() {
+    let env = machine();
+    let both = adopted_skill(&env, "both", "v1");
+    let gone = adopted_skill(&env, "gone", "v1");
+    let held = adopted_skill(&env, "held", "v1");
+    fs::write(held.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh", "skills/held"]);
+    fs::write(both.join("SKILL.md"), "theirs").unwrap();
+    fs::write(env.source.join("skills/both/SKILL.md"), "mine").unwrap();
+    fs::remove_dir_all(&gone).unwrap();
+    let out = env.expect(1, &["refresh"]);
+    assert!(
+        out.contains("refused skills/both: changed in both places"),
+        "{out}"
+    );
+    assert!(out.contains("refused skills/gone: origin is gone"), "{out}");
+    assert!(out.contains("skills/held already held for review"), "{out}");
+    // The origin changes again: a new snapshot replaces the old one.
+    fs::write(held.join("SKILL.md"), "v3").unwrap();
+    let out = env.ok(&["refresh", "skills/held"]);
+    assert!(out.contains("(replaces the copy held before)"), "{out}");
+    assert_eq!(
+        fs::read_to_string(env.source.join(".state/quarantine/skills/held/SKILL.md")).unwrap(),
+        "v3"
+    );
+    assert_eq!(
+        state(&env)["quarantine"]["skills/held"]["hash"],
+        hash(&held)
+    );
+}
+
+#[test]
+fn ec4_10_an_origin_back_at_its_adopted_content_keeps_the_held_copy() {
+    let env = machine();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    let adopted = fs::read_to_string(origin.join("SKILL.md")).unwrap();
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh"]);
+    fs::write(origin.join("SKILL.md"), adopted).unwrap();
+    let out = env.ok(&["refresh"]);
+    assert!(out.contains("skills/twg-jira is up to date with"), "{out}");
+    assert!(
+        env.source
+            .join(".state/quarantine/skills/twg-jira")
+            .is_dir()
+    );
+    assert_eq!(
+        state(&env)["quarantine"]["skills/twg-jira"]["kind"],
+        "skill"
+    );
+}
+
+#[test]
+fn ec4_21_a_symlink_leaving_a_held_skill_stays_a_symlink() {
+    let env = machine();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    let secret = env.home.join("secret.txt");
+    fs::write(&secret, "do not copy").unwrap();
+    symlink(&secret, origin.join("leak")).unwrap();
+    env.ok(&["refresh"]);
+    let snap = env.source.join(".state/quarantine/skills/twg-jira/leak");
+    assert_eq!(fs::read_link(&snap).unwrap(), secret);
+    assert!(
+        fs::symlink_metadata(&snap)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[test]
+fn refresh_dry_run_holds_nothing() {
+    let env = machine();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    let out = env.ok(&["refresh", "--dry-run"]);
+    assert!(out.contains("would hold skills/twg-jira from"), "{out}");
+    assert_eq!(state(&env)["quarantine"], Value::Null);
 }
