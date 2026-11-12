@@ -11,7 +11,7 @@ _Cycle 1 · Evaluate · 2026-11-12_
 | **Released** | [v1.0.0](https://github.com/muradmadi-leadtech/colctl/releases/tag/v1.0.0): `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu` archives, each attested |
 | **Commits on `main`** | #1 `bb1de11`, #2 `c4952ac`, #4 `0b930bf`, #5 `97355a1`, #6 `0fd9fe0`, #7 `21d966c`, #3 `3fffcd8` (release); all pushed, all squash-merged after `check` passed |
 | **Production impact** | None on this machine: the owner's real `~/.claude` and kilo profile were only read. colctl isn't installed globally yet. |
-| **Disposition** | **Proposed: Accept with issues** (see below). Awaiting the owner's sign-off. |
+| **Disposition** | **Accept**, signed off by the owner on 2026-11-12 after testing it themselves. (Proposed was "Accept with issues"; the owner accepted with no issues.) |
 
 ## What changed
 
