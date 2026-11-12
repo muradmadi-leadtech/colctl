@@ -17,7 +17,7 @@ use crate::vault::{self, CloneState, Vault};
 use std::collections::BTreeMap;
 
 mod quarantine;
-pub use quarantine::{approve, refresh, review, update};
+pub use quarantine::{approve, refresh, reject, review, update};
 
 /// Where source plugin clones live, and colctl-written manifests inside it.
 pub const PLUGINS: &str = "plugins";
@@ -940,6 +940,15 @@ pub fn rm(
         }
     }
     commit(&git, ctx, &format!("colctl: rm {label} {name}"))?;
+    let key = match kind {
+        RmKind::Skill => Some(format!("{SKILLS}/{name}")),
+        RmKind::Agent => Some(format!("{AGENTS}/{name}.md")),
+        RmKind::Source => Some(quarantine::source_key(name)),
+        RmKind::Plugin => None,
+    };
+    if let Some(key) = key {
+        quarantine::forget(ctx, &git, &key)?;
+    }
     println!("removed {label} {name}");
     run_sync(ctx, &git, None)
 }
