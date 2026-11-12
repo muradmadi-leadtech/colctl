@@ -46,3 +46,14 @@ cycle 1, v1.1.0 for cycle 2, v1.2.0 for cycle 3). The owner then evaluates.
 - **STOP and get a human:** anything touching the user's real `~/.claude`, `~/.codex`, `~/.agents` or kilo profiles beyond read-only checks
   (the Evaluate smoke test runs against a copy), deleting the repo or rewriting `main` history, changing repo
   settings beyond what `sadr init` sets, secrets or tokens.
+
+## Roadmap
+
+Agreed with the owner on 2026-11-12. The CLI comes first; the TUI only displays logic the CLI already has.
+
+| Cycle | Name | What it adds |
+|---|---|---|
+| 4 | quarantine (CLI) | New versions of plugins and skills wait for the owner's approval before they install. |
+| 5 | discovery (CLI) | List marketplaces, search plugins, browse by developer; all with `--json`. |
+| 6 | TUI | `colctl` with no arguments opens a full-screen UI over status, sync, adopt, update, review and browse. The aim is Claude Code-level polish: ratatui + tachyonfx transitions, nucleo fuzzy search, a design spec (tokens, keymap, components, motion) before code, snapshot tests per screen. Followed by a dedicated refinement pass. |
+| later | convert | Repackage a plugin for a tool its repo doesn't package. |
