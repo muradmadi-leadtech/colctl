@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use toml::Spanned;
-use toml_edit::{DocumentMut, Item, Table, TableLike, value};
+use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, TableLike, value};
 
 /// The config file's name inside the source.
 pub const CONFIG_FILE: &str = "config.toml";
@@ -66,13 +66,23 @@ pub fn clone_url(repo: &str) -> String {
 }
 
 /// True for a repo `git clone` can take: a URL, `git@host:path`, an absolute path, or `github:owner/repo`.
-pub fn valid_repo(_repo: &str) -> bool {
-    false
+pub fn valid_repo(repo: &str) -> bool {
+    if let Some(rest) = repo.strip_prefix("github:") {
+        let parts: Vec<&str> = rest.split('/').collect();
+        return parts.len() == 2 && parts.iter().all(|p| valid_item_name(p));
+    }
+    ["https://", "http://", "ssh://", "file://", "git@"]
+        .iter()
+        .any(|p| repo.starts_with(p) && repo.len() > p.len())
+        || repo.starts_with('/')
 }
 
 /// True for a full commit id: 40 lowercase hex characters.
-pub fn valid_rev(_rev: &str) -> bool {
-    false
+pub fn valid_rev(rev: &str) -> bool {
+    rev.len() == 40
+        && rev
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
 }
 
 /// Which plugin list in `config.toml` an edit applies to.
@@ -138,6 +148,20 @@ struct Raw {
     plugins: Option<RawPlugins>,
     #[serde(default)]
     codex: Option<RawCodex>,
+    #[serde(default)]
+    source: Vec<RawSource>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSource {
+    name: Spanned<String>,
+    repo: Spanned<String>,
+    rev: Spanned<String>,
+    #[serde(default)]
+    plugin: Option<Spanned<String>>,
+    #[serde(default)]
+    replaces: Vec<Spanned<String>>,
 }
 
 #[derive(Deserialize)]
@@ -201,6 +225,9 @@ pub fn valid_marketplace_source(source: &str) -> bool {
 }
 
 fn valid_exclude(item: &str, kind: Kind) -> bool {
+    if let Some(name) = item.strip_prefix("sources/") {
+        return kind != Kind::Agents && valid_item_name(name);
+    }
     let (instructions, agent_suffix, skills, plugins) = match kind {
         Kind::Claude => (Some("CLAUDE.md"), Some(".md"), true, true),
         Kind::Codex => (Some("AGENTS.md"), Some(".toml"), false, true),
@@ -223,8 +250,10 @@ fn valid_exclude(item: &str, kind: Kind) -> bool {
 
 fn exclude_help(kind: Kind) -> &'static str {
     match kind {
-        Kind::Claude => "CLAUDE.md, skills/<name>, agents/<name>.md or plugins/<id>",
-        Kind::Codex => "AGENTS.md, agents/<name>.toml or plugins/<id>",
+        Kind::Claude => {
+            "CLAUDE.md, skills/<name>, agents/<name>.md, plugins/<id> or sources/<name>"
+        }
+        Kind::Codex => "AGENTS.md, agents/<name>.toml, plugins/<id> or sources/<name>",
         Kind::Agents => "skills/<name>",
     }
 }
@@ -344,6 +373,66 @@ pub fn parse(text: &str, home: &Path) -> Result<Config, String> {
         )?;
         config.codex_marketplaces = marketplaces;
         config.codex_plugins = plugins;
+    }
+    for raw in &raw.source {
+        let name = raw.name.get_ref();
+        if !valid_item_name(name) {
+            return Err(at(
+                raw.name.span(),
+                format!("invalid source name \"{name}\""),
+            ));
+        }
+        if config.sources.iter().any(|s| &s.name == name) {
+            return Err(at(raw.name.span(), format!("duplicate source \"{name}\"")));
+        }
+        if !valid_repo(raw.repo.get_ref()) {
+            return Err(at(
+                raw.repo.span(),
+                format!(
+                    "source repo \"{}\" must be a URL, git@host:path, an absolute path or github:owner/repo",
+                    raw.repo.get_ref()
+                ),
+            ));
+        }
+        if !valid_rev(raw.rev.get_ref()) {
+            return Err(at(
+                raw.rev.span(),
+                format!(
+                    "source rev \"{}\" must be a full 40-character commit",
+                    raw.rev.get_ref()
+                ),
+            ));
+        }
+        let plugin = match &raw.plugin {
+            Some(p) if !valid_item_name(p.get_ref()) => {
+                return Err(at(
+                    p.span(),
+                    format!("invalid source plugin name \"{}\"", p.get_ref()),
+                ));
+            }
+            Some(p) => p.get_ref().clone(),
+            None => name.clone(),
+        };
+        let mut replaces = Vec::new();
+        for id in &raw.replaces {
+            if split_plugin_id(id.get_ref()).is_none() {
+                return Err(at(
+                    id.span(),
+                    format!(
+                        "replaces entry \"{}\" must be name@marketplace",
+                        id.get_ref()
+                    ),
+                ));
+            }
+            replaces.push(id.get_ref().clone());
+        }
+        config.sources.push(Source {
+            name: name.clone(),
+            repo: raw.repo.get_ref().clone(),
+            rev: raw.rev.get_ref().clone(),
+            plugin,
+            replaces,
+        });
     }
     Ok(config)
 }
@@ -522,24 +611,79 @@ pub fn add_plugin(
     add_plugin_to(text, PluginList::Claude, id, marketplace)
 }
 
-/// Appends a `[[source]]` table.
-pub fn add_source(_text: &str, _source: &Source) -> Result<String, String> {
-    Err("not implemented".into())
+/// Appends a `[[source]]` table, leaving every existing line unchanged.
+pub fn add_source(text: &str, source: &Source) -> Result<String, String> {
+    let mut out = text.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "\n[[source]]\nname = {}\nrepo = {}\nrev = {}\n",
+        toml_edit::Value::from(source.name.as_str()),
+        toml_edit::Value::from(source.repo.as_str()),
+        toml_edit::Value::from(source.rev.as_str()),
+    ));
+    if source.plugin != source.name {
+        out.push_str(&format!(
+            "plugin = {}\n",
+            toml_edit::Value::from(source.plugin.as_str())
+        ));
+    }
+    if !source.replaces.is_empty() {
+        let replaces: toml_edit::Array = source.replaces.iter().map(String::as_str).collect();
+        out.push_str(&format!("replaces = {replaces}\n"));
+    }
+    Ok(out)
+}
+
+fn with_source_table(
+    text: &str,
+    name: &str,
+    edit: impl FnOnce(&mut ArrayOfTables, usize),
+) -> Result<String, String> {
+    let mut doc = document(text)?;
+    let tables = doc
+        .get_mut("source")
+        .and_then(Item::as_array_of_tables_mut)
+        .ok_or_else(|| format!("{CONFIG_FILE}: no [[source]] named \"{name}\""))?;
+    let index = tables
+        .iter()
+        .position(|t| t.get("name").and_then(|v| v.as_str()) == Some(name))
+        .ok_or_else(|| format!("{CONFIG_FILE}: no [[source]] named \"{name}\""))?;
+    edit(tables, index);
+    Ok(doc.to_string())
 }
 
 /// Sets a source's pinned `rev`.
-pub fn set_source_rev(_text: &str, _name: &str, _rev: &str) -> Result<String, String> {
-    Err("not implemented".into())
+pub fn set_source_rev(text: &str, name: &str, rev: &str) -> Result<String, String> {
+    with_source_table(text, name, |tables, i| {
+        if let Some(t) = tables.get_mut(i) {
+            t["rev"] = value(rev);
+        }
+    })
 }
 
-/// Adds an id to a source's `replaces`.
-pub fn add_replaces(_text: &str, _name: &str, _id: &str) -> Result<String, String> {
-    Err("not implemented".into())
+/// Adds an id to a source's `replaces` (once).
+pub fn add_replaces(text: &str, name: &str, id: &str) -> Result<String, String> {
+    with_source_table(text, name, |tables, i| {
+        if let Some(t) = tables.get_mut(i) {
+            if t.get("replaces").and_then(Item::as_array).is_none() {
+                t["replaces"] = value(toml_edit::Array::new());
+            }
+            if let Some(list) = t["replaces"].as_array_mut()
+                && !list.iter().any(|v| v.as_str() == Some(id))
+            {
+                list.push(id);
+            }
+        }
+    })
 }
 
 /// Removes a `[[source]]` table.
-pub fn remove_source(_text: &str, _name: &str) -> Result<String, String> {
-    Err("not implemented".into())
+pub fn remove_source(text: &str, name: &str) -> Result<String, String> {
+    with_source_table(text, name, |tables, i| {
+        tables.remove(i);
+    })
 }
 
 /// Removes a plugin from `[plugins].enabled` (AC-23). Its marketplace stays.
