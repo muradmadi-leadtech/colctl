@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.0](https://github.com/muradmadi-leadtech/colctl/compare/v1.2.1...v2.0.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* status shows pending reviews and marks list plugins unreviewed ([#49](https://github.com/muradmadi-leadtech/colctl/issues/49))
+* refresh holds changed origins for review instead of copying them ([#45](https://github.com/muradmadi-leadtech/colctl/issues/45))
+* update holds new commits for review instead of installing them ([#44](https://github.com/muradmadi-leadtech/colctl/issues/44))
+
+### Features
+
+* approve held candidates exactly as reviewed ([#47](https://github.com/muradmadi-leadtech/colctl/issues/47)) ([657b84b](https://github.com/muradmadi-leadtech/colctl/commit/657b84bde2708210538cfbdbc6f25fc7f1d235ba))
+* flag risky changes in held candidates ([#42](https://github.com/muradmadi-leadtech/colctl/issues/42)) ([5602c1f](https://github.com/muradmadi-leadtech/colctl/commit/5602c1fdb42a9236aec1963597c65802cd1c6171))
+* refresh holds changed origins for review instead of copying them ([#45](https://github.com/muradmadi-leadtech/colctl/issues/45)) ([2531791](https://github.com/muradmadi-leadtech/colctl/commit/2531791d718c3148ff32d13d19f8416d65eac8d5))
+* reject held candidates and drop them when an item is removed ([#48](https://github.com/muradmadi-leadtech/colctl/issues/48)) ([40f60b9](https://github.com/muradmadi-leadtech/colctl/commit/40f60b94e30e3f5cf72685a4f76b67883cda9d0c))
+* review held candidates with their diff and risk flags ([#46](https://github.com/muradmadi-leadtech/colctl/issues/46)) ([272edd9](https://github.com/muradmadi-leadtech/colctl/commit/272edd9cd41cda642d0e5ec996be381a82c9434f))
+* status shows pending reviews and marks list plugins unreviewed ([#49](https://github.com/muradmadi-leadtech/colctl/issues/49)) ([2fd67b8](https://github.com/muradmadi-leadtech/colctl/commit/2fd67b82989a9f41f5feed5feb33ed6159423a49))
+* store held candidates and keep their commits ([#41](https://github.com/muradmadi-leadtech/colctl/issues/41)) ([f934fca](https://github.com/muradmadi-leadtech/colctl/commit/f934fca726d5d2f2f45aa214b5f4e34dc76c59df))
+* update holds new commits for review instead of installing them ([#44](https://github.com/muradmadi-leadtech/colctl/issues/44)) ([b0ba530](https://github.com/muradmadi-leadtech/colctl/commit/b0ba530cbd16456bf2b1afbf12d1a2333a0a5712))
+
 ## [1.2.1](https://github.com/muradmadi-leadtech/colctl/compare/v1.2.0...v1.2.1) (2026-11-12)
 
 
