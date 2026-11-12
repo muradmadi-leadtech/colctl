@@ -26,7 +26,8 @@ impl Git {
         Cmd::new(&self.program, &all)
     }
 
-    fn run(&self, dir: &Path, args: &[&str]) -> Result<String> {
+    /// Runs `git -C <dir> <args>`, returning stdout or an error carrying stderr.
+    pub(crate) fn run(&self, dir: &Path, args: &[&str]) -> Result<String> {
         let cmd = self.cmd(dir, args);
         let out = cmd.run()?;
         if !out.success() {

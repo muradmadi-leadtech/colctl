@@ -1,7 +1,9 @@
 //! The clones of source plugins in `~/.colctl/plugins/<name>`, kept at their pinned commit.
 //! Only `update`, `adopt`, `add source` and a first clone reach the network (AC3-25).
 
+use crate::fsx;
 use crate::git::Git;
+use std::ops::Not;
 use std::path::{Path, PathBuf};
 
 /// The state of a clone, read without touching the network.
@@ -43,35 +45,173 @@ impl Vault<'_> {
         self.dir.join(name)
     }
 
+    fn git(&self, dir: &Path, args: &[&str]) -> Result<String, String> {
+        self.git
+            .run(dir, args)
+            .map(|out| out.trim().to_string())
+            .map_err(|e| format!("{e:#}"))
+    }
+
     /// Reads a clone's state (offline).
-    pub fn inspect(&self, _name: &str, _url: &str, _rev: &str) -> CloneState {
-        CloneState::Missing
+    pub fn inspect(&self, name: &str, url: &str, rev: &str) -> CloneState {
+        let path = self.path(name);
+        if !fsx::exists_any(&path) {
+            return CloneState::Missing;
+        }
+        if !is_clone(&path) {
+            return CloneState::Invalid(format!("{} isn't a git clone", path.display()));
+        }
+        let origin = match self.git(&path, &["remote", "get-url", "origin"]) {
+            Ok(o) => o,
+            Err(e) => return CloneState::Invalid(e),
+        };
+        if same_repo(&origin, url).not() {
+            return CloneState::Invalid(format!(
+                "{} is a clone, but its origin is {origin}, not {url}",
+                path.display()
+            ));
+        }
+        match self.git(&path, &["status", "--porcelain", "--untracked-files=all"]) {
+            Ok(status) if !status.is_empty() => return CloneState::Dirty,
+            Ok(_) => {}
+            Err(e) => return CloneState::Invalid(e),
+        }
+        match self.git(&path, &["rev-parse", "HEAD"]) {
+            Ok(head) if head == rev => CloneState::Ok,
+            Ok(head) => CloneState::Moved { head },
+            Err(e) => CloneState::Invalid(e),
+        }
     }
 
     /// Clones if missing and checks out the pin, fetching if the commit isn't local yet.
-    pub fn ensure(&self, _name: &str, _url: &str, _rev: &str) -> Result<PathBuf, String> {
-        Err("not implemented".into())
+    pub fn ensure(&self, name: &str, url: &str, rev: &str) -> Result<PathBuf, String> {
+        let path = self.path(name);
+        let fresh = match self.inspect(name, url, rev) {
+            CloneState::Ok => return Ok(path),
+            CloneState::Dirty => {
+                return Err(format!("the clone at {} has local changes", path.display()));
+            }
+            CloneState::Invalid(reason) => return Err(reason),
+            CloneState::Moved { .. } => false,
+            CloneState::Missing => {
+                std::fs::create_dir_all(&self.dir)
+                    .map_err(|e| format!("creating {}: {e}", self.dir.display()))?;
+                let dest = path.to_string_lossy().into_owned();
+                if let Err(e) = self.git(
+                    &self.dir,
+                    &["clone", "-q", "--no-checkout", "--", url, &dest],
+                ) {
+                    let _ = fsx::remove_any(&path);
+                    return Err(format!("cloning {url}: {e}"));
+                }
+                true
+            }
+        };
+        let result = self.checkout(&path, url, rev);
+        if result.is_err() && fresh {
+            let _ = fsx::remove_any(&path);
+        }
+        result.map(|()| path)
+    }
+
+    fn checkout(&self, path: &Path, url: &str, rev: &str) -> Result<(), String> {
+        let has = |v: &Self| {
+            v.git(path, &["cat-file", "-e", &format!("{rev}^{{commit}}")])
+                .is_ok()
+        };
+        if !has(self) {
+            self.git(path, &["fetch", "-q", "origin"])
+                .map_err(|e| format!("fetching {url}: {e}"))?;
+            if !has(self) {
+                return Err(format!("rev {} not found in {url}", short(rev)));
+            }
+        }
+        self.git(path, &["checkout", "-q", "--detach", rev])
+            .map(|_| ())
+            .map_err(|e| format!("checking out {}: {e}", short(rev)))
+    }
+
+    fn existing(&self, name: &str) -> Result<PathBuf, String> {
+        let path = self.path(name);
+        if is_clone(&path) {
+            Ok(path)
+        } else {
+            Err(format!("{} isn't cloned", path.display()))
+        }
     }
 
     /// Fetches and returns the full commit of upstream's default-branch head.
-    pub fn upstream_head(&self, _name: &str) -> Result<String, String> {
-        Err("not implemented".into())
+    pub fn upstream_head(&self, name: &str) -> Result<String, String> {
+        let path = self.existing(name)?;
+        self.git(&path, &["fetch", "-q", "--tags", "origin"])?;
+        if let Ok(head) = self.git(
+            &path,
+            &[
+                "rev-parse",
+                "--verify",
+                "-q",
+                "refs/remotes/origin/HEAD^{commit}",
+            ],
+        ) {
+            return Ok(head);
+        }
+        self.git(&path, &["remote", "set-head", "origin", "-a"])?;
+        self.git(
+            &path,
+            &[
+                "rev-parse",
+                "--verify",
+                "-q",
+                "refs/remotes/origin/HEAD^{commit}",
+            ],
+        )
     }
 
     /// Fetches and resolves a tag, branch or commit to a full commit.
-    pub fn resolve(&self, _name: &str, _commitish: &str) -> Result<String, String> {
-        Err("not implemented".into())
+    pub fn resolve(&self, name: &str, commitish: &str) -> Result<String, String> {
+        let path = self.existing(name)?;
+        self.git(&path, &["fetch", "-q", "--tags", "origin"])?;
+        [
+            format!("refs/remotes/origin/{commitish}"),
+            commitish.to_string(),
+        ]
+        .iter()
+        .find_map(|c| {
+            self.git(
+                &path,
+                &["rev-parse", "--verify", "-q", &format!("{c}^{{commit}}")],
+            )
+            .ok()
+            .filter(|s| !s.is_empty())
+        })
+        .ok_or_else(|| format!("{commitish} doesn't resolve to a commit in {name}"))
     }
 
     /// Commits from `old` to `new` (0 if unknown).
-    pub fn count_between(&self, _name: &str, _old: &str, _new: &str) -> usize {
-        0
+    pub fn count_between(&self, name: &str, old: &str, new: &str) -> usize {
+        self.git(
+            &self.path(name),
+            &["rev-list", "--count", &format!("{old}..{new}")],
+        )
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0)
     }
 
     /// Deletes a clone.
-    pub fn remove(&self, _name: &str) -> Result<(), String> {
-        Err("not implemented".into())
+    pub fn remove(&self, name: &str) -> Result<(), String> {
+        fsx::remove_any(&self.path(name)).map_err(|e| format!("{e:#}"))
     }
+}
+
+/// The first 7 characters of a commit.
+pub fn short(rev: &str) -> &str {
+    &rev[..rev.len().min(7)]
+}
+
+fn same_repo(a: &str, b: &str) -> bool {
+    let norm = |u: &str| u.trim_end_matches('/').trim_end_matches(".git").to_string();
+    norm(a) == norm(b)
 }
 
 /// True when `path` looks like a git checkout.
