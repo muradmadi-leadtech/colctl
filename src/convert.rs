@@ -1,6 +1,9 @@
 //! Turning an agent written for Claude Code (`agents/<name>.md`: YAML frontmatter + a Markdown
 //! body) into a Codex custom agent (`agents/<name>.toml`). Pure: text in, text out.
 
+use toml_edit::{DocumentMut, value};
+use yaml_rust2::{Yaml, YamlLoader};
+
 /// The parts of an agent every harness needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
@@ -11,13 +14,69 @@ pub struct Agent {
 
 /// Parses an agent file. `stem` is the file name without `.md`, used when the frontmatter has
 /// no `name`. Errors say why the agent can't be converted (AC2-11).
-pub fn parse_agent(_markdown: &str, _stem: &str) -> Result<Agent, String> {
-    Err("not implemented".into())
+pub fn parse_agent(markdown: &str, stem: &str) -> Result<Agent, String> {
+    let text = markdown.replace("\r\n", "\n");
+    let mut lines = text.split('\n');
+    if lines.next() != Some("---") {
+        return Err("no frontmatter: the file must start with a --- line".into());
+    }
+    let mut yaml = Vec::new();
+    let mut closed = false;
+    for line in lines.by_ref() {
+        if line == "---" {
+            closed = true;
+            break;
+        }
+        yaml.push(line);
+    }
+    if !closed {
+        return Err("no frontmatter: no closing --- line".into());
+    }
+    let docs = YamlLoader::load_from_str(&yaml.join("\n"))
+        .map_err(|e| format!("frontmatter isn't valid YAML: {e}"))?;
+    let doc = docs.into_iter().next().unwrap_or(Yaml::Null);
+    let map = match doc {
+        Yaml::Hash(map) => map,
+        Yaml::Null => Default::default(),
+        _ => return Err("frontmatter must be a mapping of keys to values".into()),
+    };
+    let text_field = |key: &str| -> Result<Option<String>, String> {
+        match map.get(&Yaml::String(key.into())) {
+            None | Some(Yaml::Null) => Ok(None),
+            Some(Yaml::String(s)) => Ok(Some(s.clone())),
+            Some(_) => Err(format!("{key} must be text")),
+        }
+    };
+    let description = text_field("description")?
+        .filter(|d| !d.trim().is_empty())
+        .ok_or("no description in the frontmatter")?;
+    let name = text_field("name")?
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| stem.to_string());
+
+    let rest: Vec<&str> = lines.collect();
+    let first = rest.iter().position(|l| !l.trim().is_empty());
+    let last = rest.iter().rposition(|l| !l.trim().is_empty());
+    let body = match (first, last) {
+        (Some(a), Some(b)) => rest[a..=b].join("\n"),
+        _ => return Err("empty body: there are no instructions after the frontmatter".into()),
+    };
+    Ok(Agent {
+        name,
+        description,
+        body,
+    })
 }
 
 /// The Codex TOML for `agent`, with a header pointing at its source (interfaces.md).
-pub fn render_codex(_agent: &Agent, _source_display: &str, _stem: &str) -> String {
-    String::new()
+pub fn render_codex(agent: &Agent, source_display: &str, stem: &str) -> String {
+    let mut doc = DocumentMut::new();
+    doc["name"] = value(agent.name.as_str());
+    doc["description"] = value(agent.description.as_str());
+    doc["developer_instructions"] = value(agent.body.as_str());
+    format!(
+        "# Managed by colctl. Edit {source_display}/agents/{stem}.md instead; this file is regenerated.\n{doc}"
+    )
 }
 
 /// `parse_agent` then `render_codex`, as bytes ready to write.
