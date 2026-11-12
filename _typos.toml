@@ -1,0 +1,3 @@
+# Words typos would "correct" that are real names.
+[default.extend-words]
+ratatui = "ratatui"
