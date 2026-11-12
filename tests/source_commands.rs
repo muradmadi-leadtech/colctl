@@ -471,7 +471,8 @@ fn ac3_30_status_says_a_list_plugin_has_a_source() {
     listed_superpowers(&env, &v1);
     let out = env.ok(&["status"]);
     assert!(
-        out.contains("ok                   plugin        superpowers@anthropic-plugin-directory  → source available: https://github.com/obra/superpowers; colctl adopt claude plugin superpowers@anthropic-plugin-directory"),
+        // Cycle 4: list plugins are "unreviewed"; the source hint stays.
+        out.contains("unreviewed           plugin        superpowers@anthropic-plugin-directory  → updates come from anthropic-plugin-directory, not through colctl review; source available: https://github.com/obra/superpowers; colctl adopt claude plugin superpowers@anthropic-plugin-directory to hold them"),
         "{out}"
     );
 }
@@ -563,5 +564,8 @@ fn ec3_19_a_list_plugin_without_a_known_source() {
             "mystery@anthropic-plugin-directory",
         ],
     );
-    assert!(out.contains("not a foreign item (state: ok)"), "{out}");
+    assert!(
+        out.contains("not a foreign item (state: unreviewed)"),
+        "{out}"
+    );
 }

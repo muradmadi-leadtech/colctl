@@ -55,6 +55,9 @@ pub enum ItemState {
     Unsupported,
     /// A plugin from a marketplace whose own source repo is known (AC3-23).
     FromAggregator,
+    /// A list plugin: its updates come from its marketplace, not through `colctl review`.
+    /// Informational (AC4-30).
+    Unreviewed,
 }
 
 impl ItemState {
@@ -73,6 +76,7 @@ impl ItemState {
             ItemState::Outdated => "outdated",
             ItemState::Unsupported => "unsupported",
             ItemState::FromAggregator => "from-aggregator",
+            ItemState::Unreviewed => "unreviewed",
         }
     }
 }
@@ -273,10 +277,12 @@ impl HarnessPlan {
     /// True when every item is ok and the folder is usable.
     pub fn in_sync(&self) -> bool {
         self.root == Root::Ok
-            && self
-                .items
-                .iter()
-                .all(|i| matches!(i.state, ItemState::Ok | ItemState::Unsupported))
+            && self.items.iter().all(|i| {
+                matches!(
+                    i.state,
+                    ItemState::Ok | ItemState::Unsupported | ItemState::Unreviewed
+                )
+            })
     }
 }
 
@@ -336,7 +342,7 @@ fn hint(item: &Item, harness: &str, source_display: &str) -> Option<String> {
         | ItemState::PluginMissing
         | ItemState::MarketplaceMissing
         | ItemState::Outdated => "colctl sync".to_string(),
-        ItemState::Unsupported => return None,
+        ItemState::Unsupported | ItemState::Unreviewed => return None,
         ItemState::FromAggregator => format!(
             "source: {}; colctl adopt {harness} {address}",
             item.target
@@ -663,21 +669,26 @@ impl Builder<'_> {
         let mut installs = Vec::new();
         for id in &wanted {
             if plugins.installed.contains(*id) {
-                match plugins.origins.get(*id) {
-                    // AC3-30: still ok, but it could come from its source.
-                    Some(repo) => self.items.push(Item {
-                        kind: ItemKind::Plugin,
-                        name: (*id).clone(),
-                        state: ItemState::Ok,
-                        hint: Some(format!(
-                            "source available: {repo}; colctl adopt {} plugin {id}",
-                            self.harness.name
-                        )),
-                        address: Item::address_for(ItemKind::Plugin, self.harness.kind, id),
-                        target: Some(PathBuf::from(repo)),
-                    }),
-                    None => self.item(ItemKind::Plugin, id, ItemState::Ok),
+                // AC4-30: colctl can't hold a list plugin's updates. AC3-30: when its source is
+                // known, adopting it as a source plugin puts it under review.
+                let marketplace = id.rsplit_once('@').map(|(_, m)| m).unwrap_or_default();
+                let mut hint =
+                    format!("updates come from {marketplace}, not through colctl review");
+                let origin = plugins.origins.get(*id);
+                if let Some(repo) = origin {
+                    hint.push_str(&format!(
+                        "; source available: {repo}; colctl adopt {} plugin {id} to hold them",
+                        self.harness.name
+                    ));
                 }
+                self.items.push(Item {
+                    kind: ItemKind::Plugin,
+                    name: (*id).clone(),
+                    state: ItemState::Unreviewed,
+                    hint: Some(hint),
+                    address: Item::address_for(ItemKind::Plugin, self.harness.kind, id),
+                    target: origin.map(PathBuf::from),
+                });
             } else {
                 self.item(ItemKind::Plugin, id, ItemState::PluginMissing);
                 installs.push(Action::Install { id: (*id).clone() });

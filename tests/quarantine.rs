@@ -1199,3 +1199,98 @@ fn ec4_20_reject_and_approve_wait_for_the_lock() {
     assert_ne!(env.code(&["status"]).0, 3);
     fs::remove_file(env.source.join(".state/lock")).unwrap();
 }
+
+#[test]
+fn ac4_29_held_candidates_show_in_status() {
+    let (env, _, v1, v2) = risky_candidate();
+    let origin = adopted_skill(&env, "twg-jira", "v1");
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh"]);
+    let out = env.expect(1, &["status"]);
+    assert!(
+        out.contains(&format!(
+            "  pending-review       sources/superpowers  {} → {}  → colctl review superpowers",
+            &v1[..7],
+            &v2[..7]
+        )),
+        "{out}"
+    );
+    assert!(
+        out.contains("  pending-review       skills/twg-jira  ~/.config/twg/skills/twg-jira  → colctl review skills/twg-jira"),
+        "{out}"
+    );
+    assert!(
+        out.trim_end().ends_with("in sync; 2 held for review"),
+        "{out}"
+    );
+    let (code, json, _) = env.code(&["status", "--json"]);
+    assert_eq!(code, 1);
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        v["in_sync"], true,
+        "harnesses are in sync; only review is pending"
+    );
+    let q = v["quarantine"].as_array().unwrap();
+    assert_eq!(q.len(), 2);
+    let src = q.iter().find(|c| c["kind"] == "source").unwrap();
+    assert_eq!(src["state"], "pending-review");
+    assert_eq!(src["key"], "sources/superpowers");
+    assert_eq!(src["to"], v2.as_str());
+    assert_eq!(src["flags"], 4);
+    assert!(src.get("commits").is_none() && src.get("diff").is_none());
+    // sync isn't held back by a pending review.
+    env.ok(&["sync"]);
+    env.ok(&["reject", "--all"]);
+    let v = env.status_json();
+    assert_eq!(v["quarantine"], serde_json::json!([]));
+}
+
+#[test]
+fn ac4_29_status_lists_candidates_without_git() {
+    let (env, repo, _) = with_source();
+    env.upstream_commit(&repo, "v2");
+    env.ok(&["update"]);
+    // Hide git by pointing PATH at a folder without it.
+    let empty = env.home.join("empty-bin");
+    fs::create_dir_all(&empty).unwrap();
+    fs::copy(env.bin.join("claude"), empty.join("claude")).unwrap();
+    let mut cmd = env.cmd();
+    cmd.env("PATH", &empty);
+    let out = cmd.args(["status"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("pending-review       sources/superpowers"),
+        "{text}"
+    );
+}
+
+#[test]
+fn ac4_30_list_plugins_are_unreviewed() {
+    let env = machine();
+    env.write_config(
+        &env.config()
+            .replace("enabled = []", "enabled = [\"tool@some-market\"]"),
+    );
+    env.write_config(&env.config().replacen(
+        "[marketplaces]",
+        "[marketplaces]\nsome-market = \"github:owner/some-market\"",
+        1,
+    ));
+    env.ok(&["sync"]);
+    let out = env.ok(&["status"]);
+    assert!(
+        out.contains("unreviewed           plugin        tool@some-market  → updates come from some-market, not through colctl review"),
+        "{out}"
+    );
+    assert!(!out.contains("to hold them"), "{out}");
+    let v = env.status_json();
+    assert_eq!(v["in_sync"], true);
+    let state = v["harnesses"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["name"] == "tool@some-market")
+        .unwrap()["state"]
+        .clone();
+    assert_eq!(state, "unreviewed");
+}
