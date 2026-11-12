@@ -654,10 +654,30 @@ impl Builder<'_> {
             }
         }
 
+        let replaced: BTreeSet<&String> = self
+            .inputs
+            .sources
+            .iter()
+            .flat_map(|s| &s.replaces)
+            .collect();
         let mut installs = Vec::new();
         for id in &wanted {
             if plugins.installed.contains(*id) {
-                self.item(ItemKind::Plugin, id, ItemState::Ok);
+                match plugins.origins.get(*id) {
+                    // AC3-30: still ok, but it could come from its source.
+                    Some(repo) => self.items.push(Item {
+                        kind: ItemKind::Plugin,
+                        name: (*id).clone(),
+                        state: ItemState::Ok,
+                        hint: Some(format!(
+                            "source available: {repo}; colctl adopt {} plugin {id}",
+                            self.harness.name
+                        )),
+                        address: Item::address_for(ItemKind::Plugin, self.harness.kind, id),
+                        target: Some(PathBuf::from(repo)),
+                    }),
+                    None => self.item(ItemKind::Plugin, id, ItemState::Ok),
+                }
             } else {
                 self.item(ItemKind::Plugin, id, ItemState::PluginMissing);
                 installs.push(Action::Install { id: (*id).clone() });
@@ -669,7 +689,10 @@ impl Builder<'_> {
             if wanted.contains(&id) {
                 continue;
             }
-            if plugins.installed.contains(id) {
+            if replaced.contains(id) {
+                // A source's replaces uninstalls it (once); only forget that colctl installed it.
+                removals.push(Action::ForgetPlugin { id: id.clone() });
+            } else if plugins.installed.contains(id) {
                 self.item(ItemKind::Plugin, id, ItemState::Orphaned);
                 removals.push(Action::Uninstall { id: id.clone() });
             } else {

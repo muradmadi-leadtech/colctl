@@ -536,6 +536,7 @@ fn ec3_19_a_list_plugin_without_a_known_source() {
         "enabled = []",
         "enabled = [\"mystery@anthropic-plugin-directory\"]",
     ));
+    env.ok(&["sync"]);
     let out = env.ok(&["status"]);
     assert!(!out.contains("source available"), "{out}");
     let out = env.expect(
