@@ -111,6 +111,7 @@ and list plugins become `unreviewed` items in each harness.
 - `direction`: `forward` or `back` (EC4-08), sources only.
 - `status`: `added`, `modified`, `deleted`, `renamed`, `mode`.
 - `error`: the refusal from EC4-12/13 when the candidate can't be read, else null.
+- `warning`: EC4-14's note when the pin was changed by hand after holding, else null (added in Generate).
 - With a name, the one candidate also has `"diff": "<unified diff>"`.
 
 `colctl status --json` gains a top-level `"quarantine"` array with the same objects minus `commits`, `files`,

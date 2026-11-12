@@ -19,12 +19,15 @@ it into every other profile too. The tool's own folder isn't touched, and colctl
 `colctl status` reports `origin-changed` for each skill whose origin moved on:
 
 ```sh
-colctl refresh --dry-run
-colctl refresh              # or: colctl refresh skills/twg-jira
+colctl refresh              # or: colctl refresh skills/twg-jira — holds the new content for review
+colctl review skills/twg-jira
+colctl approve skills/twg-jira    # or: colctl reject skills/twg-jira
 ```
 
-Each refresh is a commit in `~/.colctl`, so `git -C ~/.colctl show` shows exactly what the update changed, and
-`git revert` undoes it. If you also edited colctl's copy, refresh refuses rather than overwrite your edit.
+`refresh` doesn't change colctl's copy; it holds the tool's new version until you approve it (see
+[Review an update before it installs](review-an-update.md)). Each approval is a commit in `~/.colctl`, so
+`git -C ~/.colctl show` shows exactly what changed, and `git revert` undoes it. If you also edited colctl's copy,
+refresh and approve refuse rather than overwrite your edit.
 
 ## When the tool re-links over colctl
 

@@ -18,14 +18,15 @@ cycle.
 
 ## Why pins
 
-`config.toml` records an exact commit for each source, and nothing moves it except `colctl update`. That means:
+`config.toml` records an exact commit for each source, and nothing moves it except `colctl approve` (after `colctl update` holds a new commit). That means:
 
 - `status` and `sync` never touch the network and never change what code runs;
 - a new version arrives only when you ask, as a commit you can read and revert;
 - adopting a plugin pins it to the commit already installed, so switching to the source and taking new code are
   separate steps.
 
-This is also what a later "quarantine" cycle builds on: review a new version before `update` installs it.
+This is also what [quarantine](quarantine.md) builds on: since 2.0, `update` holds a new commit and only `approve`
+moves the pin.
 
 ## What stays the tools' business
 

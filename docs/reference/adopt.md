@@ -28,7 +28,7 @@ Some tools install skills into a folder of their own and symlink them into a har
 2. The copy's tree hash is checked against the target.
 3. Only then is the harness link pointed at the source copy. The tool's folder is never touched.
 4. The origin and its hash are recorded in `.state`, so `colctl status` can report `origin-changed` when the tool
-   updates its copy, and [`colctl refresh`](refresh.md) can pull the update in.
+   updates its copy, and [`colctl refresh`](refresh.md) holds the update for review.
 
 If the tool re-links over colctl later, `adopt` points the link back at the source copy without copying, and says
 when the origin has changes to refresh. Dangling links, links to the wrong type of thing, and a `CLAUDE.md` or
