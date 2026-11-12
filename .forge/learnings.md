@@ -21,6 +21,11 @@ GitHub holds workflows on PRs opened by the Actions token; gh api -X POST repos/
 
 2026-11-12, codex-cli 0.167.2 via kilo-codex: a symlinked $CODEX_HOME/AGENTS.md is read; a symlinked folder in $HOME/.agents/skills is discovered (skills are per-HOME, shared by every Codex profile); a TOML in $CODEX_HOME/agents/ (name, description, developer_instructions) is a usable custom agent. codex plugin marketplace add <src> records [marketplaces.<manifest-name>] in $CODEX_HOME/config.toml (name from the marketplace manifest, e.g. obra/superpowers -> superpowers-dev); codex plugin add <id> records [plugins."<id>"] enabled = true and caches under plugins/cache; remove commands delete both. openai/plugins is reserved (built in). kilo-proxy merges its own keys into profiles/codex/config.toml and keeps the rest.
 
+### Push RED before GREEN
+*Added: 2026-11-12*
+
+Cycle 2: each feature PR's first commit (tests + compiling stubs) was pushed so CI recorded the failure, then GREEN was pushed and auto-merge enabled. Squash-merge keeps one commit per task on main; the CI history is the TDD evidence.
+
 ## Anti-Patterns
 
 <!-- Approaches to avoid -->
@@ -34,6 +39,11 @@ Files under plugins/ hold absolute paths and are owned by Claude; settings.json 
 *Added: 2026-11-12*
 
 Cycle 1 wrote tests with each module rather than one failing test at a time; traceability and coverage were high but TDD discipline was not strict. Next cycle: commit RED tests before GREEN code.
+
+### Partial profile copies in smoke tests
+*Added: 2026-11-12*
+
+Copying only config.toml of kilo's Codex profile left out models.json (referenced by model_catalog_json), so the real codex failed. Copy every file a config references.
 
 ## Decisions
 
