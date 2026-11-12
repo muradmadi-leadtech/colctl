@@ -2,6 +2,9 @@
 //! from (AC3-07…09). When the repo has only plugin manifests, colctl writes a one-plugin marketplace
 //! manifest in `~/.colctl/plugins/.manifests/<name>/`, never inside the clone.
 
+use crate::fsx;
+use serde_json::{Value, json};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Where one tool installs a source plugin from.
@@ -34,30 +37,139 @@ pub struct Packaging {
 impl Packaging {
     /// True when at least one tool can install it (EC3-04).
     pub fn any_supported(&self) -> bool {
-        false
+        [&self.claude, &self.codex]
+            .iter()
+            .any(|t| matches!(t, ToolPackaging::Supported(_)))
     }
+}
+
+/// One tool's manifest locations and how colctl writes its marketplace manifest.
+struct Tool {
+    label: &'static str,
+    marketplace: &'static str,
+    plugin: &'static str,
+    entry: fn(&str) -> Value,
+}
+
+const CLAUDE: Tool = Tool {
+    label: "Claude",
+    marketplace: ".claude-plugin/marketplace.json",
+    plugin: ".claude-plugin/plugin.json",
+    entry: |name| json!({"name": name, "source": "./plugin"}),
+};
+
+const CODEX: Tool = Tool {
+    label: "Codex",
+    marketplace: ".agents/plugins/marketplace.json",
+    plugin: ".codex-plugin/plugin.json",
+    entry: |name| {
+        json!({
+            "name": name,
+            "source": {"source": "url", "url": "./plugin"},
+            "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+        })
+    },
+};
+
+fn read_json(path: &Path) -> Result<Value, String> {
+    let text = fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("{} doesn't parse: {e}", path.display()))
+}
+
+fn one(
+    tool: &Tool,
+    clone: &Path,
+    manifests: &Path,
+    name: &str,
+    plugin: &str,
+    subpath: Option<&str>,
+) -> ToolPackaging {
+    let manifest = clone.join(tool.marketplace);
+    if manifest.is_file() {
+        let value = match read_json(&manifest) {
+            Ok(v) => v,
+            Err(e) => return ToolPackaging::Invalid(e),
+        };
+        let Some(market) = value.get("name").and_then(Value::as_str) else {
+            return ToolPackaging::Invalid(format!("{} has no \"name\"", manifest.display()));
+        };
+        let listed = value
+            .get("plugins")
+            .and_then(Value::as_array)
+            .is_some_and(|list| {
+                list.iter()
+                    .any(|p| p.get("name").and_then(Value::as_str) == Some(plugin))
+            });
+        if !listed {
+            return ToolPackaging::Invalid(format!("no plugin {plugin} in {}", manifest.display()));
+        }
+        return ToolPackaging::Supported(Target {
+            marketplace_dir: clone.to_path_buf(),
+            marketplace: market.to_string(),
+            id: format!("{plugin}@{market}"),
+        });
+    }
+    let folder = match subpath {
+        Some(sub) => clone.join(sub),
+        None => clone.to_path_buf(),
+    };
+    let plugin_manifest = folder.join(tool.plugin);
+    if !plugin_manifest.is_file() {
+        return ToolPackaging::Unsupported(format!("the repo has no {} packaging", tool.label));
+    }
+    let plugin_name = match read_json(&plugin_manifest) {
+        Ok(v) => v
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(plugin)
+            .to_string(),
+        Err(e) => return ToolPackaging::Invalid(e),
+    };
+    let market = format!("colctl-{name}");
+    let mut body = json!({"name": market, "plugins": [(tool.entry)(&plugin_name)]});
+    if tool.label == "Claude" {
+        body["owner"] = json!({"name": "colctl"});
+    }
+    let text = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&body).unwrap_or_default()
+    );
+    let path = manifests.join(tool.marketplace);
+    let written = (fs::read_to_string(&path).ok().as_deref() == Some(text.as_str()))
+        .then_some(Ok(()))
+        .unwrap_or_else(|| fsx::atomic_write(&path, text.as_bytes()));
+    let linked = match fs::read_link(manifests.join("plugin")) {
+        Ok(target) if target == folder => Ok(()),
+        _ => fsx::atomic_symlink(&folder, &manifests.join("plugin")),
+    };
+    if let Err(e) = written.and(linked) {
+        return ToolPackaging::Invalid(format!("writing {}: {e:#}", manifests.display()));
+    }
+    ToolPackaging::Supported(Target {
+        marketplace_dir: manifests.to_path_buf(),
+        marketplace: market.clone(),
+        id: format!("{plugin_name}@{market}"),
+    })
 }
 
 /// Inspects `clone` for source `name`'s plugin `plugin`, writing manifests into `manifests` if needed.
 /// `subpath` is the plugin's folder inside the repo, when it isn't the root (EC3-11).
 pub fn inspect(
-    _clone: &Path,
-    _manifests: &Path,
-    _name: &str,
-    _plugin: &str,
-    _subpath: Option<&str>,
+    clone: &Path,
+    manifests: &Path,
+    name: &str,
+    plugin: &str,
+    subpath: Option<&str>,
 ) -> Packaging {
     Packaging {
-        claude: ToolPackaging::Unsupported(String::new()),
-        codex: ToolPackaging::Unsupported(String::new()),
+        claude: one(&CLAUDE, clone, manifests, name, plugin, subpath),
+        codex: one(&CODEX, clone, manifests, name, plugin, subpath),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
-    use std::fs;
 
     struct Fixture {
         _t: tempfile::TempDir,
