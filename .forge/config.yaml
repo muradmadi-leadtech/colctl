@@ -1,0 +1,9 @@
+project: colctl
+version: 2.0.0
+created: '2026-11-12T01:06:08.414981+00:00'
+phases:
+- Focus
+- Orchestrate
+- Refine
+- Generate
+- Evaluate

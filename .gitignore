@@ -1,0 +1,7 @@
+/target
+
+# Added by sadr
+.env
+.env.*
+!.env.example
+*.db
