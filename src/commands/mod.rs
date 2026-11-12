@@ -327,7 +327,13 @@ fn uncommitted(ctx: &Ctx, git: Option<&Git>) -> Vec<String> {
     }
 }
 
-fn status_json(ctx: &Ctx, ws: &Workspace, planned: &[Planned], uncommitted: &[String]) -> Value {
+fn status_json(
+    ctx: &Ctx,
+    ws: &Workspace,
+    planned: &[Planned],
+    uncommitted: &[String],
+    held: &[quarantine::View],
+) -> Value {
     json!({
         "version": 1,
         "source": {
@@ -356,11 +362,18 @@ fn status_json(ctx: &Ctx, ws: &Workspace, planned: &[Planned], uncommitted: &[St
         "sources": ws.config.sources.iter().zip(&ws.clones).map(|(s, (_, clone))| json!({
             "name": s.name, "repo": s.repo, "rev": s.rev, "clone": clone,
         })).collect::<Vec<_>>(),
+        "quarantine": held.iter().map(quarantine::status_entry).collect::<Vec<_>>(),
         "in_sync": in_sync(ws, planned, uncommitted),
     })
 }
 
-fn print_status(ctx: &Ctx, ws: &Workspace, planned: &[Planned], uncommitted: &[String]) {
+fn print_status(
+    ctx: &Ctx,
+    ws: &Workspace,
+    planned: &[Planned],
+    uncommitted: &[String],
+    held: &[quarantine::View],
+) {
     println!("source {}", ctx.tilde(&ctx.source));
     for path in uncommitted {
         println!("  {:<20} {path}  → colctl sync commits it", "uncommitted");
@@ -378,6 +391,9 @@ fn print_status(ctx: &Ctx, ws: &Workspace, planned: &[Planned], uncommitted: &[S
             origin.display()
         );
     }
+    for v in held {
+        println!("{}", quarantine::status_line(ctx, v));
+    }
     if planned.is_empty() {
         println!("no harnesses registered; add one to {CONFIG_FILE}");
     }
@@ -387,14 +403,15 @@ fn print_status(ctx: &Ctx, ws: &Workspace, planned: &[Planned], uncommitted: &[S
             println!("{}", item_line(item));
         }
     }
-    println!(
-        "{}",
-        if in_sync(ws, planned, uncommitted) {
-            "in sync"
-        } else {
-            "not in sync"
-        }
-    );
+    let synced = if in_sync(ws, planned, uncommitted) {
+        "in sync"
+    } else {
+        "not in sync"
+    };
+    match held.len() {
+        0 => println!("{synced}"),
+        n => println!("{synced}; {n} held for review"),
+    }
 }
 
 /// `colctl status` (AC-08). Never writes anything.
@@ -403,15 +420,18 @@ pub fn status(ctx: &Ctx, filter: Option<&str>, as_json: bool) -> Result<i32, Cli
     let planned = plan_all(ctx, &ws, filter)?;
     let git = Git::find(&ctx.path_var).ok();
     let dirty = uncommitted(ctx, git.as_ref());
+    let held = quarantine::held_views(ctx, &ws, git.as_ref());
     if as_json {
-        let mut text = serde_json::to_string_pretty(&status_json(ctx, &ws, &planned, &dirty))
-            .map_err(|e| CliError::usage(e.to_string()))?;
+        let mut text =
+            serde_json::to_string_pretty(&status_json(ctx, &ws, &planned, &dirty, &held))
+                .map_err(|e| CliError::usage(e.to_string()))?;
         text.push('\n');
         print!("{text}");
     } else {
-        print_status(ctx, &ws, &planned, &dirty);
+        print_status(ctx, &ws, &planned, &dirty, &held);
     }
-    Ok(if in_sync(&ws, &planned, &dirty) {
+    // Something waiting for review needs attention, like an origin that changed (AC4-29).
+    Ok(if in_sync(&ws, &planned, &dirty) && held.is_empty() {
         0
     } else {
         EXIT_DRIFT
@@ -1316,11 +1336,13 @@ pub fn adopt(
                     ItemState::Foreign | ItemState::FromAggregator => {
                         println!("would adopt {} from {}", i.address(), p.harness.name)
                     }
-                    ItemState::Ok if i.kind == ItemKind::Plugin && i.target.is_some() => println!(
-                        "would move {} in {} to its source",
-                        i.address(),
-                        p.harness.name
-                    ),
+                    ItemState::Unreviewed if i.kind == ItemKind::Plugin && i.target.is_some() => {
+                        println!(
+                            "would move {} in {} to its source",
+                            i.address(),
+                            p.harness.name
+                        )
+                    }
                     ItemState::ForeignLink if i.can_take_over() => println!(
                         "would take over {} in {} from {}",
                         i.address(),
@@ -1357,7 +1379,7 @@ pub fn adopt(
             let outcome = match i.state {
                 ItemState::Foreign | ItemState::FromAggregator => adopt_item(ctx, &p.harness, i),
                 // AC3-29: a list plugin whose source is known moves to that source.
-                ItemState::Ok if i.kind == ItemKind::Plugin && i.target.is_some() => {
+                ItemState::Unreviewed if i.kind == ItemKind::Plugin && i.target.is_some() => {
                     adopt_item(ctx, &p.harness, i)
                 }
                 ItemState::ForeignLink => adopt_link(ctx, &p.harness, i),
