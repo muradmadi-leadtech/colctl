@@ -881,6 +881,7 @@ fn ec5_24_a_closed_pipe_ends_quietly() {
         .env_clear()
         .env("HOME", &env.home)
         .env("PATH", &env.path)
+        .current_dir(&env.home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()

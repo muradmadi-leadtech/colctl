@@ -1458,9 +1458,13 @@ fn clone_and_check(
     name: &str,
     repo: &str,
     rev: Option<&str>,
-    plugin: &str,
-    subpath: Option<&str>,
-) -> Result<(String, packaging::Packaging), String> {
+    want: PluginWanted,
+) -> Result<(String, packaging::Packaging, String), String> {
+    let PluginWanted {
+        name: plugin,
+        subpath,
+        guess_name,
+    } = want;
     let vault = Vault {
         git,
         dir: plugins_dir(ctx),
@@ -1478,18 +1482,63 @@ fn clone_and_check(
             None => vault.upstream_head(name)?,
         };
         let path = vault.ensure(name, &url, &pinned)?;
-        let p = packaging::inspect(&path, &manifests_dir(ctx, name), name, plugin, subpath);
-        if !p.any_supported() {
-            return Err(format!(
-                "{repo} has no Claude or Codex packaging for plugin {plugin}"
-            ));
+        let inspect = |plugin: &str| {
+            packaging::inspect(&path, &manifests_dir(ctx, name), name, plugin, subpath)
+        };
+        let p = inspect(plugin);
+        if p.any_supported() {
+            return Ok((pinned, p, plugin.to_string()));
         }
-        Ok((pinned, p))
+        // EC5-22: a catalog can list a plugin under another name than its own manifest gives it.
+        if guess_name && let Some(own) = own_plugin_name(&path, subpath).filter(|n| n != plugin) {
+            let p = inspect(&own);
+            if p.any_supported() {
+                return Ok((pinned, p, own));
+            }
+        }
+        Err(format!(
+            "{repo} has no Claude or Codex packaging for plugin {plugin}"
+        ))
     })();
     if result.is_err() {
         cleanup();
     }
     result
+}
+
+/// Which plugin `clone_and_check` looks for in a clone.
+struct PluginWanted<'a> {
+    name: &'a str,
+    /// Its folder in the repo, when it isn't the root.
+    subpath: Option<&'a str>,
+    /// Fall back to the clone's own name for the plugin (EC5-22).
+    guess_name: bool,
+}
+
+/// The plugin's own name in a clone (EC5-22): its plugin manifest's name, or the only plugin in the
+/// repo's marketplace manifest.
+fn own_plugin_name(clone: &Path, subpath: Option<&str>) -> Option<String> {
+    let read =
+        |p: PathBuf| -> Option<Value> { serde_json::from_str(&fs::read_to_string(p).ok()?).ok() };
+    let folder = subpath.map_or(clone.to_path_buf(), |s| clone.join(s));
+    let named = |v: Value| v.get("name")?.as_str().map(str::to_string);
+    [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]
+        .iter()
+        .find_map(|m| read(folder.join(m)).and_then(named))
+        .or_else(|| {
+            [
+                ".claude-plugin/marketplace.json",
+                ".agents/plugins/marketplace.json",
+            ]
+            .iter()
+            .find_map(|m| {
+                let doc = read(clone.join(m))?;
+                match doc.get("plugins")?.as_array()?.as_slice() {
+                    [only] => named(only.clone()),
+                    _ => None,
+                }
+            })
+        })
 }
 
 /// `colctl add source` (AC3-17).
@@ -1515,6 +1564,7 @@ pub fn add_source(
     if ws.config.sources.iter().any(|s| s.name == name) {
         return Err(CliError::usage(format!("source \"{name}\" already exists")));
     }
+    let plugin_given = plugin.is_some();
     let plugin = plugin.map(str::to_string).unwrap_or(wanted.plugin);
     let subpath = wanted.subpath;
     let folder = subpath
@@ -1526,8 +1576,20 @@ pub fn add_source(
     }
     let _lock = Lock::acquire(&ctx.source)?;
     commit_pending(&git, ctx)?;
-    let (pinned, _) = clone_and_check(ctx, &git, &name, repo, rev, &plugin, subpath.as_deref())
-        .map_err(CliError::usage)?;
+    let guess = wanted.from_catalog && !plugin_given;
+    let (pinned, _, plugin) = clone_and_check(
+        ctx,
+        &git,
+        &name,
+        repo,
+        rev,
+        PluginWanted {
+            name: &plugin,
+            subpath: subpath.as_deref(),
+            guess_name: guess,
+        },
+    )
+    .map_err(CliError::usage)?;
     let source = config::Source {
         name: name.clone(),
         repo: repo.to_string(),
@@ -1551,6 +1613,8 @@ struct WantedSource {
     name: String,
     /// The commit the catalog recorded, pinned unless `--rev` is given (AC5-23).
     rev: Option<String>,
+    /// Looked up in the catalogs (so the plugin name may need correcting from the clone).
+    from_catalog: bool,
 }
 
 /// Resolves `add source`'s argument (AC5-23…26, EC5-18, EC5-19). Anything that's a valid repo is a
@@ -1564,6 +1628,7 @@ fn wanted_source(ctx: &Ctx, ws: &Workspace, arg: &str) -> Result<WantedSource, C
             plugin: name.clone(),
             name,
             rev: None,
+            from_catalog: false,
         });
     }
     if !arg.contains('@') {
@@ -1598,6 +1663,7 @@ fn wanted_source(ctx: &Ctx, ws: &Workspace, arg: &str) -> Result<WantedSource, C
         plugin: found.name.clone(),
         name: found.name.clone(),
         rev: found.commit.clone(),
+        from_catalog: true,
     })
 }
 
@@ -1644,14 +1710,17 @@ fn adopt_plugin_from_source(ctx: &Ctx, harness: &Harness, id: &str) -> Option<Ad
             "a source named {name} already exists for another repo"
         )));
     }
-    let (pinned, packaging) = match clone_and_check(
+    let (pinned, packaging, plugin) = match clone_and_check(
         ctx,
         &git,
         &name,
         &found.repo,
         found.rev.as_deref(),
-        &found.plugin,
-        found.subpath.as_deref(),
+        PluginWanted {
+            name: &found.plugin,
+            subpath: found.subpath.as_deref(),
+            guess_name: true,
+        },
     ) {
         Ok(r) => r,
         Err(e) => return Some(Adoption::Refused(e)),
@@ -1682,7 +1751,7 @@ fn adopt_plugin_from_source(ctx: &Ctx, harness: &Harness, id: &str) -> Option<Ad
         name: name.clone(),
         repo: found.repo.clone(),
         rev: pinned,
-        plugin: found.plugin.clone(),
+        plugin,
         replaces: vec![id.to_string()],
         path: found.subpath.clone(),
     };
