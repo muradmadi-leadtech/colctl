@@ -182,6 +182,37 @@ fn plan(tool: &Tool, clone: &Path, plugin: &str, subpath: Option<&str>) -> Plan 
     }
 }
 
+/// The `colctl-<name>` marketplace entry Codex installs a converted package from (cycle 7): linked
+/// as `plugin-codex` in the wrapper folder.
+pub fn wrap_converted(
+    write: bool,
+    manifests: &Path,
+    name: &str,
+    package: &Path,
+    plugin_name: &str,
+) -> ToolPackaging {
+    wrap(
+        write,
+        &CODEX,
+        manifests,
+        name,
+        package,
+        plugin_name,
+        CONVERTED_LINK,
+    )
+}
+
+/// Removes a converted package's Codex marketplace manifest and link from the wrapper folder.
+pub fn unwrap_converted(manifests: &Path) {
+    let manifest = manifests.join(CODEX.marketplace);
+    if fs::read_to_string(&manifest).is_ok_and(|t| t.contains(CONVERTED_LINK)) {
+        let _ = fs::remove_file(&manifest);
+    }
+    let _ = fsx::remove_link(&manifests.join(CONVERTED_LINK));
+}
+
+const CONVERTED_LINK: &str = "plugin-codex";
+
 /// The folder of the clone holding the plugin's Claude packaging (cycle 7 converts from it): the
 /// folder the repo's Claude marketplace entry names when it's inside the repo, else `subpath`, else
 /// the clone itself.

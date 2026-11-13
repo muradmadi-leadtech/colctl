@@ -13,6 +13,7 @@ use crate::plan::{self, HarnessPlan, Inputs, Item, ItemKind, ItemState};
 use crate::plan::{SourceInput, SourceTarget};
 use crate::source::{self, AGENTS, AGENTS_MD, SKILLS, Source};
 use crate::state::{self, Lock, Origin, STATE_DIR, State};
+use crate::tool::Tool;
 use crate::ui::render::{self, Cell};
 use crate::ui::style::Token;
 use crate::vault::{self, CloneState, Vault};
@@ -109,6 +110,7 @@ fn prepare_sources(
     let mut inputs = Vec::new();
     let mut clones = Vec::new();
     for s in &config.sources {
+        let mut codex_rev = None;
         let both = |t: SourceTarget| (t.clone(), t);
         let (state, (claude, codex)) = if let Some(err) = errors.get(&s.name) {
             ("invalid", both(SourceTarget::Invalid(err.clone())))
@@ -128,7 +130,23 @@ fn prepare_sources(
                         &s.plugin,
                         s.path.as_deref(),
                     );
-                    (source_target(p.claude), source_target(p.codex))
+                    let claude_ready = matches!(p.claude, ToolPackaging::Supported(_));
+                    let codex = match p.codex {
+                        ToolPackaging::Unsupported(_) if s.convert.contains(&Tool::Codex) => {
+                            let (target, rev) = converted_target(ctx, s, false);
+                            codex_rev = rev;
+                            target
+                        }
+                        // AC7-13: a Claude-only source can be converted.
+                        ToolPackaging::Unsupported(why) if claude_ready => {
+                            SourceTarget::Unsupported(format!(
+                                "{why}; colctl convert {} packages it",
+                                s.name
+                            ))
+                        }
+                        other => source_target(other),
+                    };
+                    (source_target(p.claude), codex)
                 }
                 CloneState::Missing => both(SourceTarget::Pending(
                     "not cloned yet; colctl sync clones it".into(),
@@ -157,36 +175,110 @@ fn prepare_sources(
             replaces: s.replaces.clone(),
             claude,
             codex,
+            codex_rev,
         });
     }
     (inputs, clones)
 }
 
-/// Sync's clone step: each source cloned and at its pin, with any manifests colctl writes.
-/// Returns the failures, by source name.
-fn ensure_sources(ctx: &Ctx, git: &Git, config: &Config) -> BTreeMap<String, String> {
+/// The Codex target of a converted source (cycle 7): its package in `plugins/.converted/<name>`,
+/// installed through the `colctl-<name>` marketplace, and the version Codex should have:
+/// `<rev>+<digest>` of the package as approved. With `write` (sync), a missing or edited package is
+/// rebuilt; without it, one that isn't as approved gives a different version, so it shows outdated.
+fn converted_target(ctx: &Ctx, s: &config::Source, write: bool) -> (SourceTarget, Option<String>) {
+    let pkg = match convert::package_for(ctx, s) {
+        Ok(pkg) => pkg,
+        Err(e) => return (SourceTarget::Invalid(e.message), None),
+    };
+    let expected = pkg.digest();
+    let dir = plugins_dir(ctx).join(CONVERTED).join(&s.name);
+    if write
+        && crate::repackage::digest_dir(&dir).as_deref() != Some(expected.as_str())
+        && let Err(e) = crate::repackage::write(&pkg, &dir)
+    {
+        return (SourceTarget::Invalid(e), None);
+    }
+    let on_disk = crate::repackage::digest_dir(&dir);
+    let plugin_name = pkg
+        .manifest
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or(&s.plugin)
+        .to_string();
+    let target = packaging::wrap_converted(
+        write,
+        &manifests_dir(ctx, &s.name),
+        &s.name,
+        &dir,
+        &plugin_name,
+    );
+    let short = |d: &str| d.chars().take(12).collect::<String>();
+    let rev = match on_disk {
+        Some(d) if d == expected => format!("{}+{}", s.rev, short(&expected)),
+        Some(d) => format!("{}+{}", s.rev, short(&d)),
+        None => format!("{}+missing", s.rev),
+    };
+    (source_target(target), Some(rev))
+}
+
+/// Sync's clone step: each source cloned and at its pin, with any manifests colctl writes, and
+/// converted packages built. Returns the failures, by source name, and notes for the report.
+fn ensure_sources(
+    ctx: &Ctx,
+    git: &Git,
+    config: &Config,
+) -> (BTreeMap<String, String>, Vec<String>) {
     let vault = Vault {
         git,
         dir: plugins_dir(ctx),
     };
     let mut errors = BTreeMap::new();
+    let mut notes = Vec::new();
     for s in &config.sources {
         match vault.ensure(&s.name, &s.clone_url(), &s.rev) {
             Ok(path) => {
-                packaging::inspect(
+                let p = packaging::inspect(
                     &path,
                     &manifests_dir(ctx, &s.name),
                     &s.name,
                     &s.plugin,
                     s.path.as_deref(),
                 );
+                if !s.convert.contains(&Tool::Codex) {
+                    continue;
+                }
+                if matches!(p.codex, ToolPackaging::Supported(_)) {
+                    // AC7-15: the repo packages for Codex itself now; that wins.
+                    if let Err(e) = stop_converting(ctx, git, &s.name) {
+                        errors.insert(s.name.clone(), e.message);
+                        continue;
+                    }
+                    notes.push(format!(
+                        "{} now packages for Codex itself; colctl's conversion is no longer used",
+                        s.name
+                    ));
+                } else {
+                    converted_target(ctx, s, true);
+                }
             }
             Err(e) => {
                 errors.insert(s.name.clone(), e);
             }
         }
     }
-    errors
+    (errors, notes)
+}
+
+/// Removes a source's `convert` (committed), its package and its Codex marketplace entry. The next
+/// plan uninstalls it from Codex profiles, or moves them to the repo's own packaging.
+fn stop_converting(ctx: &Ctx, git: &Git, name: &str) -> Result<(), CliError> {
+    let (_, text) = config::load(&ctx.source, &ctx.home)?;
+    let text = config::set_source_convert(&text, name, false).map_err(CliError::usage)?;
+    write_config(ctx, &text)?;
+    commit(git, ctx, &format!("colctl: stop converting {name}"))?;
+    let _ = fsx::remove_any(&plugins_dir(ctx).join(CONVERTED).join(name));
+    packaging::unwrap_converted(&manifests_dir(ctx, name));
+    Ok(())
 }
 
 struct Planned {
@@ -334,17 +426,31 @@ fn status_json(
             "kind": p.harness.kind.as_str(),
             "path": p.harness.path,
             "state": root_str(p.plan.root),
-            "items": p.plan.items.iter().map(|i| json!({
-                "kind": i.kind.as_str(),
-                "name": i.name,
-                "state": i.state.as_str(),
-                "hint": i.hint,
-                "target": i.target,
-            })).collect::<Vec<_>>(),
+            "items": p.plan.items.iter().map(|i| {
+                let mut item = json!({
+                    "kind": i.kind.as_str(),
+                    "name": i.name,
+                    "state": i.state.as_str(),
+                    "hint": i.hint,
+                    "target": i.target,
+                });
+                // AC7-17: only converted items gain the field.
+                let converted = p.harness.kind == Kind::Codex
+                    && i.kind == ItemKind::Source
+                    && ws.config.sources.iter().any(|s| s.name == i.name && s.convert.contains(&Tool::Codex));
+                if converted {
+                    item["converted"] = json!(true);
+                }
+                item
+            }).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
-        "sources": ws.config.sources.iter().zip(&ws.clones).map(|(s, (_, clone))| json!({
-            "name": s.name, "repo": s.repo, "rev": s.rev, "clone": clone,
-        })).collect::<Vec<_>>(),
+        "sources": ws.config.sources.iter().zip(&ws.clones).map(|(s, (_, clone))| {
+            let mut out = json!({"name": s.name, "repo": s.repo, "rev": s.rev, "clone": clone});
+            if !s.convert.is_empty() {
+                out["convert"] = json!(["codex"]);
+            }
+            out
+        }).collect::<Vec<_>>(),
         "quarantine": held.iter().map(quarantine::status_entry).collect::<Vec<_>>(),
         "in_sync": in_sync(ws, planned, uncommitted),
     })
@@ -417,8 +523,18 @@ fn run_sync_led(
     ensure_layout(ctx)?;
     commit_pending(git, ctx)?;
     let mut ws = load(ctx)?;
-    let errors = ensure_sources(ctx, git, &ws.config);
+    let (errors, notes) = ensure_sources(ctx, git, &ws.config);
+    if !notes.is_empty() {
+        let (config, text) = config::load(&ctx.source, &ctx.home)?;
+        ws.config = config;
+        ws.config_text = text;
+    }
     (ws.sources, ws.clones) = prepare_sources(ctx, &ws.config, Some(git), &errors);
+    let mut lead = lead.to_vec();
+    for n in &notes {
+        lead.push(render::verdict(&ctx.out.caps, Token::Info, n, &[]));
+    }
+    let lead = &lead;
     let planned = plan_all(ctx, &ws, filter)?;
     let busy: Vec<String> = planned
         .iter()
@@ -525,6 +641,18 @@ fn remove_stale_clones(ctx: &Ctx, config: &Config) {
     for name in source::visible_entries(&plugins_dir(ctx).join(MANIFESTS)) {
         if !declared.contains(&name.as_str()) {
             let _ = fsx::remove_any(&manifests_dir(ctx, &name));
+        }
+    }
+    // Packages of sources that are gone or no longer converted (EC7-16).
+    let converting: Vec<&str> = config
+        .sources
+        .iter()
+        .filter(|s| s.convert.contains(&Tool::Codex))
+        .map(|s| s.name.as_str())
+        .collect();
+    for name in source::visible_entries(&plugins_dir(ctx).join(CONVERTED)) {
+        if !converting.contains(&name.as_str()) {
+            let _ = fsx::remove_any(&plugins_dir(ctx).join(CONVERTED).join(&name));
         }
     }
 }

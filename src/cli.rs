@@ -28,7 +28,10 @@ const GROUPS: &[(&str, &[(&str, &str)])] = &[
             ),
             ("rm", "Remove one, everywhere"),
             ("adopt", "Move what a profile already has into ~/.colctl"),
-            ("convert", "Package a Claude-only source plugin for Codex"),
+            (
+                "convert",
+                "Make a Claude-only source plugin work in Codex too",
+            ),
         ],
     ),
     (
@@ -460,7 +463,7 @@ enum Command {
         /// The command, and subcommand if any
         command: Vec<String>,
     },
-    /// Package a source plugin that only packages for Claude for Codex, held for review
+    /// Make a Claude-only source plugin work in Codex too (held for review first)
     #[command(
         after_help = "Examples:\n  colctl convert qdrant-skills\n  colctl convert qdrant-skills --dry-run\n  colctl convert --undo qdrant-skills"
     )]

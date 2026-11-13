@@ -121,6 +121,94 @@ fn said(ctx: &Ctx, as_json: bool, name: &str, tone: Token, text: &str) -> i32 {
     0
 }
 
+/// `colctl convert --undo <source>` (AC7-11, AC7-12, EC7-14, EC7-15): drops a held conversion, or
+/// stops converting and uninstalls the package from Codex profiles.
+fn undo_convert(
+    ctx: &Ctx,
+    git: &Git,
+    ws: &super::Workspace,
+    s: &config::Source,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<i32, CliError> {
+    let name = &s.name;
+    let key = conversion_key(name);
+    let held = ws.state.quarantine.contains_key(&key);
+    let converted = s.convert.contains(&Tool::Codex);
+    let json_out = |undone: bool| {
+        ctx.out.raw(&format!(
+            "{:#}\n",
+            json!({"source": name, "undone": undone, "dry_run": dry_run})
+        ));
+    };
+    if !held && !converted {
+        if as_json {
+            json_out(false);
+        } else {
+            ctx.out.line(render::verdict(
+                &ctx.out.caps,
+                Token::Info,
+                &format!("{name} isn't converted"),
+                &[],
+            ));
+        }
+        return Ok(0);
+    }
+    if dry_run {
+        if as_json {
+            json_out(false);
+        } else {
+            let what = if converted {
+                "uninstall it from Codex profiles and remove its package"
+            } else {
+                "drop its held package"
+            };
+            ctx.out.line(render::verdict(
+                &ctx.out.caps,
+                Token::Info,
+                &format!("Would stop converting {name}"),
+                &[what.to_string()],
+            ));
+        }
+        return Ok(0);
+    }
+    let _lock = Lock::acquire(&ctx.source)?;
+    if held {
+        let mut st = state::load(&ctx.source)?;
+        st.quarantine.remove(&key);
+        state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))?;
+        let _ = crate::fsx::remove_any(&state::snapshot_path(&ctx.source, &key));
+    }
+    let lead = vec![render::verdict(
+        &ctx.out.caps,
+        Token::Ok,
+        &format!("Stopped converting {name}"),
+        &[],
+    )];
+    if !converted {
+        if as_json {
+            json_out(true);
+        } else {
+            ctx.out.lines(lead);
+        }
+        return Ok(0);
+    }
+    super::stop_converting(ctx, git, name)?;
+    if as_json {
+        let quiet = Ctx {
+            out: crate::ui::Out::new(&crate::ui::term::Settings {
+                quiet: true,
+                ..crate::ui::term::Settings::default()
+            }),
+            ..ctx.clone()
+        };
+        let code = super::run_sync_led(&quiet, git, None, &[])?;
+        json_out(true);
+        return Ok(code);
+    }
+    super::run_sync_led(ctx, git, None, &lead)
+}
+
 /// `colctl convert <source>` (AC7-07, AC7-12, EC7-01 – 05, 10, 11).
 pub fn convert(
     ctx: &Ctx,
@@ -135,7 +223,7 @@ pub fn convert(
         return Err(CliError::usage(format!("no source named \"{name}\"")).hint("colctl status"));
     };
     if undo {
-        return Err(CliError::usage("convert --undo isn't available yet"));
+        return undo_convert(ctx, &_git, &ws, &s, dry_run, as_json);
     }
     if !ws.config.harnesses.iter().any(|h| h.kind == Kind::Codex) {
         return Err(CliError::refused("no Codex profile is registered").hint("colctl init"));

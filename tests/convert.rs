@@ -463,7 +463,9 @@ fn ac7_13_status_points_at_convert() {
     let (code, out, _) = env.code(&["status", "--all", "--color", "never"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        Env::words(&out).contains("unsupported source qdrant → colctl convert qdrant"),
+        Env::words(&out).contains(
+            "unsupported source qdrant → the repo has no Codex packaging; colctl convert qdrant packages it"
+        ),
         "{out}"
     );
 }

@@ -486,6 +486,46 @@ pub fn build(folder: &Path, fallback: &str) -> Result<Package, String> {
     })
 }
 
+/// The digest of a package written to `dir` ([`Package::digest`] of what's there), or `None` when
+/// it's missing or can't be read.
+pub fn digest_dir(dir: &Path) -> Option<String> {
+    let mut files = Vec::new();
+    let mut stack = vec![(String::new(), dir.to_path_buf())];
+    while let Some((rel, d)) = stack.pop() {
+        for e in fs::read_dir(&d).ok()? {
+            let e = e.ok()?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            let path = if rel.is_empty() {
+                name
+            } else {
+                format!("{rel}/{name}")
+            };
+            let meta = fs::symlink_metadata(e.path()).ok()?;
+            if meta.is_dir() {
+                stack.push((path, e.path()));
+            } else {
+                files.push((path, e.path(), meta.permissions().mode() & 0o111 != 0));
+            }
+        }
+    }
+    files.sort();
+    let pkg = Package {
+        manifest: Value::Null,
+        skills: Vec::new(),
+        hooks: Vec::new(),
+        report: Report::default(),
+        entries: files
+            .into_iter()
+            .map(|(path, real, executable)| Entry {
+                path,
+                content: Content::File(real),
+                executable,
+            })
+            .collect(),
+    };
+    Some(pkg.digest())
+}
+
 /// Writes `pkg` to `dest`, replacing what's there, and returns its digest. It's built next to `dest`
 /// and renamed into place, so a reader never sees half a package (EC7-19).
 pub fn write(pkg: &Package, dest: &Path) -> Result<String, String> {

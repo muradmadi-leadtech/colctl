@@ -113,7 +113,8 @@ Then it prints what it would hold or remove and writes nothing (config, state, f
 ```gherkin
 Given a source with Claude packaging and none for Codex, not converted
 When I run colctl status --all
-Then each Codex item is unsupported with the fix "colctl convert <name>"; it stays informational (exit 0)
+Then each Codex item is unsupported with the fix "the repo has no Codex packaging; colctl convert <name> packages
+  it"; it stays informational (exit 0)
 ```
 
 **AC7-14 Sync keeps the package as approved**
