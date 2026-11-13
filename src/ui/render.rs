@@ -252,6 +252,21 @@ mod tests {
     }
 
     #[test]
+    fn ec6_09_control_characters_are_escaped_before_measuring() {
+        let shown = crate::review::escape("evil\u{1b}]0;pwned\u{7}name");
+        assert!(!shown.contains('\u{1b}'));
+        let cut_down = cut(&shown, 12);
+        assert_eq!(width(&cut_down), 12);
+        let lines = table(
+            &at(40),
+            0,
+            &[vec![Cell::plain(shown.clone()), Cell::plain("x")]],
+            0,
+        );
+        assert!(width(&lines[0]) <= 40);
+    }
+
+    #[test]
     fn ec6_08_wide_characters_stay_aligned() {
         let rows = vec![
             vec![Cell::plain("日本語プラグイン"), Cell::plain("dev")],
