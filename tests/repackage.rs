@@ -304,3 +304,178 @@ fn ec7_05_no_claude_manifest_is_an_error() {
     let err = repackage::build(&src, "x").unwrap_err();
     assert!(err.contains("no Claude packaging"), "{err}");
 }
+
+// ---------------------------------------------------------------- hooks (T2)
+
+fn hooks_fixture(root: &Path, hooks: &Value) -> PathBuf {
+    let src = qdrant(root);
+    write(&src.join("hooks/hooks.json"), &hooks.to_string());
+    write(&src.join("hooks/run.py"), "print('hi')");
+    src
+}
+
+fn group(matcher: Option<&str>, command: &str) -> Value {
+    let mut g = json!({"hooks": [{"type": "command", "command": command}]});
+    if let Some(m) = matcher {
+        g["matcher"] = json!(m);
+    }
+    g
+}
+
+fn package_hooks(dest: &Path) -> Value {
+    serde_json::from_str(&fs::read_to_string(dest.join("hooks/hooks.json")).unwrap()).unwrap()
+}
+
+#[test]
+fn ac7_04_hooks_codex_runs_are_kept_unchanged() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/run.py\"";
+    let hooks = json!({"description": "d", "hooks": {
+        "UserPromptSubmit": [group(None, run)],
+        "SessionStart": [group(Some("startup|clear"), run)],
+        "PreToolUse": [group(Some("Bash"), run), group(Some("mcp__github__.*"), run)],
+        "PostToolUse": [{"matcher": "Edit|Write", "hooks": [{"type": "command", "command": run, "timeout": 30}]}],
+    }});
+    let src = hooks_fixture(tmp.path(), &hooks);
+    let pkg = repackage::build(&src, "x").unwrap();
+    let dest = tmp.path().join("out");
+    repackage::write(&pkg, &dest).unwrap();
+    assert_eq!(package_hooks(&dest), hooks);
+    assert_eq!(
+        fs::read_to_string(dest.join("hooks/run.py")).unwrap(),
+        "print('hi')"
+    );
+    assert!(pkg.report.never_runs.is_empty(), "{:?}", pkg.report);
+    let kept: Vec<String> = pkg
+        .hooks
+        .iter()
+        .map(|h| format!("{} {}", h.event, h.matcher.clone().unwrap_or_default()))
+        .collect();
+    assert_eq!(
+        kept,
+        vec![
+            "PostToolUse Edit|Write",
+            "PreToolUse Bash",
+            "PreToolUse mcp__github__.*",
+            "SessionStart startup|clear",
+            "UserPromptSubmit ",
+        ]
+    );
+    assert!(
+        pkg.hooks
+            .iter()
+            .all(|h| h.kind == "command" && h.command == run)
+    );
+}
+
+#[test]
+fn ac7_05_hooks_codex_never_runs_are_reported_not_kept() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hooks = json!({"hooks": {
+        "Notification": [group(None, "notify")],
+        "PreToolUse": [group(Some("Read|Grep"), "a"), group(Some("Bash"), "b")],
+        "PostToolUse": [group(Some("Bash|WebFetch"), "c")],
+        "Stop": [{"hooks": [{"type": "prompt", "prompt": "check"}, {"type": "command", "command": "d"}]}],
+    }});
+    let src = hooks_fixture(tmp.path(), &hooks);
+    let pkg = repackage::build(&src, "x").unwrap();
+    let dest = tmp.path().join("out");
+    repackage::write(&pkg, &dest).unwrap();
+    assert_eq!(
+        package_hooks(&dest),
+        json!({"hooks": {
+            "PreToolUse": [group(Some("Bash"), "b")],
+            "PostToolUse": [group(Some("Bash"), "c")],
+            "Stop": [group(None, "d")],
+        }})
+    );
+    assert_eq!(
+        pkg.report.never_runs,
+        vec![
+            "Notification hook (Codex has no such event)",
+            "WebFetch in PostToolUse's matcher",
+            "PreToolUse on Read|Grep (Codex has no such tools)",
+            "prompt hook in Stop (Codex runs command hooks only)",
+        ]
+    );
+}
+
+#[test]
+fn ac7_05_no_hook_left_means_no_hooks_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = hooks_fixture(
+        tmp.path(),
+        &json!({"hooks": {"Notification": [group(None, "n")]}}),
+    );
+    let pkg = repackage::build(&src, "x").unwrap();
+    let dest = tmp.path().join("out");
+    repackage::write(&pkg, &dest).unwrap();
+    assert!(!dest.join("hooks/hooks.json").exists());
+    assert!(pkg.hooks.is_empty());
+}
+
+#[test]
+fn ec7_06_a_broken_hooks_file_is_an_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = qdrant(tmp.path());
+    write(&src.join("hooks/hooks.json"), "{not json");
+    let err = repackage::build(&src, "x").unwrap_err();
+    assert!(
+        err.contains("hooks.json") && err.contains("doesn't parse"),
+        "{err}"
+    );
+    for shape in [
+        json!({"hooks": []}),
+        json!({"hooks": {"Stop": {}}}),
+        json!({"hooks": {"Stop": [{"hooks": "x"}]}}),
+        json!({"hooks": {"Stop": [{"matcher": 3, "hooks": []}]}}),
+    ] {
+        write(&src.join("hooks/hooks.json"), &shape.to_string());
+        let err = repackage::build(&src, "x").unwrap_err();
+        assert!(err.contains("unknown shape"), "{shape}: {err}");
+    }
+}
+
+#[test]
+fn ec7_18_hooks_in_the_manifest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = qdrant(tmp.path());
+    // Inline.
+    write(
+        &src.join(".claude-plugin/plugin.json"),
+        &json!({"name": "q", "hooks": {"hooks": {"Stop": [group(None, "s")]}}}).to_string(),
+    );
+    let dest = tmp.path().join("inline");
+    repackage::write(&repackage::build(&src, "x").unwrap(), &dest).unwrap();
+    assert_eq!(
+        package_hooks(&dest),
+        json!({"hooks": {"Stop": [group(None, "s")]}})
+    );
+    assert!(manifest(&dest).get("hooks").is_none());
+    // A path: read from there, written to hooks/hooks.json, the original not copied twice.
+    write(
+        &src.join("config/my-hooks.json"),
+        &json!({"hooks": {"Stop": [group(None, "t")]}}).to_string(),
+    );
+    write(
+        &src.join(".claude-plugin/plugin.json"),
+        r#"{"name": "q", "hooks": "./config/my-hooks.json"}"#,
+    );
+    let dest = tmp.path().join("path");
+    repackage::write(&repackage::build(&src, "x").unwrap(), &dest).unwrap();
+    assert_eq!(
+        package_hooks(&dest),
+        json!({"hooks": {"Stop": [group(None, "t")]}})
+    );
+    assert!(!dest.join("config/my-hooks.json").exists());
+    // A path outside is refused.
+    write(
+        &src.join(".claude-plugin/plugin.json"),
+        r#"{"name": "q", "hooks": "../h.json"}"#,
+    );
+    assert!(
+        repackage::build(&src, "x")
+            .unwrap_err()
+            .contains("outside the plugin")
+    );
+}
