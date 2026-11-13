@@ -10,16 +10,16 @@ Design how colctl presents information and interacts, as one system applied to e
 
 ---
 
-<!-- FORGE_PHASE:Focus:Active -->
+<!-- FORGE_PHASE:Focus:Complete -->
 ## Phase 1: Focus
 
 **Purpose**: Define what you're building and why.
 
 ### Required Outputs
-- [ ] Problem statement and target users defined
-- [ ] Testable success criteria written
-- [ ] System Context diagram (C4 L1) created
-- [ ] Clear boundaries on what you WON'T build
+- [x] Problem statement and target users defined
+- [x] Testable success criteria written
+- [x] System Context diagram (C4 L1) created
+- [x] Clear boundaries on what you WON'T build
 
 ### Notes
 
@@ -30,7 +30,7 @@ Design how colctl presents information and interacts, as one system applied to e
 
 ---
 
-<!-- FORGE_PHASE:Orchestrate:Pending -->
+<!-- FORGE_PHASE:Orchestrate:Active -->
 ## Phase 2: Orchestrate
 
 **Purpose**: Break the work into session-sized pieces.
@@ -43,7 +43,8 @@ Design how colctl presents information and interacts, as one system applied to e
 
 ### Tasks
 
-<!-- List tasks here -->
+See `docs/tasks/cli-output-design.md` (T1–T8), `docs/cli-output-design/containers.md`, `components.md`.
+Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 
 ---
 
