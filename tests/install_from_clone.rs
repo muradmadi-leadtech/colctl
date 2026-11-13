@@ -55,7 +55,7 @@ fn manifests(repo: &Path, remote: bool) {
         } else if tool == "claude" {
             json!({"name": "dbx", "source": "./plugins/dbx/claude"})
         } else {
-            json!({"name": "dbx", "source": {"source": "url", "url": "./plugins/dbx/codex"}})
+            json!({"name": "dbx", "source": {"source": "local", "path": "./plugins/dbx/codex"}})
         }
     };
     write(

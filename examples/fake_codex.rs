@@ -130,6 +130,48 @@ fn main() {
                 eprintln!("marketplace `{market}` is not configured");
                 exit(1);
             }
+            // Like Codex: a plugin entry's `url` source is cloned with git, so a folder that isn't a
+            // repo fails; a `local` source must exist.
+            let plugin = id.rsplit_once('@').map(|(p, _)| p).unwrap_or_default();
+            let root = table(&mut config, "marketplaces")
+                .get(market)
+                .and_then(|m| m.get("source"))
+                .and_then(|s| s.as_str())
+                .map(PathBuf::from);
+            if let Some(root) = root.filter(|r| r.is_absolute()) {
+                let manifest: serde_json::Value =
+                    fs::read_to_string(root.join(".agents/plugins/marketplace.json"))
+                        .ok()
+                        .and_then(|t| serde_json::from_str(&t).ok())
+                        .unwrap_or_default();
+                let source = manifest["plugins"]
+                    .as_array()
+                    .and_then(|ps| ps.iter().find(|p| p["name"] == plugin))
+                    .map(|p| p["source"].clone())
+                    .unwrap_or_default();
+                let rel = |k: &str| {
+                    source[k]
+                        .as_str()
+                        .filter(|u| u.starts_with('.'))
+                        .map(|u| root.join(u))
+                };
+                match source["source"].as_str() {
+                    Some("url") => {
+                        if let Some(dir) = rel("url").filter(|d| !d.join(".git").exists()) {
+                            eprintln!(
+                                "Error: git clone {} failed: repository does not exist",
+                                dir.display()
+                            );
+                            exit(1);
+                        }
+                    }
+                    Some("local") if rel("path").is_none_or(|d| !d.is_dir()) => {
+                        eprintln!("Error: plugin path for `{plugin}` does not exist");
+                        exit(1);
+                    }
+                    _ => {}
+                }
+            }
             let mut plugins = table(&mut config, "plugins");
             let mut entry = toml::Table::new();
             entry.insert("enabled".into(), true.into());
