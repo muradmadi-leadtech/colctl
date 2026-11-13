@@ -577,3 +577,219 @@ fn ec5_16_one_profile_failing_still_lists_the_rest() {
     assert_eq!(code, 1);
     assert!(err.contains("warning: codex:"), "{err}");
 }
+
+// ---------------------------------------------------------------- add source <id> (T7)
+
+fn sh(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// Marketplaces write GitHub URLs with `.git`; the local stand-in answers to that spelling too.
+fn git_alias(repo: &Path) {
+    let alias = repo.with_extension("git");
+    std::os::unix::fs::symlink(repo, alias).unwrap();
+}
+
+fn sources(env: &Env) -> Vec<toml::Value> {
+    let t: toml::Table = toml::from_str(&env.config()).unwrap();
+    t.get("source")
+        .and_then(|s| s.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// superpowers on "GitHub" at v1 and v2; the official marketplace lists it at v1.
+fn listed_superpowers(env: &Env) -> (String, String) {
+    let (repo, v1) = env.github_repo("obra/superpowers", "superpowers", "superpowers-dev");
+    git_alias(&repo);
+    let v2 = env.upstream_commit(&repo, "v2");
+    claude_market(
+        env,
+        &env.home.join(".claude"),
+        "official",
+        "anthropics/official",
+        json!([
+            {"name": "superpowers", "source": {"source": "url",
+             "url": "https://github.com/obra/superpowers.git", "sha": v1}},
+            {"name": "xcode", "source": {"source": "command", "command": "xcrun agent plugin path"}},
+            {"name": "missing", "source": {"source": "github", "repo": "none/missing"}}
+        ]),
+    );
+    (v1, v2)
+}
+
+#[test]
+fn ac5_23_add_source_from_a_result() {
+    let env = machine();
+    let (v1, v2) = listed_superpowers(&env);
+    let out = env.ok(&["add", "source", "superpowers@official"]);
+    assert!(
+        out.contains(&format!("added source superpowers at {}", &v1[..7])),
+        "{out}"
+    );
+    let s = &sources(&env)[0];
+    assert_eq!(s["name"].as_str(), Some("superpowers"));
+    assert_eq!(
+        s["repo"].as_str(),
+        Some("https://github.com/obra/superpowers.git")
+    );
+    assert_eq!(
+        s["rev"].as_str(),
+        Some(v1.as_str()),
+        "the catalog's commit is pinned"
+    );
+    assert!(
+        env.installed(&env.home.join(".claude"))
+            .contains(&"superpowers@superpowers-dev".to_string())
+    );
+    // --rev wins over the catalog's commit.
+    let env2 = machine();
+    listed_superpowers(&env2);
+    let v2b = head_of_github(&env2);
+    env2.ok(&["add", "source", "superpowers@official", "--rev", &v2b]);
+    assert_eq!(sources(&env2)[0]["rev"].as_str(), Some(v2b.as_str()));
+    let _ = v2;
+}
+
+fn head_of_github(env: &Env) -> String {
+    sh(
+        &env.home.parent().unwrap().join("github/obra/superpowers"),
+        &["rev-parse", "HEAD"],
+    )
+}
+
+#[test]
+fn ac5_24_a_plugin_in_a_subfolder() {
+    let env = machine();
+    let base = env.github_is_local();
+    let repo = base.join("o/plugins");
+    write(
+        &repo.join("plugins/x/.claude-plugin/plugin.json"),
+        &json!({"name": "x", "description": "in a folder"}),
+    );
+    fs::write(repo.join("README.md"), "r").unwrap();
+    sh(&repo, &["init", "-q"]);
+    sh(&repo, &["add", "-A"]);
+    sh(&repo, &["commit", "-qm", "init"]);
+    let head = sh(&repo, &["rev-parse", "HEAD"]);
+    git_alias(&repo);
+    claude_market(
+        &env,
+        &env.home.join(".claude"),
+        "official",
+        "anthropics/official",
+        json!([{"name": "x", "source": {"source": "git-subdir",
+                 "url": "https://github.com/o/plugins.git", "path": "plugins/x", "sha": head}}]),
+    );
+    env.ok(&["add", "source", "x@official"]);
+    let s = &sources(&env)[0];
+    assert_eq!(s["path"].as_str(), Some("plugins/x"));
+    assert_eq!(s["rev"].as_str(), Some(head.as_str()));
+    assert!(
+        env.installed(&env.home.join(".claude"))
+            .contains(&"x@colctl-x".to_string()),
+        "{:?}",
+        env.installed(&env.home.join(".claude"))
+    );
+}
+
+#[test]
+fn ac5_25_results_without_a_repo() {
+    let env = machine();
+    listed_superpowers(&env);
+    let (code, _, err) = env.code(&["add", "source", "xcode@official"]);
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("xcode@official has no repo to clone; colctl add plugin xcode@official keeps it on the marketplace list"),
+        "{err}"
+    );
+    assert!(sources(&env).is_empty());
+}
+
+#[test]
+fn ac5_26_already_a_source() {
+    let env = machine();
+    listed_superpowers(&env);
+    env.ok(&["add", "source", "superpowers@official"]);
+    let (code, _, err) = env.code(&["add", "source", "superpowers@official"]);
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("superpowers@official is already source plugin superpowers"),
+        "{err}"
+    );
+}
+
+#[test]
+fn ec5_18_a_git_at_repo_is_still_a_repo() {
+    let env = machine();
+    let out = env.ok(&["add", "source", "git@github.com:o/r.git", "--dry-run"]);
+    assert!(
+        out.contains("clone git@github.com:o/r.git as source r"),
+        "{out}"
+    );
+}
+
+#[test]
+fn ec5_19_unknown_ids_and_bare_names() {
+    let env = machine();
+    listed_superpowers(&env);
+    let (code, _, err) = env.code(&["add", "source", "nope@official"]);
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("nope@official isn't a repo or a plugin id from colctl search"),
+        "{err}"
+    );
+    let (code, _, err) = env.code(&["add", "source", "superpowers"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("or a plugin id from colctl search"), "{err}");
+    assert!(sources(&env).is_empty());
+}
+
+#[test]
+fn ec5_20_an_unreachable_repo_writes_nothing() {
+    let env = machine();
+    listed_superpowers(&env);
+    let config = env.config();
+    let (code, _, _) = env.code(&["add", "source", "missing@official"]);
+    assert_eq!(code, 2);
+    assert_eq!(env.config(), config);
+    assert!(!env.source.join("plugins/missing").exists());
+}
+
+#[test]
+fn ec5_21_name_and_plugin_override_the_result() {
+    let env = machine();
+    listed_superpowers(&env);
+    let out = env.ok(&[
+        "add",
+        "source",
+        "superpowers@official",
+        "--name",
+        "sp",
+        "--plugin",
+        "superpowers",
+        "--dry-run",
+    ]);
+    assert!(out.contains("as source sp"), "{out}");
+    env.ok(&["add", "source", "superpowers@official", "--name", "sp"]);
+    assert_eq!(sources(&env)[0]["name"].as_str(), Some("sp"));
+}

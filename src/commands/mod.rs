@@ -1503,14 +1503,10 @@ pub fn add_source(
 ) -> Result<i32, CliError> {
     let git = Git::find(&ctx.path_var)?;
     let ws = load(ctx)?;
-    if !config::valid_repo(repo) {
-        return Err(CliError::usage(format!(
-            "repo \"{repo}\" must be a URL, git@host:path, an absolute path or github:owner/repo"
-        )));
-    }
-    let name = name
-        .map(str::to_string)
-        .unwrap_or_else(|| skill_name_from(repo, None));
+    let wanted = wanted_source(ctx, &ws, repo)?;
+    let repo = wanted.repo.as_str();
+    let rev = rev.or(wanted.rev.as_deref());
+    let name = name.map(str::to_string).unwrap_or(wanted.name);
     if !config::valid_item_name(&name) {
         return Err(CliError::usage(format!(
             "invalid source name \"{name}\"; pass --name"
@@ -1519,29 +1515,90 @@ pub fn add_source(
     if ws.config.sources.iter().any(|s| s.name == name) {
         return Err(CliError::usage(format!("source \"{name}\" already exists")));
     }
-    let plugin = plugin
-        .map(str::to_string)
-        .unwrap_or_else(|| skill_name_from(repo, None));
-    if dry_or_write(dry_run, &format!("clone {repo} as source {name}")) {
+    let plugin = plugin.map(str::to_string).unwrap_or(wanted.plugin);
+    let subpath = wanted.subpath;
+    let folder = subpath
+        .as_ref()
+        .map(|p| format!(" (folder {p})"))
+        .unwrap_or_default();
+    if dry_or_write(dry_run, &format!("clone {repo}{folder} as source {name}")) {
         return Ok(0);
     }
     let _lock = Lock::acquire(&ctx.source)?;
     commit_pending(&git, ctx)?;
-    let (pinned, _) =
-        clone_and_check(ctx, &git, &name, repo, rev, &plugin, None).map_err(CliError::usage)?;
+    let (pinned, _) = clone_and_check(ctx, &git, &name, repo, rev, &plugin, subpath.as_deref())
+        .map_err(CliError::usage)?;
     let source = config::Source {
         name: name.clone(),
         repo: repo.to_string(),
         rev: pinned.clone(),
         plugin,
         replaces: Vec::new(),
-        path: None,
+        path: subpath,
     };
     let text = config::add_source(&ws.config_text, &source).map_err(CliError::usage)?;
     write_config(ctx, &text)?;
     commit(&git, ctx, &format!("colctl: add source {name}"))?;
     println!("added source {name} at {}", vault::short(&pinned));
     run_sync(ctx, &git, None)
+}
+
+/// What `add source` clones: from a repo argument as before, or from a plugin id in the catalogs.
+struct WantedSource {
+    repo: String,
+    subpath: Option<String>,
+    plugin: String,
+    name: String,
+    /// The commit the catalog recorded, pinned unless `--rev` is given (AC5-23).
+    rev: Option<String>,
+}
+
+/// Resolves `add source`'s argument (AC5-23…26, EC5-18, EC5-19). Anything that's a valid repo is a
+/// repo, so `git@host:o/r` is never looked up as an id.
+fn wanted_source(ctx: &Ctx, ws: &Workspace, arg: &str) -> Result<WantedSource, CliError> {
+    if config::valid_repo(arg) {
+        let name = skill_name_from(arg, None);
+        return Ok(WantedSource {
+            repo: arg.to_string(),
+            subpath: None,
+            plugin: name.clone(),
+            name,
+            rev: None,
+        });
+    }
+    if !arg.contains('@') {
+        return Err(CliError::usage(format!(
+            "repo \"{arg}\" must be a URL, git@host:path, an absolute path or github:owner/repo, or a plugin id from colctl search"
+        )));
+    }
+    let catalog = crate::catalog::build(&ws.config, &ctx.source);
+    let all = crate::search::merge(&catalog.entries);
+    let found = discovery::find(&all, arg).map_err(|e| {
+        if e.message.starts_with("no plugin") {
+            CliError::usage(format!(
+                "{arg} isn't a repo or a plugin id from colctl search"
+            ))
+        } else {
+            e
+        }
+    })?;
+    if let Some(existing) = &found.source_plugin {
+        return Err(CliError::usage(format!(
+            "{arg} is already source plugin {existing}"
+        )));
+    }
+    let Some(repo) = found.repo.clone().filter(|r| config::valid_repo(r)) else {
+        return Err(CliError::usage(format!(
+            "{arg} has no repo to clone; colctl add plugin {arg} keeps it on the marketplace list"
+        )));
+    };
+    Ok(WantedSource {
+        repo,
+        subpath: found.subpath.clone(),
+        plugin: found.name.clone(),
+        name: found.name.clone(),
+        rev: found.commit.clone(),
+    })
 }
 
 /// Moves a plugin to its source when the source can be found (AC3-18…21); `None` to fall back

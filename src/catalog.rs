@@ -378,7 +378,7 @@ impl Builder {
         }
     }
 
-    fn finish(mut self, config: &Config) -> Catalog {
+    fn finish(mut self, config: &Config, source_dir: &Path) -> Catalog {
         let mut entries: Vec<Entry> = std::mem::take(&mut self.entries).into_values().collect();
         // A plugin that a source installs is that source, whichever catalog lists it.
         let source_ids: BTreeMap<String, String> = entries
@@ -403,12 +403,10 @@ impl Builder {
             };
             m.managed = declared.contains_key(&m.name);
         }
-        // Marketplaces colctl added for its sources are managed too.
+        // Marketplaces colctl added for its sources (folders in ~/.colctl/plugins) are managed too.
+        let clones = source_dir.join("plugins");
         for m in &mut marketplaces {
-            if entries
-                .iter()
-                .any(|e| e.catalog == m.name && e.tool == m.tool && e.source_plugin.is_some())
-            {
+            if Path::new(&m.source).starts_with(&clones) {
                 m.managed = true;
             }
         }
@@ -423,6 +421,9 @@ impl Builder {
 /// Reads every catalog the registered harnesses keep, plus colctl's sources (AC5-01…06).
 pub fn build(config: &Config, source_dir: &Path) -> Catalog {
     let mut b = Builder::default();
+    // Sources first: the same id under the local marketplace colctl added for a source is that
+    // source, and the first entry for an id is the one kept.
+    b.sources(config, source_dir);
     for h in &config.harnesses {
         if !h.path.is_dir() {
             continue;
@@ -433,8 +434,7 @@ pub fn build(config: &Config, source_dir: &Path) -> Catalog {
             Kind::Agents => {}
         }
     }
-    b.sources(config, source_dir);
-    b.finish(config)
+    b.finish(config, source_dir)
 }
 
 /// Codex connectors from `codex plugin list --available --json` output (AC5-21): available entries
@@ -902,6 +902,43 @@ mod tests {
         let c = f.build();
         assert_eq!(c.entries.len(), 1);
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+    }
+
+    #[test]
+    fn ac5_04_a_source_wins_over_its_own_local_marketplace() {
+        let mut f = Fx::new();
+        let clone = f.root.join("source/plugins/superpowers");
+        write(
+            &clone.join(".claude-plugin/marketplace.json"),
+            &json!({"name": "superpowers-dev", "plugins": [{"name": "superpowers", "source": "./"}]}),
+        );
+        // Claude knows the clone as a local marketplace, as after colctl installed it.
+        let known = f.claude().join("plugins/known_marketplaces.json");
+        write(
+            &known,
+            &json!({"superpowers-dev": {"source": {"source": "directory", "path": clone.display().to_string()},
+                                        "installLocation": clone.display().to_string()}}),
+        );
+        f.config.sources.push(config::Source {
+            name: "superpowers".into(),
+            repo: "https://github.com/obra/superpowers.git".into(),
+            rev: "a".repeat(40),
+            plugin: "superpowers".into(),
+            replaces: vec![],
+            path: None,
+        });
+        let c = f.build();
+        let e = find(&c, "superpowers@superpowers-dev");
+        assert_eq!(e.catalog, COLCTL);
+        assert_eq!(
+            e.repo.as_deref(),
+            Some("https://github.com/obra/superpowers.git")
+        );
+        assert!(
+            c.marketplaces
+                .iter()
+                .any(|m| m.name == "superpowers-dev" && m.managed)
+        );
     }
 
     #[test]
