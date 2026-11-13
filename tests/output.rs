@@ -272,8 +272,8 @@ fn ac6_08_all_in_sync_fits_in_eight_lines() {
         "{out}"
     );
     let words = Env::words(&out);
-    assert!(words.contains("✓ claude ~/.claude 32 ok"), "{out}");
-    assert!(words.contains("✓ agents ~/.agents 32 ok"), "{out}");
+    assert!(words.contains("✓ claude ~/.claude 32 skills"), "{out}");
+    assert!(words.contains("✓ agents ~/.agents 32 skills"), "{out}");
     let all = env.ok(&["status", "--all"]);
     assert!(non_blank(&all) > 90, "{all}");
 }
@@ -297,7 +297,7 @@ fn ac6_09_problems_only_each_with_its_fix() {
         "{out}"
     );
     assert!(
-        words.contains("! claude ~/.claude 31 ok · 1 missing"),
+        words.contains("! claude ~/.claude 32 skills · 1 missing"),
         "{out}"
     );
     // Nothing that's fine is listed one by one.
@@ -722,4 +722,140 @@ fn stacked_outcomes_start_on_the_profile_line() {
     let (_, out, _) = at_width(&env, &["sync"], "40");
     let line = out.lines().find(|l| l.contains("claude ")).unwrap();
     assert!(line.trim_end().len() > "  ✓  claude".len(), "{out}");
+}
+
+// ---------------------------------------------------------------- revise (T9, T10)
+
+/// The text after a profile's path on its status line.
+fn profile_line(out: &str, name: &str) -> String {
+    out.lines()
+        .map(Env::words)
+        .find(|l| l.split(' ').nth(1) == Some(name))
+        .unwrap_or_else(|| panic!("no {name} line in {out}"))
+}
+
+#[test]
+fn ac6_34_profile_lines_say_what_each_profile_has() {
+    let env = calm_machine();
+    fs::write(env.source.join("AGENTS.md"), "rules").unwrap();
+    let (_, url, v1) = env.upstream("clonly", true, false, Some("m"));
+    env.add_source_entry("clonly", &url, &v1, "");
+    env.ok(&["sync"]);
+    let out = env.ok(&["status", "--color", "never"]);
+    let claude = profile_line(&out, "claude");
+    assert!(
+        claude.ends_with("~/.claude 32 skills · 1 plugin · CLAUDE.md"),
+        "{claude}"
+    );
+    let codex = profile_line(&out, "codex");
+    assert!(
+        codex.ends_with("~/.codex AGENTS.md · skills via ~/.agents · 1 not packaged"),
+        "{codex}"
+    );
+    let agents = profile_line(&out, "agents");
+    assert!(agents.ends_with("~/.agents 32 skills"), "{agents}");
+}
+
+#[test]
+fn ac6_34_an_empty_profile_says_nothing_yet() {
+    let env = Env::new();
+    env.native();
+    env.ok(&["init"]);
+    let out = env.ok(&["status"]);
+    assert!(
+        profile_line(&out, "claude").ends_with("~/.claude nothing yet"),
+        "{out}"
+    );
+}
+
+/// The path cell of each profile line: the word after the name.
+fn paths(out: &str) -> Vec<String> {
+    out.lines()
+        .map(Env::words)
+        .filter(|l| l.starts_with('✓') || l.starts_with('!') || l.starts_with('✗'))
+        .filter_map(|l| l.split(' ').nth(2).map(str::to_string))
+        .filter(|p| p.starts_with('~'))
+        .collect()
+}
+
+#[test]
+fn ac6_35_paths_are_shortened_alike_and_only_when_needed() {
+    let env = calm_machine();
+    let (_, wide, _) = at_width(&env, &["status", "--color", "never"], "160");
+    let full = paths(&wide);
+    assert!(
+        full.iter().any(|p| p.contains("Application")),
+        "full paths at 160: {wide}"
+    );
+    for columns in ["60", "80"] {
+        let (_, out, _) = at_width(&env, &["status", "--color", "never"], columns);
+        let kilo: Vec<String> = paths(&out)
+            .into_iter()
+            .filter(|p| p.contains('…'))
+            .collect();
+        assert_eq!(kilo.len(), 2, "both kilo paths shortened at {columns}: {out}");
+        let shape = |p: &str| {
+            let (head, tail) = p.split_once('…').unwrap();
+            (head.to_string(), tail.matches('/').count())
+        };
+        assert_eq!(shape(&kilo[0]), shape(&kilo[1]), "{out}");
+        for line in out.lines() {
+            assert!(
+                console::measure_text_width(line) <= columns.parse().unwrap(),
+                "{line:?} at {columns}"
+            );
+        }
+    }
+}
+
+#[test]
+fn ac6_36_help_welcomes_someone_new() {
+    let env = Env::new();
+    for args in [&["--help"][..], &["help"], &["-h"], &[]] {
+        let mut all = args.to_vec();
+        all.extend(["--color", "never"]);
+        let (code, out, err) = at_width(&env, &all, "80");
+        assert_eq!(code, 0, "{args:?}: {out}{err}");
+        let first = out.lines().next().unwrap();
+        assert!(first.starts_with("colctl keeps every AI coding profile"), "{out}");
+        let words = Env::words(&out);
+        for want in [
+            "Start here",
+            "colctl init Find your profiles and create ~/.colctl",
+            "colctl status See what's in sync and what needs you",
+            "colctl sync Make every profile match",
+            "More: colctl <command> --help",
+        ] {
+            assert!(words.contains(want), "{want} in {out}");
+        }
+        // Groups are separated by a blank line.
+        let lines: Vec<&str> = out.lines().collect();
+        for heading in ["Start here", "Options"] {
+            let at = lines.iter().position(|l| *l == heading).unwrap();
+            assert_eq!(lines[at - 1], "", "{heading} in {out}");
+        }
+        for line in out.lines() {
+            assert!(console::measure_text_width(line) <= 80, "{line:?}");
+        }
+    }
+    // Styled in colour: headings bold, commands cyan.
+    let (_, out, _) = at_width(&env, &["--help", "--color", "always"], "80");
+    assert!(out.contains("\u{1b}[1mStart here"), "{out:?}");
+    assert!(out.contains("\u{1b}[36mcolctl init"), "{out:?}");
+    // A command's help uses the same styles and fits the width.
+    let (_, out, _) = at_width(&env, &["status", "--help", "--color", "always"], "80");
+    assert!(out.contains("\u{1b}[1m"), "{out:?}");
+    let (_, out, _) = at_width(&env, &["status", "--help", "--color", "never"], "80");
+    for line in out.lines() {
+        assert!(console::measure_text_width(line) <= 80, "{line:?}");
+    }
+}
+
+#[test]
+fn ec6_23_bare_colctl_before_init_creates_nothing() {
+    let env = Env::new();
+    let (code, out, _) = env.code(&[]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("Start here"), "{out}");
+    assert!(!env.source.exists());
 }
