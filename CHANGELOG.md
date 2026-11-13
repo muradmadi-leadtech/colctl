@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/muradmadi-leadtech/colctl/compare/v2.2.0...v2.2.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **output:** profile lines by kind, alike paths, a welcome help ([#79](https://github.com/muradmadi-leadtech/colctl/issues/79)) ([05ca0cd](https://github.com/muradmadi-leadtech/colctl/commit/05ca0cda946fd24ca9bcce51cf7ca24e3ff89dd8))
+
 ## [2.2.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.1.2...v2.2.0) (2026-11-13)
 
 
