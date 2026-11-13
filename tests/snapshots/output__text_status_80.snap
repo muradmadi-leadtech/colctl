@@ -6,9 +6,9 @@ exit 1
 --- stdout
 ! 2 things need attention
 
-  !  claude       ~/.claude                    1 ok · 1 missing
-  ✓  kilo-claude  ~/Library/…/profiles/claude  2 ok
-  ✓  codex        ~/.codex                     1 ok
+  !  claude       ~/.claude                    1 skill · 1 plugin · 1 missing
+  ✓  kilo-claude  ~/Library/…/profiles/claude  1 skill · 1 plugin
+  ✓  codex        ~/.codex                     1 plugin
 
 Needs attention
   !  claude  skill   alpha        missing            → colctl sync

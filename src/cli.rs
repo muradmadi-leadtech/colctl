@@ -8,56 +8,197 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-/// The top-level help (AC6-25): commands grouped by task. A test checks it lists every subcommand.
-const HELP: &str = "\
-{about}
+/// The welcome help's groups (AC6-25, AC6-36): commands grouped by task, the first three as "Start
+/// here". A test checks every subcommand is listed.
+const GROUPS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Start here",
+        &[
+            ("init", "Find your profiles and create ~/.colctl"),
+            ("status", "See what's in sync and what needs you"),
+            ("sync", "Make every profile match"),
+        ],
+    ),
+    (
+        "Change what you have",
+        &[
+            (
+                "add",
+                "Add a skill, agent, plugin or source plugin, then sync",
+            ),
+            ("rm", "Remove one, everywhere"),
+            ("adopt", "Move what a profile already has into ~/.colctl"),
+        ],
+    ),
+    (
+        "Updates and review",
+        &[
+            (
+                "update",
+                "Fetch new versions of source plugins and hold them for review",
+            ),
+            (
+                "refresh",
+                "Hold changes from the folders taken-over skills came from",
+            ),
+            ("review", "See what a held version changes, with risk flags"),
+            ("approve", "Install held versions exactly as reviewed"),
+            ("reject", "Drop held versions for good"),
+        ],
+    ),
+    (
+        "Find plugins",
+        &[
+            ("search", "Search every plugin catalog your profiles know"),
+            ("show", "One plugin in full"),
+            ("developers", "Who publishes what"),
+            ("marketplace", "List or refresh marketplaces"),
+            ("connectors", "Codex's app connectors"),
+        ],
+    ),
+    (
+        "Other",
+        &[
+            ("completions", "Shell completions (bash, zsh, fish)"),
+            ("version", "Print the version"),
+            ("help", "Help for a command"),
+        ],
+    ),
+];
 
-{usage-heading} {usage}
+const OPTIONS: &[(&str, &str)] = &[
+    ("--color <when>", "auto, always or never"),
+    ("-q, --quiet", "Only errors and the verdict line"),
+    (
+        "-v, --verbose",
+        "Also show each tool call and how long it took",
+    ),
+    ("-y, --yes", "Answer yes to every confirmation"),
+    ("--no-pager", "Never page long output"),
+    ("-V, --version", "Print the version"),
+];
 
-Get started:
-  init          Create ~/.colctl and register the profiles on this machine
-  status        What's in sync, what isn't, and what to run
-  sync          Make every profile match ~/.colctl
-Manage:
-  add           Add a skill, agent, plugin or source plugin, then sync
-  rm            Remove one, everywhere
-  adopt         Move what a profile already has into ~/.colctl
-Updates and review:
-  update        Fetch new versions of source plugins and hold them for review
-  refresh       Hold changes from the folders taken-over skills came from
-  review        See what a held version changes, with risk flags
-  approve       Install held versions exactly as reviewed
-  reject        Drop held versions for good
-Discover:
-  search        Search every plugin catalog your profiles know
-  show          One plugin in full
-  developers    Who publishes what
-  marketplace   List or refresh marketplaces
-  connectors    Codex's app connectors
-Other:
-  completions   Shell completions (bash, zsh, fish)
-  version       Print the version
-  help          Help for a command
+const DOCS: &str = "https://github.com/muradmadi-leadtech/colctl/tree/main/docs";
 
-Options:
-{options}
-Docs: https://github.com/muradmadi-leadtech/colctl/tree/main/docs
-";
+/// The help someone new sees (AC6-36): what colctl does, where to start, every command by task,
+/// the options in short, and where to learn more. Shown for `colctl`, `colctl help` and `--help`.
+fn welcome(caps: &crate::ui::term::Caps) -> String {
+    use crate::ui::render;
+    use crate::ui::style::{Token, paint};
+    let c = caps.color_out;
+    let mut lines = render::wrap(
+        "colctl keeps every AI coding profile on this machine in sync with one source of truth, \
+         ~/.colctl: one AGENTS.md, one copy of each skill and agent, one plugin list.",
+        caps.width,
+        0,
+        0,
+    );
+    lines.push(String::new());
+    lines.push(format!(
+        "{} colctl <command> [options]",
+        paint("Usage:", Token::Heading, c)
+    ));
+    // One column for every description, so the page reads as one list ("Start here" names carry
+    // the "colctl " prefix).
+    let w = GROUPS
+        .iter()
+        .enumerate()
+        .flat_map(|(g, (_, commands))| {
+            commands
+                .iter()
+                .map(move |(n, _)| n.len() + if g == 0 { "colctl ".len() } else { 0 })
+        })
+        .chain(OPTIONS.iter().map(|(o, _)| o.len()))
+        .max()
+        .unwrap_or(0);
+    let rows = |lines: &mut Vec<String>, rows: &[(String, &str)]| {
+        for (name, what) in rows {
+            let prefix = 2 + w + 3;
+            let wrapped = render::wrap(what, caps.width, prefix, prefix);
+            for (i, text) in wrapped.into_iter().enumerate() {
+                if i == 0 {
+                    let pad = " ".repeat(w - render::width(name));
+                    lines.push(format!(
+                        "  {}{pad}   {text}",
+                        paint(name, Token::Command, c)
+                    ));
+                } else {
+                    lines.push(text);
+                }
+            }
+        }
+    };
+    for (i, (heading, commands)) in GROUPS.iter().enumerate() {
+        lines.push(String::new());
+        lines.push(paint(heading, Token::Heading, c));
+        let named: Vec<(String, &str)> = commands
+            .iter()
+            .map(|(name, what)| {
+                let name = if i == 0 {
+                    format!("colctl {name}")
+                } else {
+                    (*name).to_string()
+                };
+                (name, *what)
+            })
+            .collect();
+        rows(&mut lines, &named);
+    }
+    lines.push(String::new());
+    lines.push(paint("Options", Token::Heading, c));
+    let options: Vec<(String, &str)> = OPTIONS
+        .iter()
+        .map(|(o, w)| ((*o).to_string(), *w))
+        .collect();
+    rows(&mut lines, &options);
+    lines.push(String::new());
+    lines.extend(render::wrap(
+        &format!(
+            "More: {} shows one command in full, with examples.",
+            paint("colctl <command> --help", Token::Command, c)
+        ),
+        caps.width + if c { 9 } else { 0 },
+        0,
+        0,
+    ));
+    lines.push(format!("Docs: {DOCS}"));
+    lines.push("Set COLCTL_HOME to keep ~/.colctl somewhere else.".to_string());
+    let mut text = lines.join("\n");
+    text.push('\n');
+    text
+}
+
+/// Styles for each command's own help, matching colctl's tokens: headings bold, commands cyan.
+fn styles() -> clap::builder::Styles {
+    use clap::builder::styling::{AnsiColor, Effects, Styles};
+    Styles::styled()
+        .header(Effects::BOLD.into())
+        .usage(Effects::BOLD.into())
+        .literal(AnsiColor::Cyan.on_default())
+        .placeholder(Effects::DIMMED.into())
+}
 
 #[derive(Parser, Debug)]
 #[command(
+    disable_help_subcommand = true,
     name = "colctl",
     version,
-    help_template = HELP,
     about = "Keep every AI coding harness in sync with one source of truth in ~/.colctl",
     long_about = "Keep every AI coding harness in sync with one source of truth in ~/.colctl: one AGENTS.md, \
 one copy of each skill and agent, one plugin list.\n\nSet COLCTL_HOME to keep the source somewhere else."
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
     /// When to use colour: auto (a terminal, unless NO_COLOR), always or never
-    #[arg(long, global = true, value_enum, default_value_t = ColorArg::Auto)]
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value_t = ColorArg::Auto,
+        hide_possible_values = true,
+        hide_default_value = true
+    )]
     color: ColorArg,
     /// Only errors and the verdict line
     #[arg(short, long, global = true, conflicts_with = "verbose")]
@@ -310,6 +451,14 @@ enum Command {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+    /// Help for colctl, or for one command
+    #[command(
+        after_help = "Examples:\n  colctl help\n  colctl help sync\n  colctl help add source"
+    )]
+    Help {
+        /// The command, and subcommand if any
+        command: Vec<String>,
+    },
     /// Print the version
     #[command(after_help = "Examples:\n  colctl version\n  colctl --version")]
     Version,
@@ -525,6 +674,8 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             ctx.out.raw(&String::from_utf8_lossy(&script));
             Ok(0)
         }
+        // Handled in `run`, before a context is needed.
+        Command::Help { .. } => Ok(0),
         Command::Version => {
             ctx.out
                 .line(format!("colctl {}", env!("CARGO_PKG_VERSION")));
@@ -551,14 +702,55 @@ where
         .find(|w| !w.starts_with('-'))
         .cloned()
         .unwrap_or_default();
-    let cli = match Cli::try_parse_from(&args) {
+    let early = crate::ui::Out::new(&crate::ui::term::Settings {
+        color: color_word(&words),
+        ..crate::ui::term::Settings::default()
+    });
+    let parsed = Cli::command()
+        .styles(styles())
+        .term_width(early.caps.width)
+        .try_get_matches_from(&args)
+        .and_then(|m| <Cli as clap::FromArgMatches>::from_arg_matches(&m));
+    let cli = match parsed {
         Ok(cli) => cli,
-        Err(err) => return parse_error(&err, &words),
+        Err(err) => return parse_error(&err, &words, &early),
     };
     let out = crate::ui::Out::new(&cli.settings(json));
+    let subcommand = match cli.command {
+        // EC6-23: `colctl` alone is a welcome, not an error, and touches nothing.
+        None => {
+            out.raw(&welcome(&out.caps));
+            return 0;
+        }
+        Some(Command::Help { command }) if command.is_empty() => {
+            out.raw(&welcome(&out.caps));
+            return 0;
+        }
+        // `colctl help <command>` is `colctl <command> --help`, global flags kept.
+        Some(Command::Help { command }) => {
+            let mut again: Vec<OsString> = vec!["colctl".into()];
+            again.extend(command.into_iter().map(OsString::from));
+            again.push("--help".into());
+            again.extend(
+                words
+                    .iter()
+                    .skip_while(|w| *w != "help")
+                    .filter(|w| w.starts_with('-') && *w != "--color")
+                    .map(OsString::from),
+            );
+            if let Some(c) = words.iter().position(|w| w == "--color") {
+                again.extend([
+                    "--color".into(),
+                    words.get(c + 1).cloned().unwrap_or_default().into(),
+                ]);
+            }
+            return run(again);
+        }
+        Some(c) => c,
+    };
     let result = Ctx::from_process().and_then(|mut ctx| {
         ctx.out = out;
-        dispatch(&ctx, cli.command)
+        dispatch(&ctx, subcommand)
     });
     match result {
         Ok(code) => code,
@@ -574,20 +766,37 @@ where
     }
 }
 
-/// Argument errors in colctl's error layout (AC6-06, EC6-18); help and version print as they are.
-fn parse_error(err: &clap::Error, words: &[String]) -> i32 {
-    use crate::ui::term::{ColorChoice, Settings};
-    let color = if words.iter().any(|w| w == "--color=never" || w == "never") {
-        ColorChoice::Never
-    } else {
-        ColorChoice::Auto
-    };
-    let out = crate::ui::Out::new(&Settings {
-        color,
-        ..Settings::default()
+/// The `--color` choice in raw arguments, for output before they're parsed.
+fn color_word(words: &[String]) -> crate::ui::term::ColorChoice {
+    use crate::ui::term::ColorChoice;
+    let value = words.iter().enumerate().find_map(|(i, w)| {
+        w.strip_prefix("--color=")
+            .map(str::to_string)
+            .or_else(|| (w == "--color").then(|| words.get(i + 1).cloned().unwrap_or_default()))
     });
+    match value.as_deref() {
+        Some("always") => ColorChoice::Always,
+        Some("never") => ColorChoice::Never,
+        _ => ColorChoice::Auto,
+    }
+}
+
+/// Argument errors in colctl's error layout (AC6-06, EC6-18). Help for colctl itself is the welcome
+/// (AC6-36); a command's help and the version print as clap renders them, styled when colour is on.
+fn parse_error(err: &clap::Error, words: &[String], out: &crate::ui::Out) -> i32 {
     if !err.use_stderr() {
-        out.raw(&err.render().to_string());
+        let named = words
+            .iter()
+            .enumerate()
+            .filter(|(i, w)| !w.starts_with('-') && (*i == 0 || words[i - 1] != "--color"))
+            .any(|(_, w)| w != "help" && Cli::command().find_subcommand(w).is_some());
+        if err.kind() == clap::error::ErrorKind::DisplayHelp && !named {
+            out.raw(&welcome(&out.caps));
+        } else if out.caps.color_out {
+            out.raw(&err.render().ansi().to_string());
+        } else {
+            out.raw(&err.render().to_string());
+        }
         return 0;
     }
     let text = err.render().to_string();
@@ -619,22 +828,20 @@ mod tests {
 
     #[test]
     fn ac6_25_the_grouped_help_lists_every_command() {
-        for heading in [
-            "Get started:",
-            "Manage:",
-            "Updates and review:",
-            "Discover:",
-            "Other:",
-        ] {
-            assert!(HELP.contains(heading), "{heading}");
-        }
+        let listed: Vec<&str> = GROUPS
+            .iter()
+            .flat_map(|(_, commands)| commands.iter().map(|(name, _)| *name))
+            .collect();
         for sub in Cli::command().get_subcommands() {
             let name = sub.get_name();
             assert!(
-                HELP.lines()
-                    .any(|l| l.trim_start().starts_with(&format!("{name} "))),
+                listed.contains(&name),
                 "{name} is missing from the grouped help"
             );
+        }
+        let help = welcome(&crate::ui::term::Caps::plain());
+        for name in listed {
+            assert!(help.contains(&format!(" {name} ")), "{name} in {help}");
         }
     }
 

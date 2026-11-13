@@ -279,28 +279,7 @@ counted. An empty profile shows `nothing yet`.
 Path column: shown in full when `indent + name + path + contents` fits the width; otherwise every path is cut with the
 same (head, tail) parts kept, chosen as the most that lets all of them fit.
 
-Welcome help (`colctl`, `colctl --help`, `colctl help`, `-h`):
-```
-colctl keeps every AI coding profile on this machine in sync with one source of truth, ~/.colctl.
-
-Start here
-  colctl init      Find your profiles and create ~/.colctl
-  colctl status    See what's in sync and what needs you
-  colctl sync      Make every profile match
-
-Get started
-  init          Create ~/.colctl and register the profiles on this machine
-  …
-
-Manage
-  …
-
-Options
-  --color <when>   auto, always or never
-  -q, -v           Quieter or more detailed output
-  -y, --yes        Answer yes to questions
-  --no-pager       Never page long output
-  -V, --version    Print the version
-
-More: colctl <command> --help · https://github.com/muradmadi-leadtech/colctl/tree/main/docs
-```
+Welcome help (`colctl`, `colctl --help`, `colctl help`, `-h`): one description column for the whole page; the first
+group's names carry `colctl ` so they can be copied; the others are task groups (Change what you have, Updates and
+review, Find plugins, Other); then Options, then `More:` and `Docs:` lines. Descriptions wrap under their column.
+`colctl help <command>` re-runs as `colctl <command> --help`, styled (bold headings, cyan literals) and wrapped by clap.

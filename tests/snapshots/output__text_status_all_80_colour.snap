@@ -6,9 +6,9 @@ exit 1
 --- stdout
 [33m![0m 2 things need attention
 
-  [33m![0m  [1mclaude[0m       [2m~/.claude[0m                    1 ok · 1 missing
-  [32m✓[0m  [1mkilo-claude[0m  [2m~/Library/…/profiles/claude[0m  2 ok
-  [32m✓[0m  [1mcodex[0m        [2m~/.codex[0m                     1 ok
+  [33m![0m  [1mclaude[0m       [2m~/.claude[0m                    1 skill[2m · [0m1 plugin[2m · [0m[33m1 missing[0m
+  [32m✓[0m  [1mkilo-claude[0m  [2m~/Library/…/profiles/claude[0m  1 skill[2m · [0m1 plugin
+  [32m✓[0m  [1mcodex[0m        [2m~/.codex[0m                     1 plugin
 
 [1mNeeds attention[0m
   [33m![0m  [1mclaude[0m  skill   alpha        missing            [36m→ colctl sync[0m

@@ -11,16 +11,26 @@ writes anything and doesn't take the lock; `git` is optional (without it, uncomm
 $ colctl status
 ✓ All 5 profiles in sync · 3 sources · nothing held for review
 
-  ✓  claude       ~/.claude                    17 ok
-  ✓  kilo-claude  ~/Library/…/profiles/claude  17 ok
-  ✓  codex        ~/.codex                     2 ok · 1 unsupported
-  ✓  kilo-codex   ~/Library/…/profiles/codex   2 ok · 1 unsupported
-  ✓  agents       ~/.agents                    14 ok
+  ✓  claude       ~/.claude                    14 skills · 3 plugins · CLAUDE.md
+  ✓  kilo-claude  ~/Library/…/profiles/claude  14 skills · 3 plugins · CLAUDE.md
+  ✓  codex        ~/.codex                     2 plugins · AGENTS.md · skills via
+                                               ~/.agents · 1 not packaged
+  ✓  kilo-codex   ~/Library/…/profiles/codex   2 plugins · AGENTS.md · skills via
+                                               ~/.agents · 1 not packaged
+  ✓  agents       ~/.agents                    14 skills
 
 → colctl status --all lists every item
 ```
 
-The first line is the verdict; then one line per profile with counts per state. When something needs you, the verdict
+The first line is the verdict; then one line per profile with what it has: skills, agents, plugins (list and source
+plugins together) and its instructions file, then any problems (`1 missing`) and what's informational (`1 not packaged`:
+a source plugin whose repo has no packaging for that tool; `1 unreviewed`). Codex reads skills from `~/.agents`, not
+its own folder, so a Codex profile says `skills via ~/.agents` instead of counting them; that's why Claude and Codex
+counts differ. An empty profile says `nothing yet`.
+
+Paths are shown in full when the terminal is wide enough. When they aren't, every path in the column is shortened the
+same way (`~/Library/…/profiles/claude` and `~/Library/…/profiles/codex`), and what a profile has wraps under itself
+rather than being cut. When something needs you, the verdict
 says how many things (`! 3 things need attention`) and a **Needs attention** section lists exactly those, each with
 its fix:
 
