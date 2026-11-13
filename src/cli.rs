@@ -74,6 +74,9 @@ enum Command {
         /// Only this harness
         #[arg(long)]
         harness: Option<String>,
+        /// List every item, not only what needs attention
+        #[arg(long)]
+        all: bool,
         /// Print one JSON document
         #[arg(long)]
         json: bool,
@@ -325,7 +328,9 @@ fn list(codex: bool) -> PluginList {
 fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
     match command {
         Command::Init { dry_run } => commands::init(ctx, dry_run),
-        Command::Status { harness, json } => commands::status(ctx, harness.as_deref(), json),
+        Command::Status { harness, all, json } => {
+            commands::status(ctx, harness.as_deref(), json, all)
+        }
         Command::Sync { harness, dry_run } => commands::sync(ctx, harness.as_deref(), dry_run),
         Command::Add { what } => match what {
             Add::Skill {
