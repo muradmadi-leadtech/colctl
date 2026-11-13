@@ -309,10 +309,14 @@ pub(super) fn render(
     if all {
         for p in planned.iter().filter(|p| p.plan.root == Root::Ok) {
             lines.push(String::new());
+            let room = caps
+                .width
+                .saturating_sub(render::width(&p.harness.name) + 2)
+                .max(16);
             lines.push(format!(
                 "{}  {}",
                 render::heading(caps, &p.harness.name),
-                render::footer(caps, &ctx.tilde(&p.harness.path))
+                render::footer(caps, &render::cut_middle(&ctx.tilde(&p.harness.path), room))
             ));
             if p.plan.items.is_empty() {
                 lines.push(format!("  {} 0 items", Token::Info.symbol()));

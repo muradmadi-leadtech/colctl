@@ -145,6 +145,9 @@ pub fn update(
                 Token::Info
             } else {
                 newer += 1;
+                if matches!(found, Found::AlreadyHeld) {
+                    held.push(s.name.clone());
+                }
                 Token::Attention
             };
             said.push((tone, format!("{change}{note}")));

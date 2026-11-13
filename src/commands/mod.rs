@@ -714,11 +714,18 @@ fn item_lines(
     let caps = &ctx.out.caps;
     let mut lines = vec![render::verdict(caps, tone, verdict, facts)];
     for (t, text) in items {
-        lines.push(format!(
-            "  {} {}",
-            crate::ui::style::mark(*t, caps.color_out),
-            crate::review::escape(text)
-        ));
+        // Prose wraps under itself, so a long line never runs past the width.
+        let wrapped = render::wrap(&crate::review::escape(text), caps.width, 4, 4);
+        for (i, l) in wrapped.into_iter().enumerate() {
+            if i == 0 {
+                lines.push(format!(
+                    "  {} {l}",
+                    crate::ui::style::mark(*t, caps.color_out)
+                ));
+            } else {
+                lines.push(l);
+            }
+        }
     }
     lines
 }

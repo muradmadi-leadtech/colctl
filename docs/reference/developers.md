@@ -8,8 +8,10 @@ Without a name, lists every developer in the [catalogs](../explanation/catalogs.
 catalogs they appear in, by count, then name:
 
 ```
-anthropics      58 plugins  anthropic-plugin-directory, claude-plugins-official
-obra             3 plugins  anthropic-plugin-directory, claude-plugins-official, colctl
+anthropics  124 plugins  anthropic-plugin-directory, claude-plugins-official
+obra        3 plugins    anthropic-plugin-directory, claude-plugins-official, colctl
+
+2 developers · colctl developers <name> lists one's plugins
 ```
 
 With a name, lists that developer's plugins exactly as `colctl search --developer <name> --limit 0` does. Names compare

@@ -10,10 +10,11 @@ colctl marketplace refresh [--dry-run]
 Every marketplace any Claude or Codex profile knows, offline:
 
 ```
-anthropic-plugin-directory  claude  built in                                3663 plugins  claude, kilo-claude
-claude-plugins-official     claude  github:anthropics/claude-plugins-official  317 plugins  claude, kilo-claude
-superpowers-dev             claude  ~/.colctl/plugins/superpowers                 1 plugin   claude, kilo-claude   managed
-superpowers-dev             codex   ~/.colctl/plugins/superpowers                 1 plugin   codex, kilo-codex     managed
+NAME                        TOOL    SOURCE                                     PLUGINS  PROFILES
+anthropic-plugin-directory  claude  built in                                   3662     claude, kilo-claude
+claude-plugins-official     claude  github:anthropics/claude-plugins-official  317      claude, kilo-claude
+superpowers-dev             claude  ~/.colctl/plugins/superpowers              1        claude, kilo-claude  ✓ managed
+superpowers-dev             codex   ~/.colctl/plugins/superpowers              1        codex, kilo-codex    ✓ managed
 ```
 
 Columns: name, tool, where it comes from, how many plugins it lists, the profiles that know it, and `managed` when
