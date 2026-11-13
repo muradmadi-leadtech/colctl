@@ -93,6 +93,14 @@ fn ac_34_docs_exist_for_everything_shipped() {
         "docs/reference/reject.md",
         "docs/how-to/review-an-update.md",
         "docs/explanation/quarantine.md",
+        // Cycle 5 (AC5-27)
+        "docs/reference/search.md",
+        "docs/reference/show.md",
+        "docs/reference/developers.md",
+        "docs/reference/marketplace.md",
+        "docs/reference/connectors.md",
+        "docs/how-to/find-and-add-a-plugin.md",
+        "docs/explanation/catalogs.md",
     ];
     for page in pages {
         assert!(read(page).starts_with("# "), "{page} needs a title");
@@ -153,6 +161,7 @@ fn defined_ids() -> BTreeSet<String> {
         ("codex-cli-support", "AC2", "EC2"),
         ("plugins-from-source", "AC3", "EC3"),
         ("quarantine", "AC4", "EC4"),
+        ("discovery", "AC5", "EC5"),
     ] {
         for (file, prefix, id) in [
             ("acceptance-criteria.md", format!("**{ac}-"), ac),
@@ -198,7 +207,10 @@ fn tested_ids() -> BTreeSet<String> {
                 .collect();
             let parts: Vec<&str> = name.split('_').collect();
             for pair in parts.windows(2) {
-                if ["ac", "ec", "ac2", "ec2", "ac3", "ec3", "ac4", "ec4"].contains(&pair[0])
+                if [
+                    "ac", "ec", "ac2", "ec2", "ac3", "ec3", "ac4", "ec4", "ac5", "ec5",
+                ]
+                .contains(&pair[0])
                     && pair[1].len() == 2
                     && pair[1].chars().all(|c| c.is_ascii_digit())
                 {
@@ -211,7 +223,7 @@ fn tested_ids() -> BTreeSet<String> {
 }
 
 #[test]
-fn ac_35_ac2_23_ac3_28_ac4_33_every_criterion_and_edge_case_has_a_named_test() {
+fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_every_criterion_and_edge_case_has_a_named_test() {
     let defined = defined_ids();
     for (prefix, count) in [
         ("AC-", 35),
@@ -222,6 +234,8 @@ fn ac_35_ac2_23_ac3_28_ac4_33_every_criterion_and_edge_case_has_a_named_test() {
         ("EC3-", 19),
         ("AC4-", 33),
         ("EC4-", 23),
+        ("AC5-", 28),
+        ("EC5-", 21),
     ] {
         assert_eq!(
             defined.iter().filter(|i| i.starts_with(prefix)).count(),
@@ -268,13 +282,14 @@ fn ac3_27_docs_cover_source_plugins() {
 }
 
 #[test]
-fn ac3_26_ac4_33_earlier_suites_are_still_complete() {
+fn ac3_26_ac4_33_ac5_28_earlier_suites_are_still_complete() {
     for (file, count) in [
         ("tests/cli.rs", 55),
         ("tests/codex.rs", 19),
         ("tests/takeover.rs", 16),
         ("tests/sources.rs", 17),
         ("tests/source_commands.rs", 17),
+        ("tests/quarantine.rs", 51),
     ] {
         let text = read(file);
         assert_eq!(text.matches("#[test]").count(), count, "{file}");
@@ -320,4 +335,38 @@ fn ac4_32_docs_cover_quarantine() {
         );
     }
     assert!(read("README.md").contains("Quarantine"));
+}
+
+#[test]
+fn ac5_27_docs_cover_discovery() {
+    let search = read("docs/reference/search.md");
+    for needle in [
+        "--developer",
+        "--installed",
+        "--limit",
+        "\"matched\"",
+        "Merging",
+    ] {
+        assert!(
+            search.contains(needle),
+            "reference/search.md lacks {needle}"
+        );
+    }
+    assert!(read("docs/reference/add.md").contains("add source <repo-or-id>"));
+    assert!(read("docs/reference/marketplace.md").contains("## refresh"));
+    assert!(read("docs/reference/connectors.md").contains("plugin list --available --json"));
+    let commands = read("docs/reference/commands.md");
+    for needle in [
+        "colctl search",
+        "colctl show",
+        "colctl developers",
+        "colctl marketplace list",
+        "colctl connectors",
+    ] {
+        assert!(
+            commands.contains(needle),
+            "reference/commands.md lacks {needle}"
+        );
+    }
+    assert!(read("README.md").contains("Discovery"));
 }
