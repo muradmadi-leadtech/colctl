@@ -11,10 +11,20 @@ use crate::review::escape;
 use crate::runner;
 use crate::search::{self, Plugin, Query};
 use crate::tool::Tool;
+use crate::ui::render::{self, Cell};
+use crate::ui::style::Token;
 use serde_json::{Value, json};
 
-const NO_CATALOGS: &str =
-    "no catalogs found; start Claude or Codex once, or add a marketplace to config.toml";
+/// Said when no profile has any catalog (EC5-01).
+fn no_catalogs_lines(ctx: &Ctx) -> Vec<String> {
+    vec![
+        render::verdict(&ctx.out.caps, Token::Attention, "No catalogs found", &[]),
+        render::hint(
+            &ctx.out.caps,
+            "start Claude or Codex once, or add a marketplace to config.toml",
+        ),
+    ]
+}
 
 /// Reads every catalog and merges it into plugins; warnings go to stderr unless `quiet`.
 fn plugins(ctx: &Ctx, quiet: bool) -> Result<(Catalog, Vec<Plugin>), CliError> {
@@ -22,7 +32,7 @@ fn plugins(ctx: &Ctx, quiet: bool) -> Result<(Catalog, Vec<Plugin>), CliError> {
     let catalog = catalog::build(&ws.config, &ctx.source);
     if !quiet {
         for w in &catalog.warnings {
-            eprintln!("warning: {}", escape(w));
+            ctx.out.warn(&escape(w));
         }
     }
     let merged = search::merge(&catalog.entries);
@@ -44,36 +54,70 @@ fn cut(text: &str, max: usize) -> String {
     out
 }
 
-/// One line per plugin: id, developer, description, and where it's installed (AC5-12).
-fn print_lines(results: &[Plugin]) {
-    let id_width = results
+/// One aligned row per plugin (AC6-23): id, developer, description cut to fit, and whether it's
+/// installed anywhere. Connectors without a description show their marketplace, and OpenAI's are
+/// shown as by openai.
+fn result_lines(ctx: &Ctx, results: &[Plugin]) -> Vec<String> {
+    let rows: Vec<Vec<Cell>> = results
         .iter()
-        .map(|p| p.ids[0].chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(56);
-    let dev_width = results
-        .iter()
-        .map(|p| p.developer.chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(20);
-    for p in results {
-        let installed = if p.installed.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "  [installed: {}]",
-                p.installed.iter().cloned().collect::<Vec<_>>().join(", ")
-            )
-        };
-        println!(
-            "{:<id_width$}  {:<dev_width$}  {}{installed}",
-            escape(&p.ids[0]),
-            escape(&p.developer),
-            escape(&cut(&p.description, 60))
-        );
+        .map(|p| {
+            let connector = p.kind == "connector";
+            let developer = if connector
+                && p.developer == "unknown"
+                && p.ids[0].ends_with("@openai-curated-remote")
+            {
+                "openai".to_string()
+            } else {
+                p.developer.clone()
+            };
+            let description = if p.description.is_empty() && connector {
+                p.catalogs
+                    .first()
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default()
+            } else {
+                p.description
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            vec![
+                if p.installed.is_empty() {
+                    Cell::plain(" ")
+                } else {
+                    Cell::styled("✓", Token::Ok)
+                },
+                Cell::plain(escape(&p.ids[0])),
+                Cell::styled(escape(&developer), Token::Dim),
+                Cell::plain(escape(&description)),
+            ]
+        })
+        .collect();
+    render::table(&ctx.out.caps, 0, &rows, 3)
+}
+
+/// "✓ installed" in the footer when any listed plugin is installed.
+fn legend(results: &[Plugin]) -> &'static str {
+    if results.iter().any(|p| !p.installed.is_empty()) {
+        "✓ installed"
+    } else {
+        ""
     }
+}
+
+/// The footer under a list: counts, and what to do next.
+fn footer(ctx: &Ctx, shown: usize, matched: usize, noun: &str, next: &str, legend: &str) -> String {
+    let mut text = format!("{shown} of {matched} {noun}");
+    if !legend.is_empty() {
+        text.push_str(&format!(" · {legend}"));
+    }
+    if shown < matched {
+        text.push_str(" · --limit 0 shows all");
+    }
+    if !next.is_empty() {
+        text.push_str(&format!(" · {next}"));
+    }
+    render::footer(&ctx.out.caps, &text)
 }
 
 fn results_json(matched: usize, results: &[Plugin], warnings: &[String]) -> Value {
@@ -85,29 +129,44 @@ fn results_json(matched: usize, results: &[Plugin], warnings: &[String]) -> Valu
     })
 }
 
-fn print_json(value: &Value) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(value).unwrap_or_default()
-    );
+fn print_json(ctx: &Ctx, value: &Value) {
+    ctx.out
+        .line(serde_json::to_string_pretty(value).unwrap_or_default());
 }
 
 /// Prints search-shaped results, text or JSON, and returns the exit code (AC5-12, AC5-13, EC5-10).
-fn report(catalog: &Catalog, shown: &[Plugin], matched: usize, what: &str, as_json: bool) -> i32 {
+fn report(
+    ctx: &Ctx,
+    catalog: &Catalog,
+    shown: &[Plugin],
+    matched: usize,
+    what: &str,
+    as_json: bool,
+) -> i32 {
     if as_json {
-        print_json(&results_json(matched, shown, &catalog.warnings));
+        print_json(ctx, &results_json(matched, shown, &catalog.warnings));
     } else if no_catalogs(catalog) {
-        println!("{NO_CATALOGS}");
+        ctx.out.lines(no_catalogs_lines(ctx));
     } else if matched == 0 {
-        println!("no plugins match {}", escape(what));
+        ctx.out.line(render::verdict(
+            &ctx.out.caps,
+            Token::Info,
+            &format!("No plugins match {}", escape(what)),
+            &[],
+        ));
     } else {
-        print_lines(shown);
-        let hidden = if shown.len() < matched {
-            "; --limit 0 shows all"
-        } else {
-            ""
-        };
-        println!("{} of {matched} results{hidden}", shown.len());
+        let mut lines = result_lines(ctx, shown);
+        lines.push(String::new());
+        lines.push(footer(
+            ctx,
+            shown.len(),
+            matched,
+            "results",
+            "colctl show <id> for details",
+            legend(shown),
+        ));
+        // AC6-20: a long list goes through the pager in a terminal.
+        ctx.out.page(lines);
     }
     if matched == 0 { EXIT_DRIFT } else { 0 }
 }
@@ -121,7 +180,7 @@ pub fn search(ctx: &Ctx, query: &Query, as_json: bool) -> Result<i32, CliError> 
     } else {
         query.terms.join(" ")
     };
-    Ok(report(&catalog, &shown, matched, &what, as_json))
+    Ok(report(ctx, &catalog, &shown, matched, &what, as_json))
 }
 
 /// Finds one plugin by any of its ids, or by a name only one plugin has (AC5-14, EC5-11).
@@ -146,51 +205,79 @@ pub(super) fn find<'a>(all: &'a [Plugin], what: &str) -> Result<&'a Plugin, CliE
     }
 }
 
-fn row(label: &str, value: &str) {
-    if !value.is_empty() {
-        println!("  {label:<12} {}", escape(value));
-    }
-}
-
 /// `colctl show` (AC5-14).
-pub fn show(ctx: &Ctx, what: &str, as_json: bool) -> Result<i32, CliError> {
+pub fn show(ctx: &Ctx, what: Option<&str>, as_json: bool) -> Result<i32, CliError> {
     let (_, all) = plugins(ctx, as_json)?;
+    // AC6-19: without an id, pick one in a terminal.
+    let picked;
+    let what = match what {
+        Some(w) => w,
+        None => {
+            let labels: Vec<String> = all
+                .iter()
+                .map(|p| {
+                    format!(
+                        "{}  {}  {}",
+                        escape(&p.ids[0]),
+                        escape(&p.developer),
+                        escape(&cut(&p.description, 50))
+                    )
+                })
+                .collect();
+            let Some(i) = (!as_json)
+                .then(|| ctx.out.pick_one("Which plugin?", &labels))
+                .flatten()
+            else {
+                return Err(CliError::usage("name a plugin id or name to show")
+                    .hint("colctl search lists plugin ids"));
+            };
+            picked = all[i].ids[0].clone();
+            picked.as_str()
+        }
+    };
     let p = find(&all, what)?;
     if as_json {
-        print_json(&json!({"version": 1, "result": p}));
+        print_json(ctx, &json!({"version": 1, "result": p}));
         return Ok(0);
     }
-    let opt = |o: &Option<String>| o.clone().unwrap_or_default();
-    println!("{}", escape(p.display_name.as_deref().unwrap_or(&p.name)));
-    row("ids", &p.ids.join(", "));
-    row(
-        "catalogs",
-        &p.catalogs
-            .iter()
-            .map(|c| format!("{} ({})", c.name, c.tool))
-            .collect::<Vec<_>>()
-            .join(", "),
-    );
-    row("developer", &p.developer);
-    row("author", &opt(&p.author));
-    row("description", &p.description);
-    row("keywords", &p.keywords.join(", "));
-    row("category", &opt(&p.category));
-    row("homepage", &opt(&p.homepage));
-    row("repo", &opt(&p.repo));
-    row("subpath", &opt(&p.subpath));
+    // AC6-23: the name as a heading, then an aligned key–value block.
+    let opt = |o: &Option<String>| escape(&o.clone().unwrap_or_default());
     let version = match (&p.version, &p.commit) {
         (Some(v), Some(c)) => format!("{v} (commit {})", crate::vault::short(c)),
         (Some(v), None) => v.clone(),
         (None, Some(c)) => format!("commit {}", crate::vault::short(c)),
         (None, None) => String::new(),
     };
-    row("version", &version);
-    row(
-        "installed",
-        &p.installed.iter().cloned().collect::<Vec<_>>().join(", "),
-    );
-    row("add", &p.add);
+    let catalogs = p
+        .catalogs
+        .iter()
+        .map(|c| format!("{} ({})", c.name, c.tool))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let rows: Vec<(&str, String)> = vec![
+        ("ids", escape(&p.ids.join(", "))),
+        ("catalogs", escape(&catalogs)),
+        ("developer", escape(&p.developer)),
+        ("author", opt(&p.author)),
+        ("description", escape(&p.description)),
+        ("keywords", escape(&p.keywords.join(", "))),
+        ("category", opt(&p.category)),
+        ("homepage", opt(&p.homepage)),
+        ("repo", opt(&p.repo)),
+        ("subpath", opt(&p.subpath)),
+        ("version", escape(&version)),
+        (
+            "installed",
+            p.installed.iter().cloned().collect::<Vec<_>>().join(", "),
+        ),
+        ("add", escape(&p.add)),
+    ];
+    let mut lines = vec![render::heading(
+        &ctx.out.caps,
+        &escape(p.display_name.as_deref().unwrap_or(&p.name)),
+    )];
+    lines.extend(render::kv(&ctx.out.caps, 2, &rows));
+    ctx.out.lines(lines);
     Ok(0)
 }
 
@@ -204,6 +291,7 @@ pub fn developers(ctx: &Ctx, name: Option<&str>, as_json: bool) -> Result<i32, C
         };
         let (shown, matched) = search::search(&all, &query);
         return Ok(report(
+            ctx,
             &catalog,
             &shown,
             matched,
@@ -213,25 +301,33 @@ pub fn developers(ctx: &Ctx, name: Option<&str>, as_json: bool) -> Result<i32, C
     }
     let list = search::developers(&all);
     if as_json {
-        print_json(&json!({"version": 1, "developers": list, "warnings": catalog.warnings}));
+        print_json(
+            ctx,
+            &json!({"version": 1, "developers": list, "warnings": catalog.warnings}),
+        );
     } else if no_catalogs(&catalog) {
-        println!("{NO_CATALOGS}");
+        ctx.out.lines(no_catalogs_lines(ctx));
     } else {
-        let width = list
+        let rows: Vec<Vec<Cell>> = list
             .iter()
-            .map(|d| d.name.chars().count())
-            .max()
-            .unwrap_or(0)
-            .min(24);
-        for d in &list {
-            let word = if d.plugins == 1 { "plugin" } else { "plugins" };
-            println!(
-                "{:<width$}  {:>4} {word:<7}  {}",
-                escape(&d.name),
-                d.plugins,
-                escape(&d.catalogs.join(", "))
-            );
-        }
+            .map(|d| {
+                vec![
+                    Cell::styled(escape(&d.name), Token::Name),
+                    Cell::plain(super::plural(d.plugins, "plugin")),
+                    Cell::styled(escape(&d.catalogs.join(", ")), Token::Dim),
+                ]
+            })
+            .collect();
+        let mut lines = render::table(&ctx.out.caps, 0, &rows, 2);
+        lines.push(String::new());
+        lines.push(render::footer(
+            &ctx.out.caps,
+            &format!(
+                "{} · colctl developers <name> lists one's plugins",
+                super::plural(list.len(), "developer")
+            ),
+        ));
+        ctx.out.page(lines);
     }
     Ok(if list.is_empty() { EXIT_DRIFT } else { 0 })
 }
@@ -240,32 +336,43 @@ pub fn developers(ctx: &Ctx, name: Option<&str>, as_json: bool) -> Result<i32, C
 pub fn marketplace_list(ctx: &Ctx, as_json: bool) -> Result<i32, CliError> {
     let (catalog, _) = plugins(ctx, as_json)?;
     if as_json {
-        print_json(&json!({
-            "version": 1,
-            "marketplaces": catalog.marketplaces,
-            "warnings": catalog.warnings,
-        }));
+        print_json(
+            ctx,
+            &json!({
+                "version": 1,
+                "marketplaces": catalog.marketplaces,
+                "warnings": catalog.warnings,
+            }),
+        );
     } else if catalog.marketplaces.is_empty() {
-        println!("{NO_CATALOGS}");
+        ctx.out.lines(no_catalogs_lines(ctx));
     } else {
-        let width = |f: &dyn Fn(&catalog::Marketplace) -> usize| {
-            catalog.marketplaces.iter().map(f).max().unwrap_or(0)
-        };
-        let name_w = width(&|m| m.name.chars().count());
-        let source_w =
-            width(&|m| ctx.tilde(std::path::Path::new(&m.source)).chars().count()).min(48);
+        // AC6-23: a table with a header row.
+        let caps = &ctx.out.caps;
+        let mut rows: Vec<Vec<Cell>> = vec![
+            ["NAME", "TOOL", "SOURCE", "PLUGINS", "PROFILES", ""]
+                .iter()
+                .map(|h| Cell::styled(*h, Token::Dim))
+                .collect(),
+        ];
         for m in &catalog.marketplaces {
-            let word = if m.plugins == 1 { "plugin" } else { "plugins" };
-            let managed = if m.managed { "   managed" } else { "" };
-            println!(
-                "{:<name_w$}  {:<6}  {:<source_w$}  {:>5} {word:<7}  {}{managed}",
-                escape(&m.name),
-                m.tool,
-                escape(&ctx.tilde(std::path::Path::new(&m.source))),
-                m.plugins,
-                m.profiles.iter().cloned().collect::<Vec<_>>().join(", ")
-            );
+            rows.push(vec![
+                Cell::styled(escape(&m.name), Token::Name),
+                Cell::plain(m.tool.clone()),
+                Cell::styled(
+                    escape(&ctx.tilde(std::path::Path::new(&m.source))),
+                    Token::Dim,
+                ),
+                Cell::plain(m.plugins.to_string()),
+                Cell::plain(m.profiles.iter().cloned().collect::<Vec<_>>().join(", ")),
+                if m.managed {
+                    Cell::styled("✓ managed", Token::Ok)
+                } else {
+                    Cell::plain("")
+                },
+            ]);
         }
+        ctx.out.lines(render::table(caps, 0, &rows, 2));
     }
     Ok(if catalog.marketplaces.is_empty() {
         EXIT_DRIFT
@@ -286,6 +393,7 @@ fn harnesses_for(harnesses: &[Harness], tool: Tool) -> Vec<&Harness> {
 pub fn marketplace_refresh(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
     let ws = load(ctx)?;
     let mut failed = 0;
+    let mut said: Vec<(Token, String)> = Vec::new();
     for (tool, args) in [
         (Tool::Claude, ["plugin", "marketplace", "update"]),
         (Tool::Codex, ["plugin", "marketplace", "upgrade"]),
@@ -299,36 +407,79 @@ pub fn marketplace_refresh(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
             let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
             let Some(program) = program.clone() else {
                 failed += 1;
-                println!("{}: skipped: {} isn't on PATH", h.name, tool.program());
+                said.push((
+                    Token::Attention,
+                    format!("{}: skipped: {} isn't on PATH", h.name, tool.program()),
+                ));
                 continue;
             };
             let cmd = tool.command(ctx, program, h, &args);
             if dry_run {
-                println!("{}: would run {}", h.name, cmd.display());
+                said.push((
+                    Token::Info,
+                    format!("{}: would run {}", h.name, cmd.display()),
+                ));
                 continue;
             }
             match cmd.run() {
-                Ok(out) if out.success() => println!("{}: ✓ {}", h.name, cmd.display()),
+                Ok(out) if out.success() => {
+                    said.push((Token::Ok, format!("{}: {}", h.name, cmd.display())));
+                }
                 Ok(out) if out.timed_out => {
                     failed += 1;
-                    println!(
-                        "{}: ✗ {} timed out after {}s",
-                        h.name,
-                        cmd.display(),
-                        ctx.tool_timeout.as_secs()
-                    );
+                    said.push((
+                        Token::Failed,
+                        format!(
+                            "{}: {} timed out after {}s",
+                            h.name,
+                            cmd.display(),
+                            ctx.tool_timeout.as_secs()
+                        ),
+                    ));
                 }
                 Ok(out) => {
                     failed += 1;
-                    println!("{}: ✗ {}: {}", h.name, cmd.display(), out.stderr.trim());
+                    said.push((
+                        Token::Failed,
+                        format!(
+                            "{}: {}: {}",
+                            h.name,
+                            cmd.display(),
+                            escape(out.stderr.trim())
+                        ),
+                    ));
                 }
                 Err(e) => {
                     failed += 1;
-                    println!("{}: ✗ {}: {e}", h.name, cmd.display());
+                    said.push((Token::Failed, format!("{}: {}: {e}", h.name, cmd.display())));
                 }
             }
         }
     }
+    let (tone, verdict) = if dry_run {
+        (
+            Token::Info,
+            format!(
+                "Would refresh the catalogs in {}",
+                super::plural(said.len(), "profile")
+            ),
+        )
+    } else if failed > 0 {
+        (
+            Token::Failed,
+            format!("{} couldn't refresh", super::plural(failed, "profile")),
+        )
+    } else {
+        (
+            Token::Ok,
+            format!(
+                "Refreshed the catalogs in {}",
+                super::plural(said.len(), "profile")
+            ),
+        )
+    };
+    ctx.out
+        .lines(super::item_lines(ctx, tone, &verdict, &[], &said));
     Ok(if failed > 0 { EXIT_DRIFT } else { 0 })
 }
 
@@ -402,7 +553,7 @@ pub fn connectors(
     }
     if !as_json {
         for w in &warnings {
-            eprintln!("warning: {}", escape(w));
+            ctx.out.warn(&escape(w));
         }
     }
     let all = search::merge(&entries);
@@ -413,17 +564,26 @@ pub fn connectors(
     };
     let (shown, matched) = search::search(&all, &query);
     if as_json {
-        print_json(&results_json(matched, &shown, &warnings));
+        print_json(ctx, &results_json(matched, &shown, &warnings));
     } else if matched == 0 {
-        println!("no connectors match {}", escape(&terms.join(" ")));
+        ctx.out.line(render::verdict(
+            &ctx.out.caps,
+            Token::Info,
+            &format!("No connectors match {}", escape(&terms.join(" "))),
+            &[],
+        ));
     } else {
-        print_lines(&shown);
-        let hidden = if shown.len() < matched {
-            "; --limit 0 shows all"
-        } else {
-            ""
-        };
-        println!("{} of {matched} connectors{hidden}", shown.len());
+        let mut lines = result_lines(ctx, &shown);
+        lines.push(String::new());
+        lines.push(footer(
+            ctx,
+            shown.len(),
+            matched,
+            "connectors",
+            "installed through codex",
+            legend(&shown),
+        ));
+        ctx.out.page(lines);
     }
     Ok(if matched == 0 || !warnings.is_empty() {
         EXIT_DRIFT

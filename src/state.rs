@@ -269,7 +269,10 @@ impl Lock {
                             path.display()
                         )));
                     }
-                    eprintln!("colctl: reclaimed a stale lock from pid {}", holder.trim());
+                    crate::ui::Out::default().warn(&format!(
+                        "reclaimed a stale lock from pid {}",
+                        holder.trim()
+                    ));
                     let _ = fs::remove_file(&path);
                 }
                 Err(err) => {

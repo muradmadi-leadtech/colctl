@@ -101,13 +101,7 @@ fn ac6_01_json_output_is_unchanged() {
 
 /// Files under src/ that print directly (outside `#[cfg(test)]`). AC6-02: this list only shrinks,
 /// and is empty once every command goes through `ui` (T6).
-const STILL_PRINTING: &[&str] = &[
-    "src/cli.rs",
-    "src/commands/discovery.rs",
-    "src/commands/mod.rs",
-    "src/commands/quarantine.rs",
-    "src/state.rs",
-];
+const STILL_PRINTING: &[&str] = &[];
 
 fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for e in fs::read_dir(dir).unwrap().flatten() {
@@ -495,4 +489,132 @@ fn ac6_17_commands_lead_with_their_result() {
     let out = env.ok(&["adopt", "claude", "skills/mine"]);
     assert!(out.starts_with("✓ Adopted 1 item"), "{out}");
     assert!(out.contains("✓ adopted skills/mine from claude"), "{out}");
+}
+
+// ---------------------------------------------------------------- interaction (T4)
+
+#[test]
+fn ac6_18_ec6_12_without_a_terminal_nothing_asks() {
+    let env = two_profiles_with_plugins();
+    env.ok(&["sync"]);
+    // rm proceeds as in 2.1: no question without a terminal.
+    let out = env.ok(&["rm", "skill", "alpha"]);
+    assert!(out.starts_with("✓ Removed skill alpha"), "{out}");
+    // --yes is accepted and changes nothing about that.
+    let out = env.ok(&["rm", "skill", "beta", "--yes"]);
+    assert!(out.starts_with("✓ Removed skill beta"), "{out}");
+}
+
+#[test]
+fn ac6_19_ec6_05_without_a_terminal_a_missing_name_is_still_an_error() {
+    let env = fixture();
+    let (code, _, err) = env.code(&["approve"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("or use --all"), "{err}");
+    let (code, _, err) = env.code(&["reject"]);
+    assert_eq!(code, 2, "{err}");
+    let (code, _, err) = env.code(&["show"]);
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("hint: colctl search lists plugin ids"),
+        "{err}"
+    );
+    // review -i without a terminal lists, as review does.
+    let (code, out, _) = env.code(&["review", "-i"]);
+    assert_eq!(code, 1);
+    assert!(out.contains("sources/superpowers"), "{out}");
+}
+
+#[test]
+fn ac6_20_without_a_terminal_long_output_is_not_paged() {
+    let env = fixture();
+    let env = env.var("PAGER", "false");
+    // A pager that fails would lose the text; without a terminal it's never started.
+    let out = env.ok(&["review", "superpowers"]);
+    assert!(out.contains("superpowers"), "{out}");
+    assert!(out.contains("diff"), "{out}");
+}
+
+// ---------------------------------------------------------------- the rest (T5)
+
+#[test]
+fn ac6_21_update_and_refresh_lead_with_a_verdict() {
+    let env = fixture();
+    let (code, out, _) = env.code(&["update", "--check"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.starts_with("! 1 update available"), "{out}");
+    assert!(out.contains("(held for review)"), "{out}");
+    let out = env.ok(&["update"]);
+    assert!(out.starts_with("! 1 update held for review"), "{out}");
+    assert!(out.contains("! superpowers:"), "{out}");
+    assert!(
+        out.trim_end().ends_with("→ colctl review superpowers"),
+        "{out}"
+    );
+    let out = env.ok(&["refresh"]);
+    assert!(out.starts_with("· Nothing to refresh"), "{out}");
+}
+
+#[test]
+fn ac6_22_review_puts_risk_first_and_colours_the_diff() {
+    let env = fixture();
+    let list = env.expect(1, &["review"]);
+    assert!(list.starts_with("! 1 version held for review"), "{list}");
+    assert!(
+        list.trim_end().ends_with("→ colctl review superpowers"),
+        "{list}"
+    );
+    let out = env.ok(&["review", "superpowers", "--color", "always"]);
+    assert!(out.contains("Risk flags"), "{out}");
+    assert!(
+        out.contains("\u{1b}[32m+v2"),
+        "added lines are green: {out:?}"
+    );
+    assert!(
+        out.contains("\u{1b}[31m-v1"),
+        "removed lines are red: {out:?}"
+    );
+    let plain = env.ok(&["review", "superpowers"]);
+    assert!(!plain.contains('\u{1b}'), "{plain:?}");
+    assert!(plain.find("Risk flags").unwrap() < plain.find("Diff").unwrap());
+}
+
+#[test]
+fn ac6_23_discovery_output() {
+    let env = fixture();
+    let out = env.ok(&["search"]);
+    assert!(out.contains("colctl show <id> for details"), "{out}");
+    let show = env.ok(&["show", "tool@official"]);
+    let lines: Vec<&str> = show.lines().collect();
+    assert_eq!(lines[0], "tool");
+    assert!(Env::words(&show).contains("developer ann"), "{show}");
+    let dev = env.ok(&["developers"]);
+    assert!(dev.contains("colctl developers <name>"), "{dev}");
+    let markets = env.var("COLUMNS", "120").ok(&["marketplace", "list"]);
+    assert!(markets.starts_with("NAME"), "{markets}");
+    assert!(
+        Env::words(&markets).contains("NAME TOOL SOURCE PLUGINS PROFILES"),
+        "{markets}"
+    );
+}
+
+#[test]
+fn ac6_24_every_error_has_a_hint() {
+    let env = fixture();
+    for args in [
+        &["review", "nope"][..],
+        &["show", "nope@nowhere"],
+        &["rm", "skill", "nope"],
+        &["add", "source", "not a repo"],
+        &["update", "--rev", "x"],
+        &["status", "--harness", "nope"],
+        &["approve"],
+        &["nonsense"],
+    ] {
+        let (code, _, err) = env.code(args);
+        assert_ne!(code, 0, "{args:?}");
+        let last = err.lines().last().unwrap_or_default();
+        assert!(last.starts_with("  hint: "), "{args:?}: {err}");
+        assert!(err.starts_with("✗ error: "), "{args:?}: {err}");
+    }
 }

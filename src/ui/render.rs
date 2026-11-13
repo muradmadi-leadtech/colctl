@@ -93,29 +93,40 @@ impl Cell {
 
 /// An aligned table (AC6-05): columns sized to their widest cell, two spaces apart, `indent` spaces in.
 /// Column `flex` (the description, usually) is cut so a row never exceeds the width; other columns are
-/// capped at two fifths of the width each. The last column is never padded.
+/// only capped (at two fifths of the width) when cutting `flex` isn't enough. The last column is never padded.
 pub fn table(caps: &Caps, indent: usize, rows: &[Vec<Cell>], flex: usize) -> Vec<String> {
     let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let cap = (caps.width * 2 / 5).max(8);
-    let mut widths: Vec<usize> = (0..cols)
+    let natural: Vec<usize> = (0..cols)
         .map(|c| {
             rows.iter()
                 .filter_map(|r| r.get(c))
                 .map(|cell| width(&cell.text))
                 .max()
                 .unwrap_or(0)
-                .min(if c == flex { usize::MAX } else { cap })
         })
         .collect();
-    let used: usize = indent
-        + widths
-            .iter()
-            .enumerate()
-            .filter(|(c, _)| *c != flex)
-            .map(|(_, w)| w + 2)
-            .sum::<usize>();
+    let mut widths = natural.clone();
+    let others = |w: &[usize]| -> usize {
+        indent
+            + w.iter()
+                .enumerate()
+                .filter(|(c, _)| *c != flex)
+                .map(|(_, w)| w + 2)
+                .sum::<usize>()
+    };
+    // The flexible column shrinks first (to no less than 8); other columns are capped only when
+    // that isn't enough, so ids and names are cut last.
+    const FLEX_MIN: usize = 8;
+    if others(&widths) + FLEX_MIN.min(natural.get(flex).copied().unwrap_or(0)) > caps.width {
+        let cap = (caps.width * 2 / 5).max(8);
+        for (c, w) in widths.iter_mut().enumerate() {
+            if c != flex {
+                *w = (*w).min(cap);
+            }
+        }
+    }
     if flex < cols {
-        widths[flex] = widths[flex].min(caps.width.saturating_sub(used).max(4));
+        widths[flex] = widths[flex].min(caps.width.saturating_sub(others(&widths)).max(4));
     }
     rows.iter()
         .map(|row| {

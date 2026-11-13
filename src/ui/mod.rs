@@ -1,6 +1,7 @@
 //! Every byte of human-readable output (cycle 6, docs/cli-output-design/components.md). Commands say
 //! what to show; this module decides how it looks and whether to ask. `--json` doesn't come here.
 
+pub mod ask;
 pub mod progress;
 pub mod render;
 pub mod style;
@@ -72,6 +73,37 @@ impl Out {
         for l in render::error(&self.caps, what, cause, hint) {
             self.err_line(l);
         }
+    }
+}
+
+impl Out {
+    /// Asks a yes/no question in a terminal (AC6-18); see [`ask::confirm`].
+    pub fn confirm(&self, question: &str) -> ask::Answer {
+        ask::confirm(&self.caps, question, &ask::terminal_confirm)
+    }
+
+    /// A multi-select picker in a terminal (AC6-19); `None` without one or when interrupted.
+    pub fn pick_many(&self, title: &str, items: &[String]) -> Option<Vec<usize>> {
+        ask::pick(&self.caps, title, items, &ask::terminal_pick_many)
+    }
+
+    /// A fuzzy single-select picker in a terminal (AC6-19).
+    pub fn pick_one(&self, title: &str, items: &[String]) -> Option<usize> {
+        ask::pick(&self.caps, title, items, &ask::terminal_pick_one)
+            .and_then(|v| v.first().copied())
+    }
+
+    /// Prints `lines`, through the pager when they're taller than the terminal (AC6-20, EC6-15).
+    pub fn page(&self, lines: Vec<String>) {
+        if ask::should_page(&self.caps, lines.len()) {
+            let command = ask::pager_command(std::env::var("PAGER").ok().as_deref());
+            let mut text = lines.join("\n");
+            text.push('\n');
+            if ask::run_pager(&command, &text).is_ok() {
+                return;
+            }
+        }
+        self.lines(lines);
     }
 }
 

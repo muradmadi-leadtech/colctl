@@ -163,8 +163,8 @@ enum Command {
     },
     /// Show one plugin from the catalogs in full
     Show {
-        /// A plugin id from search, or a name only one plugin has
-        id: String,
+        /// A plugin id from search, or a name only one plugin has (in a terminal, omit it to pick)
+        id: Option<String>,
         /// Print one JSON document
         #[arg(long)]
         json: bool,
@@ -219,6 +219,9 @@ enum Command {
     Review {
         /// A source name, skills/<name> or agents/<name>.md
         name: Option<String>,
+        /// Pick a held version from a list (in a terminal)
+        #[arg(short, long)]
+        interactive: bool,
         /// Print one JSON document
         #[arg(long)]
         json: bool,
@@ -414,7 +417,7 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
         Command::Connectors { terms, limit, json } => {
             commands::connectors(ctx, &terms, limit, json)
         }
-        Command::Show { id, json } => commands::show(ctx, &id, json),
+        Command::Show { id, json } => commands::show(ctx, id.as_deref(), json),
         Command::Developers { name, json } => commands::developers(ctx, name.as_deref(), json),
         Command::Approve {
             names,
@@ -426,9 +429,14 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             all,
             dry_run,
         } => commands::reject(ctx, &names, all, dry_run),
-        Command::Review { name, json } => commands::review(ctx, name.as_deref(), json),
+        Command::Review {
+            name,
+            interactive,
+            json,
+        } => commands::review(ctx, name.as_deref(), interactive, json),
         Command::Version => {
-            println!("colctl {}", env!("CARGO_PKG_VERSION"));
+            ctx.out
+                .line(format!("colctl {}", env!("CARGO_PKG_VERSION")));
             Ok(0)
         }
     }
