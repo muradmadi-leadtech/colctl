@@ -712,3 +712,14 @@ fn ac6_28_snapshots_of_every_command() {
     let (_, out, _) = fresh.code(&["sync", "--color", "never"]);
     insta::assert_snapshot!("text_sync_80", normalise(&fresh, &out));
 }
+
+#[test]
+fn stacked_outcomes_start_on_the_profile_line() {
+    let env = two_profiles_with_plugins();
+    for i in 0..6 {
+        env.source_skill(&format!("long-skill-name-number-{i}"));
+    }
+    let (_, out, _) = at_width(&env, &["sync"], "40");
+    let line = out.lines().find(|l| l.contains("claude ")).unwrap();
+    assert!(line.trim_end().len() > "  ✓  claude".len(), "{out}");
+}
