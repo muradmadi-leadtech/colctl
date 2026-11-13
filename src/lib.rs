@@ -20,6 +20,7 @@ pub mod plan;
 pub mod review;
 pub mod risk;
 pub mod runner;
+pub mod search;
 pub mod source;
 pub mod state;
 pub mod tool;
