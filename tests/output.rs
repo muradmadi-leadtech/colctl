@@ -496,3 +496,47 @@ fn ac6_17_commands_lead_with_their_result() {
     assert!(out.starts_with("✓ Adopted 1 item"), "{out}");
     assert!(out.contains("✓ adopted skills/mine from claude"), "{out}");
 }
+
+// ---------------------------------------------------------------- interaction (T4)
+
+#[test]
+fn ac6_18_ec6_12_without_a_terminal_nothing_asks() {
+    let env = two_profiles_with_plugins();
+    env.ok(&["sync"]);
+    // rm proceeds as in 2.1: no question without a terminal.
+    let out = env.ok(&["rm", "skill", "alpha"]);
+    assert!(out.starts_with("✓ Removed skill alpha"), "{out}");
+    // --yes is accepted and changes nothing about that.
+    let out = env.ok(&["rm", "skill", "beta", "--yes"]);
+    assert!(out.starts_with("✓ Removed skill beta"), "{out}");
+}
+
+#[test]
+fn ac6_19_ec6_05_without_a_terminal_a_missing_name_is_still_an_error() {
+    let env = fixture();
+    let (code, _, err) = env.code(&["approve"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("or use --all"), "{err}");
+    let (code, _, err) = env.code(&["reject"]);
+    assert_eq!(code, 2, "{err}");
+    let (code, _, err) = env.code(&["show"]);
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("hint: colctl search lists plugin ids"),
+        "{err}"
+    );
+    // review -i without a terminal lists, as review does.
+    let (code, out, _) = env.code(&["review", "-i"]);
+    assert_eq!(code, 1);
+    assert!(out.contains("sources/superpowers"), "{out}");
+}
+
+#[test]
+fn ac6_20_without_a_terminal_long_output_is_not_paged() {
+    let env = fixture();
+    let env = env.var("PAGER", "false");
+    // A pager that fails would lose the text; without a terminal it's never started.
+    let out = env.ok(&["review", "superpowers"]);
+    assert!(out.contains("superpowers"), "{out}");
+    assert!(out.contains("diff"), "{out}");
+}
