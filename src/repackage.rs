@@ -11,6 +11,41 @@ use std::path::{Component, Path, PathBuf};
 
 const CLAUDE_MANIFEST: &str = ".claude-plugin/plugin.json";
 const CODEX_MANIFEST: &str = ".codex-plugin/plugin.json";
+const HOOKS: &str = "hooks/hooks.json";
+/// Hook events Codex runs (https://learn.chatgpt.com/docs/hooks.md).
+const CODEX_EVENTS: &[&str] = &[
+    "PreToolUse",
+    "PermissionRequest",
+    "PostToolUse",
+    "PreCompact",
+    "PostCompact",
+    "UserPromptSubmit",
+    "SubagentStart",
+    "SubagentStop",
+    "Stop",
+    "SessionStart",
+    "SessionEnd",
+    "PreModelRequest",
+    "PostModelRequest",
+    "Interrupt",
+];
+/// Events whose matcher is a tool name.
+const TOOL_EVENTS: &[&str] = &["PreToolUse", "PostToolUse", "PermissionRequest"];
+/// Claude tools Codex has no equivalent of, so a matcher naming them never fires.
+const NO_SUCH_TOOL: &[&str] = &[
+    "Read",
+    "Grep",
+    "Glob",
+    "LS",
+    "WebFetch",
+    "WebSearch",
+    "NotebookEdit",
+    "NotebookRead",
+    "TodoWrite",
+    "MultiEdit",
+    "Task",
+    "ExitPlanMode",
+];
 /// Fields copied from Claude's manifest when present (AC7-01).
 const COPIED: &[&str] = &[
     "name",
@@ -195,6 +230,115 @@ fn keys(value: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Hooks Codex runs, unchanged, from a Claude hooks document (AC7-04, AC7-05); the rest is reported.
+/// Returns the document to write (none when nothing is left) and the kept hooks.
+fn map_hooks(
+    doc: &Value,
+    file: &str,
+    report: &mut Report,
+) -> Result<(Option<Value>, Vec<KeptHook>), String> {
+    let shape = |what: &str| format!("{file} has an unknown shape: {what}");
+    let events = doc
+        .get("hooks")
+        .and_then(Value::as_object)
+        .ok_or_else(|| shape("\"hooks\" isn't an object"))?;
+    let mut out_events = Map::new();
+    let mut kept = Vec::new();
+    for (event, groups) in events {
+        let groups = groups
+            .as_array()
+            .ok_or_else(|| shape(&format!("{event} isn't a list")))?;
+        let mut out_groups = Vec::new();
+        for group in groups {
+            let matcher = match group.get("matcher") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(m)) => Some(m.clone()),
+                Some(_) => return Err(shape(&format!("a {event} matcher isn't text"))),
+            };
+            let handlers = group
+                .get("hooks")
+                .and_then(Value::as_array)
+                .ok_or_else(|| shape(&format!("a {event} group has no hooks list")))?;
+            if !CODEX_EVENTS.contains(&event.as_str()) {
+                continue;
+            }
+            // Tool names Codex never fires come out of a plain `A|B` matcher.
+            let mut matcher_out = matcher.clone();
+            if let Some(m) = &matcher
+                && TOOL_EVENTS.contains(&event.as_str())
+                && m.split('|').all(|p| {
+                    !p.is_empty()
+                        && p.chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '*')
+                })
+            {
+                let (gone, left): (Vec<&str>, Vec<&str>) =
+                    m.split('|').partition(|p| NO_SUCH_TOOL.contains(p));
+                if left.is_empty() {
+                    report
+                        .never_runs
+                        .push(format!("{event} on {m} (Codex has no such tools)"));
+                    continue;
+                }
+                if !gone.is_empty() {
+                    report
+                        .never_runs
+                        .push(format!("{} in {event}'s matcher", gone.join(", ")));
+                    matcher_out = Some(left.join("|"));
+                }
+            }
+            let mut out_handlers = Vec::new();
+            for h in handlers {
+                let kind = h
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| shape(&format!("a {event} hook has no type")))?;
+                if kind != "command" {
+                    report.never_runs.push(format!(
+                        "{kind} hook in {event} (Codex runs command hooks only)"
+                    ));
+                    continue;
+                }
+                kept.push(KeptHook {
+                    event: event.clone(),
+                    matcher: matcher_out.clone(),
+                    kind: kind.to_string(),
+                    command: h
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                });
+                out_handlers.push(h.clone());
+            }
+            if out_handlers.is_empty() {
+                continue;
+            }
+            let mut g = group.clone();
+            g["hooks"] = Value::Array(out_handlers);
+            if let Some(m) = &matcher_out {
+                g["matcher"] = json!(m);
+            }
+            out_groups.push(g);
+        }
+        if !CODEX_EVENTS.contains(&event.as_str()) {
+            report
+                .never_runs
+                .push(format!("{event} hook (Codex has no such event)"));
+            continue;
+        }
+        if !out_groups.is_empty() {
+            out_events.insert(event.clone(), Value::Array(out_groups));
+        }
+    }
+    if out_events.is_empty() {
+        return Ok((None, kept));
+    }
+    let mut out = doc.clone();
+    out["hooks"] = Value::Object(out_events);
+    Ok((Some(out), kept))
+}
+
 /// Builds the Codex package for the plugin in `folder`. `fallback` names it when Claude's manifest
 /// doesn't (EC7-07).
 pub fn build(folder: &Path, fallback: &str) -> Result<Package, String> {
@@ -262,6 +406,28 @@ pub fn build(folder: &Path, fallback: &str) -> Result<Package, String> {
     }
     carry("link leaving the plugin", leaving);
 
+    // Hooks: inline in the manifest, at the manifest's path, or hooks/hooks.json (EC7-18).
+    let (hooks_doc, hooks_file) = match source.get("hooks") {
+        Some(Value::Object(_)) => (source.get("hooks").cloned(), None),
+        Some(Value::String(rel)) => {
+            let rel = inside(rel, "hooks")?.display().to_string();
+            (Some(read_json(&folder.join(&rel))?), Some(rel))
+        }
+        _ if folder.join(HOOKS).is_file() => (
+            Some(read_json(&folder.join(HOOKS))?),
+            Some(HOOKS.to_string()),
+        ),
+        _ => (None, None),
+    };
+    let (hooks_out, hooks) = match hooks_doc {
+        Some(doc) => map_hooks(
+            &doc,
+            hooks_file.as_deref().unwrap_or(CLAUDE_MANIFEST),
+            &mut report,
+        )?,
+        None => (None, Vec::new()),
+    };
+
     let mut manifest = Map::new();
     for key in COPIED {
         if let Some(v) = source.get(*key) {
@@ -280,6 +446,7 @@ pub fn build(folder: &Path, fallback: &str) -> Result<Package, String> {
 
     let mut entries: Vec<Entry> = files
         .into_iter()
+        .filter(|(path, _)| Some(path.as_str()) != hooks_file.as_deref())
         .map(|(path, real)| {
             let executable = fs::metadata(&real)
                 .map(|m| m.permissions().mode() & 0o111 != 0)
@@ -298,12 +465,22 @@ pub fn build(folder: &Path, fallback: &str) -> Result<Package, String> {
         content: Content::Bytes(text.into_bytes()),
         executable: false,
     });
+    if let Some(doc) = hooks_out {
+        let mut text = serde_json::to_string_pretty(&doc).expect("a JSON value serialises");
+        text.push('\n');
+        entries.retain(|e| e.path != HOOKS);
+        entries.push(Entry {
+            path: HOOKS.to_string(),
+            content: Content::Bytes(text.into_bytes()),
+            executable: false,
+        });
+    }
     entries.sort_by(|a, b| a.path.cmp(&b.path));
 
     Ok(Package {
         manifest,
         skills,
-        hooks: Vec::new(),
+        hooks,
         report,
         entries,
     })
