@@ -422,12 +422,6 @@ impl Builder {
 
 /// Reads every catalog the registered harnesses keep, plus colctl's sources (AC5-01…06).
 pub fn build(config: &Config, source_dir: &Path) -> Catalog {
-    let _ = (config, source_dir); // RED: not implemented yet
-    Catalog::default()
-}
-
-#[allow(dead_code)]
-fn build_impl(config: &Config, source_dir: &Path) -> Catalog {
     let mut b = Builder::default();
     for h in &config.harnesses {
         if !h.path.is_dir() {

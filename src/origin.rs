@@ -46,6 +46,7 @@ pub(crate) fn plugin_source(
             match field("source")? {
                 "github" => Some((format!("https://github.com/{}", field("repo")?), None)),
                 // AC5-07: a folder inside another repo, at a recorded commit.
+                "git-subdir" => Some((field("url")?.to_string(), subpath(field("path")?))),
                 "url" | "git" => {
                     let url = field("url")?;
                     if url.starts_with('.') {
