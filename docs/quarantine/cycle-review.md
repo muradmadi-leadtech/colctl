@@ -11,7 +11,7 @@ _Cycle 4 · Evaluate · 2026-11-12_
 | **Released** | [v2.0.0](https://github.com/muradmadi-leadtech/colctl/releases/tag/v2.0.0): both archives attested (`gh attestation verify` exit 0); `mise exec github:muradmadi-leadtech/colctl@2.0.0 -- colctl --version` prints `colctl 2.0.0`, and the released binary reports `in sync` on the smoke copy. Breaking: `update` and `refresh` hold instead of install; list plugins are `unreviewed` |
 | **PRs** | #40 plan · #41 T1 · #42 T2 · #44 T3 · #45 T4 · #46 T5 · #47 T6 · #48 T7 · #49 T8 · #50 T9 · #51 typos fix · #43 release |
 | **Production impact** | None on this machine. Real profiles were only read; the smoke test ran on a copy |
-| **Disposition** | _Yours to decide_ |
+| **Disposition** | **Accept**, signed off by the owner on 2026-11-13 after running the checklist on the real profiles (v7.0.1 held, reviewed and rejected; superpowers stayed on v7.0.2 everywhere) |
 
 ## Your story, on a copy of your real setup
 
@@ -241,4 +241,4 @@ This cycle is a security feature, so the review looks at how it could be bypasse
 - [ ] `colctl update --check`, then `colctl update superpowers --rev v7.0.1` and `colctl review superpowers` to see a
       real review; then `colctl reject superpowers` (nothing gets installed)
 - [ ] Optional: when twg updates its skills, `colctl refresh`, `colctl review`, `colctl approve …`
-- [ ] Decide the disposition
+- [x] Decide the disposition: **Accept**

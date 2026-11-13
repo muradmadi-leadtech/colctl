@@ -100,11 +100,11 @@ Plan changes during Generate (AC4-29 in_sync, AC4-31 moved to T6, EC4-20 exit 3,
 - [x] Code review: Security review completed
 - [x] Code review: Integration and interface contracts verified
 - [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
-- [ ] Disposition decision made
+- [x] Disposition decision made
 
 ### Disposition
 
-<!-- Accept / Accept with issues / Revise / Reject -->
+**Accept** (owner, 2026-11-13). Follow-ups: ETXTBSY flake in apply tests; flag noise and column alignment in `review` (cycle 6 or a small HIL cycle).
 
 ---
 
