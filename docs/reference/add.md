@@ -4,7 +4,7 @@
 colctl add skill <path | git-url> [--subdir <path>] [--name <name>] [--dry-run]
 colctl add agent <file.md> [--dry-run]
 colctl add plugin <name@marketplace> [--codex] [--marketplace <source>] [--dry-run]
-colctl add source <repo> [--rev <commit-ish>] [--name <name>] [--plugin <plugin>] [--dry-run]
+colctl add source <repo-or-id> [--rev <commit-ish>] [--name <name>] [--plugin <plugin>] [--dry-run]
 ```
 
 Each adds one item to the source, commits (`colctl: add <kind> <name>`), then runs [sync](sync.md).
@@ -44,3 +44,24 @@ plugin to the repo's name. A repo with no packaging for the plugin is refused (e
 colctl add source https://github.com/obra/superpowers
 colctl add source github:owner/repo --rev v2.1.0 --plugin the-plugin
 ```
+
+### From a search result
+
+`colctl add source <id>` also takes a plugin id from [`colctl search`](search.md) (`name@marketplace`). colctl looks the
+plugin up in the [catalogs](../explanation/catalogs.md) and uses:
+
+- its **repo**, and its **folder** in that repo when it lives in one (a marketplace repo, a `git-subdir` source, a
+  directory listing with a path), stored as the source's `path`;
+- the **commit** the catalog recorded (the plugin directory's reviewed commit, a `sha` in the marketplace), unless you
+  pass `--rev`; otherwise the default branch's head;
+- the plugin's **name** as the source name and plugin name, unless you pass `--name` or `--plugin`.
+
+```sh
+colctl add source superpowers@claude-plugins-official
+colctl add source frontend-design@anthropic-plugin-directory --name frontend
+```
+
+An argument that is a valid repo (a URL, `git@host:path`, an absolute path or `github:owner/repo`) is always a repo,
+never looked up. Refused with exit 2: an id the catalogs don't have, a plugin with no repo to clone (use
+`colctl add plugin <id>` to keep it on the marketplace list), and a plugin that's already a source plugin.
+Adding from a result is a first-time add, so it isn't held for review.

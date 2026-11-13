@@ -5,11 +5,17 @@
 | `colctl init [--dry-run]` | [init](init.md) | yes |
 | `colctl status [--harness <name>] [--json]` | [status](status.md) | never |
 | `colctl sync [--harness <name>] [--dry-run]` | [sync](sync.md) | yes |
-| `colctl add skill\|agent\|plugin …` | [add](add.md) | yes |
+| `colctl add skill\|agent\|plugin\|source …` | [add](add.md) | yes |
 | `colctl rm skill\|agent\|plugin <name> [--dry-run]` | [rm](rm.md) | yes |
 | `colctl adopt [<harness> [<item>]] [--dry-run]` | [adopt](adopt.md) | yes |
 | `colctl refresh [<item>…] [--dry-run]` | [refresh](refresh.md) | holds new versions |
 | `colctl update [<name>…] [--check] [--rev <commit-ish>] [--dry-run]` | [update](update.md) | holds new versions (not with `--check`) |
+| `colctl search [<term>…] [--tool] [--marketplace] [--developer] [--installed] [--limit] [--json]` | [search](search.md) | never |
+| `colctl show <id-or-name> [--json]` | [show](show.md) | never |
+| `colctl developers [<developer>] [--json]` | [developers](developers.md) | never |
+| `colctl marketplace list [--json]` | [marketplace](marketplace.md) | never |
+| `colctl marketplace refresh [--dry-run]` | [marketplace](marketplace.md#refresh) | the tools' own catalogs |
+| `colctl connectors [<term>…] [--limit] [--json]` | [connectors](connectors.md) | never |
 | `colctl review [<name>] [--json]` | [review](review.md) | never |
 | `colctl approve (<name>… \| --all) [--dry-run]` | [approve](approve.md) | yes |
 | `colctl reject (<name>… \| --all) [--dry-run]` | [reject](reject.md) | yes (state only) |
@@ -47,5 +53,7 @@ with risk flags; [`approve`](approve.md) installs exactly what was held; [`rejec
 
 ## Network
 
-Only `colctl update`, `colctl adopt` (when it clones a plugin's source), `colctl add source`, and the first `sync` after a
-source is declared contact upstream repos. `status`, `review`, `approve`, `reject` and every other `sync` work offline.
+Only `colctl update`, `colctl adopt` (when it clones a plugin's source), `colctl add source`, `colctl marketplace refresh`
+(through the tools), and the first `sync` after a source is declared contact the network. `colctl connectors` asks
+`codex` for its catalog. `status`, `search`, `show`, `developers`, `marketplace list`, `review`, `approve`, `reject` and every other `sync`
+work offline.
