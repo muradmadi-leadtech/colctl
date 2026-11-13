@@ -34,13 +34,18 @@ fn subpath(relative: &str) -> Option<String> {
 }
 
 /// A plugin entry's `source` in a marketplace manifest → (repo, subpath), given the marketplace's own repo.
-fn plugin_source(entry: &Value, market_repo: Option<&str>) -> Option<(String, Option<String>)> {
+/// Shared with the discovery catalog (cycle 5).
+pub(crate) fn plugin_source(
+    entry: &Value,
+    market_repo: Option<&str>,
+) -> Option<(String, Option<String>)> {
     match entry {
         Value::String(rel) => Some((market_repo?.to_string(), subpath(rel))),
         Value::Object(o) => {
             let field = |k: &str| o.get(k).and_then(Value::as_str);
             match field("source")? {
                 "github" => Some((format!("https://github.com/{}", field("repo")?), None)),
+                // AC5-07: a folder inside another repo, at a recorded commit.
                 "url" | "git" => {
                     let url = field("url")?;
                     if url.starts_with('.') {
@@ -54,6 +59,15 @@ fn plugin_source(entry: &Value, market_repo: Option<&str>) -> Option<(String, Op
         }
         _ => None,
     }
+}
+
+/// The commit a plugin entry's `source` records (`sha`), if any (AC5-07).
+pub(crate) fn plugin_commit(entry: &Value) -> Option<String> {
+    entry
+        .get("sha")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 /// The entry for `plugin` in the marketplace manifest at `manifest`.
@@ -104,7 +118,9 @@ pub fn claude(harness: &Path, id: &str, head_of: HeadOf) -> Option<Found> {
     let (repo, sub) = plugin_source(&source, market_repo.as_deref())?;
     let inside = market_repo.as_deref() == Some(repo.as_str());
     Some(Found {
-        rev: sha.or_else(|| if inside { head_of(&dir) } else { None }),
+        rev: sha
+            .or_else(|| plugin_commit(&source))
+            .or_else(|| if inside { head_of(&dir) } else { None }),
         repo,
         subpath: sub,
         plugin: plugin.to_string(),

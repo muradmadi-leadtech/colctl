@@ -5,6 +5,7 @@
 
 pub mod adapter;
 pub mod apply;
+pub mod catalog;
 pub mod cli;
 pub mod commands;
 pub mod config;
