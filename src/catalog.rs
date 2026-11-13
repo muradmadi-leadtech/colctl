@@ -752,6 +752,7 @@ mod tests {
             plugin: "superpowers".into(),
             replaces: vec![],
             path: None,
+            convert: Vec::new(),
         });
         // A declared source that isn't cloned yet contributes nothing.
         f.config.sources.push(config::Source {
@@ -761,6 +762,7 @@ mod tests {
             plugin: "later".into(),
             replaces: vec![],
             path: None,
+            convert: Vec::new(),
         });
         let c = f.build();
         let e = find(&c, "superpowers@superpowers-dev");
@@ -932,6 +934,7 @@ mod tests {
             plugin: "superpowers".into(),
             replaces: vec![],
             path: None,
+            convert: Vec::new(),
         });
         let c = f.build();
         let e = find(&c, "superpowers@superpowers-dev");

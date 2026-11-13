@@ -352,6 +352,9 @@ pub(super) fn attention_rows(
             crate::state::Candidate::Skill(c) | crate::state::Candidate::Agent(c) => {
                 escape(&ctx.tilde(&c.origin))
             }
+            crate::state::Candidate::Conversion(c) => {
+                format!("Codex package from {}", crate::vault::short(&c.rev))
+            }
         };
         attention.push(Attention {
             place: "held".into(),
