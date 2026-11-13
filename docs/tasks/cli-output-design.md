@@ -37,3 +37,10 @@ T2–T5 all build on T1 and touch different commands, so they can go in any orde
 | T6 | AC6-25 – 27 | — |
 | T7 | AC6-28 – 30 | — |
 | T0 | AC6-31 – 33 | EC6-21, 22 |
+
+## Revise (after Evaluate)
+
+| Task | Criteria |
+|---|---|
+| T9 | AC6-34, AC6-35: status profile lines by kind; consistent path shortening |
+| T10 | AC6-36, EC6-23: welcome help; styled command help |

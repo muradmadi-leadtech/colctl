@@ -48,7 +48,7 @@ Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 
 ---
 
-<!-- FORGE_PHASE:Refine:Complete -->
+<!-- FORGE_PHASE:Refine:Active -->
 ## Phase 3: Refine
 
 **Purpose**: Define exactly what "done" looks like.
@@ -69,7 +69,7 @@ Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 
 ---
 
-<!-- FORGE_PHASE:Generate:Complete -->
+<!-- FORGE_PHASE:Generate:Pending -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.
@@ -88,7 +88,7 @@ T0 #66, #69 (v2.1.1, v2.1.2); T1 #68; T2 #72; T3 #73; T4+T5 #74; T6 #75; T7 #76;
 
 ---
 
-<!-- FORGE_PHASE:Evaluate:Active -->
+<!-- FORGE_PHASE:Evaluate:Pending -->
 ## Phase 5: Evaluate
 
 **Purpose**: Verify output matches intent.
@@ -104,7 +104,7 @@ T0 #66, #69 (v2.1.1, v2.1.2); T1 #68; T2 #72; T3 #73; T4+T5 #74; T6 #75; T7 #76;
 
 ### Disposition
 
-<!-- Accept / Accept with issues / Revise / Reject -->
+**Revise** (owner, 2026-11-13), back to Refine: profile lines should say what each profile has (Claude 17 vs Codex 2 looked wrong), paths in a column were shortened inconsistently, and the help should welcome someone new. AC6-34 – 36, EC6-23.
 
 ---
 

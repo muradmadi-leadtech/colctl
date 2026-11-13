@@ -267,3 +267,40 @@ Each command's `--help` ends with an `Examples:` section of 2–4 real invocatio
 ## Text stability
 
 Human-readable text may change in any release; scripts should use `--json` and exit codes, which follow semver.
+
+## Revise: status profile lines and help
+
+Profile line: \`<mark>  <name>  <path>  <contents>\`, where contents lists kinds in a fixed order with counts:
+\`<n> skills · <n> agents · <n> plugins · CLAUDE.md|AGENTS.md\` (kinds with none are left out), then for a Codex profile
+when an agents harness is registered \`skills via ~/.agents\`, then problem states (\`1 missing\`), then informational
+(\`1 not packaged\`, \`1 unreviewed\`). Plugins count list plugins and source plugins together; marketplaces aren't
+counted. An empty profile shows \`nothing yet\`.
+
+Path column: shown in full when \`indent + name + path + contents\` fits the width; otherwise every path is cut with the
+same (head, tail) parts kept, chosen as the most that lets all of them fit.
+
+Welcome help (\`colctl\`, \`colctl --help\`, \`colctl help\`, \`-h\`):
+```
+colctl keeps every AI coding profile on this machine in sync with one source of truth, ~/.colctl.
+
+Start here
+  colctl init      Find your profiles and create ~/.colctl
+  colctl status    See what's in sync and what needs you
+  colctl sync      Make every profile match
+
+Get started
+  init          Create ~/.colctl and register the profiles on this machine
+  …
+
+Manage
+  …
+
+Options
+  --color <when>   auto, always or never
+  -q, -v           Quieter or more detailed output
+  -y, --yes        Answer yes to questions
+  --no-pager       Never page long output
+  -V, --version    Print the version
+
+More: colctl <command> --help · https://github.com/muradmadi-leadtech/colctl/tree/main/docs
+```
