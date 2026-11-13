@@ -134,6 +134,22 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// The marketplaces your profiles know, or ask the tools to update them
+    Marketplace {
+        #[command(subcommand)]
+        what: MarketplaceCmd,
+    },
+    /// Search Codex's app connectors (Gmail, Slack…), which have no repo
+    Connectors {
+        /// Words that must all appear
+        terms: Vec<String>,
+        /// Show at most this many results (0 for all)
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
     /// Install held new versions exactly as reviewed, then sync
     Approve {
         /// Source names, skills/<name> or agents/<name>.md
@@ -214,6 +230,22 @@ enum Add {
         /// The Codex plugin list instead of Claude's
         #[arg(long)]
         codex: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum MarketplaceCmd {
+    /// Every marketplace any profile knows (offline)
+    List {
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask claude and codex to update their marketplaces (uses the network)
+    Refresh {
+        /// Print the calls without running them
         #[arg(long)]
         dry_run: bool,
     },
@@ -330,6 +362,13 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             },
             json,
         ),
+        Command::Marketplace { what } => match what {
+            MarketplaceCmd::List { json } => commands::marketplace_list(ctx, json),
+            MarketplaceCmd::Refresh { dry_run } => commands::marketplace_refresh(ctx, dry_run),
+        },
+        Command::Connectors { terms, limit, json } => {
+            commands::connectors(ctx, &terms, limit, json)
+        }
         Command::Show { id, json } => commands::show(ctx, &id, json),
         Command::Developers { name, json } => commands::developers(ctx, name.as_deref(), json),
         Command::Approve {
