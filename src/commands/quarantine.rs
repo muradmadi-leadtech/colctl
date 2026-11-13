@@ -545,6 +545,10 @@ pub(super) fn inspect(
                 )
             }
         }
+        // Built and reviewed by `colctl convert` (T4).
+        Candidate::Conversion(_) => Err(format!(
+            "{name}'s Codex package can't be reviewed by this version"
+        )),
     };
     match result {
         Ok(r) => view.review = Some(r),
@@ -562,6 +566,7 @@ fn change_text(ctx: &Ctx, c: &Candidate) -> String {
     match c {
         Candidate::Source(c) => format!("{} → {}", vault::short(&c.from), vault::short(&c.to)),
         Candidate::Skill(c) | Candidate::Agent(c) => ctx.tilde(&c.origin),
+        Candidate::Conversion(c) => format!("Codex package from {}", vault::short(&c.rev)),
     }
 }
 
@@ -700,6 +705,11 @@ fn detail_lines(ctx: &Ctx, v: &View) -> Vec<String> {
         Candidate::Skill(h) | Candidate::Agent(h) => {
             format!("{}  from {}", escape(&v.key), escape(&ctx.tilde(&h.origin)))
         }
+        Candidate::Conversion(h) => format!(
+            "{}  Codex package from {}",
+            escape(&v.name),
+            vault::short(&h.rev)
+        ),
     };
     let Some(r) = &v.review else {
         lines.push(render::verdict(
@@ -835,12 +845,13 @@ pub(super) fn view_json(v: &View, full: bool) -> Value {
             Some(c.origin.display().to_string()),
             c.held_at,
         ),
+        Candidate::Conversion(c) => (c.rev.clone(), c.digest.clone(), None, c.held_at),
     };
     let mut out = json!({
         "key": v.key,
         "kind": v.candidate.kind(),
         "name": match &v.candidate {
-            Candidate::Source(_) => v.name.clone(),
+            Candidate::Source(_) | Candidate::Conversion(_) => v.name.clone(),
             _ => v.key.rsplit('/').next().unwrap_or_default().trim_end_matches(".md").to_string(),
         },
         "from": from,
@@ -1061,6 +1072,10 @@ fn approve_one(
     }
     let commit_err = |e: CliError| e.message;
     match &candidate {
+        Candidate::Conversion(_) => Err(format!(
+            "{}'s Codex package can't be approved by this version",
+            view.name
+        )),
         Candidate::Source(c) => {
             let name = &view.name;
             if view.warning.is_some() {

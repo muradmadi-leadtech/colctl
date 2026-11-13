@@ -1709,6 +1709,7 @@ pub fn add_source(
         plugin,
         replaces: Vec::new(),
         path: subpath,
+        convert: Vec::new(),
     };
     let text = config::add_source(&ws.config_text, &source).map_err(CliError::usage)?;
     write_config(ctx, &text)?;
@@ -1875,6 +1876,7 @@ fn adopt_plugin_from_source(ctx: &Ctx, harness: &Harness, id: &str) -> Option<Ad
         plugin,
         replaces: vec![id.to_string()],
         path: found.subpath.clone(),
+        convert: Vec::new(),
     };
     text = match config::add_source(&text, &source) {
         Ok(t) => t,

@@ -68,6 +68,19 @@ pub enum Candidate {
     Skill(HeldCopy),
     /// A taken-over agent's snapshot in `.state/quarantine/agents/<name>.md`.
     Agent(HeldCopy),
+    /// A source's Codex package built by colctl (cycle 7), in `.state/quarantine/conversions/<name>`.
+    Conversion(HeldConversion),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeldConversion {
+    /// The commit it was built from.
+    pub rev: String,
+    /// The package's digest.
+    pub digest: String,
+    /// Unix seconds.
+    pub held_at: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +111,7 @@ impl Candidate {
         match self {
             Candidate::Source(c) => c.held_at,
             Candidate::Skill(c) | Candidate::Agent(c) => c.held_at,
+            Candidate::Conversion(c) => c.held_at,
         }
     }
 
@@ -106,6 +120,7 @@ impl Candidate {
             Candidate::Source(_) => "source",
             Candidate::Skill(_) => "skill",
             Candidate::Agent(_) => "agent",
+            Candidate::Conversion(_) => "conversion",
         }
     }
 
@@ -114,6 +129,7 @@ impl Candidate {
         match self {
             Candidate::Source(c) => &c.to,
             Candidate::Skill(c) | Candidate::Agent(c) => &c.hash,
+            Candidate::Conversion(c) => &c.digest,
         }
     }
 
@@ -123,6 +139,12 @@ impl Candidate {
             Candidate::Source(c) => key.starts_with("sources/") && hex40(&c.from) && hex40(&c.to),
             Candidate::Skill(c) => key.starts_with("skills/") && c.origin.is_absolute(),
             Candidate::Agent(c) => key.starts_with("agents/") && c.origin.is_absolute(),
+            Candidate::Conversion(c) => {
+                key.starts_with("conversions/")
+                    && hex40(&c.rev)
+                    && c.digest.len() == 64
+                    && c.digest.bytes().all(|b| b.is_ascii_hexdigit())
+            }
         }
     }
 }

@@ -50,6 +50,8 @@ pub struct Source {
     pub replaces: Vec<String>,
     /// The plugin's folder inside the repo, when it isn't the root (EC3-11).
     pub path: Option<String>,
+    /// Tools colctl packages it for itself, because the repo doesn't (cycle 7). Only Codex.
+    pub convert: Vec<crate::tool::Tool>,
 }
 
 impl Source {
@@ -177,6 +179,8 @@ struct RawSource {
     replaces: Vec<Spanned<String>>,
     #[serde(default)]
     path: Option<Spanned<String>>,
+    #[serde(default)]
+    convert: Option<Spanned<toml::Value>>,
 }
 
 #[derive(Deserialize)]
@@ -456,6 +460,25 @@ pub fn parse(text: &str, home: &Path) -> Result<Config, String> {
             Some(p) => Some(p.get_ref().clone()),
             None => None,
         };
+        let mut convert = Vec::new();
+        if let Some(c) = &raw.convert {
+            let bad = || {
+                at(
+                    c.span(),
+                    "convert must be a list of tools colctl converts for: [\"codex\"]".to_string(),
+                )
+            };
+            let list = c.get_ref().as_array().ok_or_else(bad)?;
+            for tool in list {
+                match tool.as_str() {
+                    Some("codex") if !convert.contains(&crate::tool::Tool::Codex) => {
+                        convert.push(crate::tool::Tool::Codex);
+                    }
+                    Some("codex") => {}
+                    _ => return Err(bad()),
+                }
+            }
+        }
         config.sources.push(Source {
             name: name.clone(),
             repo: raw.repo.get_ref().clone(),
@@ -463,6 +486,7 @@ pub fn parse(text: &str, home: &Path) -> Result<Config, String> {
             plugin,
             replaces,
             path,
+            convert,
         });
     }
     Ok(config)
@@ -670,6 +694,9 @@ pub fn add_source(text: &str, source: &Source) -> Result<String, String> {
         let replaces: toml_edit::Array = source.replaces.iter().map(String::as_str).collect();
         out.push_str(&format!("replaces = {replaces}\n"));
     }
+    if !source.convert.is_empty() {
+        out.push_str("convert = [\"codex\"]\n");
+    }
     Ok(out)
 }
 
@@ -711,6 +738,23 @@ pub fn add_replaces(text: &str, name: &str, id: &str) -> Result<String, String> 
                 && !list.iter().any(|v| v.as_str() == Some(id))
             {
                 list.push(id);
+            }
+        }
+    })
+}
+
+/// Sets or removes a source's `convert = ["codex"]` (cycle 7: written on approve, removed by undo).
+pub fn set_source_convert(text: &str, name: &str, on: bool) -> Result<String, String> {
+    with_source_table(text, name, |tables, i| {
+        if let Some(t) = tables.get_mut(i) {
+            if on {
+                if t.get("convert").is_none() {
+                    let mut list = toml_edit::Array::new();
+                    list.push("codex");
+                    t["convert"] = value(list);
+                }
+            } else {
+                t.remove("convert");
             }
         }
     })
@@ -1311,6 +1355,7 @@ enabled = ["superpowers@superpowers-dev", "x@openai-curated"]
             plugin: "superpowers".into(),
             replaces: vec!["superpowers@anthropic-plugin-directory".into()],
             path: None,
+            convert: Vec::new(),
         };
         let added = add_source(original, &source).unwrap();
         assert!(added.starts_with(original), "{added}");
