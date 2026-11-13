@@ -15,11 +15,13 @@ Then .codex-plugin/plugin.json has the same fields with the same values, "skills
 And fields Claude's manifest doesn't have are left out, never invented
 ```
 
-**AC7-02 The plugin folder is carried over whole**
+**AC7-02 What Codex reads is carried over, where it was**
 ```gherkin
-When colctl builds a package
+When colctl builds a package that keeps a hook
 Then every file of the plugin folder is in it at the same path, except .git, .claude-plugin and hooks/hooks.json
   (which is rewritten, AC7-04), so skills and the files hooks run are where they were
+And when it keeps no hook, only the skills folder and the top-level README, LICENSE and NOTICE files are carried
+  (smoke test: qdrant's plugin folder is its whole repo, CI and eval scripts included, which Codex never reads)
 And the clone is unchanged (git status is clean, no file's mtime changes)
 ```
 
