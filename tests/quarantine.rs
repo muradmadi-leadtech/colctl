@@ -201,7 +201,7 @@ fn ac4_16_sync_never_installs_a_candidate() {
 fn ec4_01_update_with_no_sources() {
     let env = machine();
     let out = env.ok(&["update"]);
-    assert!(out.contains("no sources declared"), "{out}");
+    assert!(out.contains("No sources declared"), "{out}");
 }
 
 #[test]
@@ -558,27 +558,32 @@ fn risky_candidate() -> (Env, PathBuf, String, String) {
 fn ac4_19_review_lists_what_is_held() {
     let env = machine();
     let out = env.ok(&["review"]);
-    assert!(out.contains("nothing held for review"), "{out}");
+    assert!(out.contains("Nothing held for review"), "{out}");
     let (env, _, v1, v2) = risky_candidate();
     let origin = adopted_skill(&env, "twg-jira", "v1");
     fs::write(origin.join("SKILL.md"), "v2").unwrap();
     fs::write(origin.join("run.sh"), "echo").unwrap();
     env.ok(&["refresh"]);
+    // Cycle 6: a verdict, one aligned row per held version, flags counted per file.
     let out = env.expect(1, &["review"]);
-    let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.len(), 2, "{out}");
-    assert!(lines[0].starts_with("skills/twg-jira"), "{out}");
-    assert!(lines[0].contains("~/.config/twg/skills/twg-jira"), "{out}");
-    assert!(
-        lines[0].contains("2 files") && lines[0].contains("1 flag"),
-        "{out}"
+    assert!(out.starts_with("! 2 versions held for review"), "{out}");
+    let rows: Vec<String> = out
+        .lines()
+        .filter(|l| l.starts_with("  ") && !l.trim().is_empty())
+        .map(Env::words)
+        .collect();
+    assert_eq!(rows.len(), 2, "{out}");
+    assert_eq!(
+        rows[0],
+        "skills/twg-jira ~/.config/twg/skills/twg-jira 2 files 1 file flagged"
     );
-    assert!(lines[1].starts_with("sources/superpowers"), "{out}");
-    assert!(
-        lines[1].contains(&format!("{} → {}", &v1[..7], &v2[..7]))
-            && lines[1].contains("1 commit")
-            && lines[1].contains("4 flags"),
-        "{out}"
+    assert_eq!(
+        rows[1],
+        format!(
+            "sources/superpowers {} → {} 1 commit 3 files flagged",
+            &v1[..7],
+            &v2[..7]
+        )
     );
 }
 
@@ -587,24 +592,31 @@ fn ac4_20_reviewing_a_source_plugin() {
     let (env, _, v1, v2) = risky_candidate();
     let before = env.snapshot();
     let out = env.ok(&["review", "superpowers"]);
+    // Cycle 6: risk flags first, grouped per file and ordered by severity.
+    assert!(
+        out.starts_with(&format!(
+            "! superpowers  {} → {} · 1 commit · 3 files flagged",
+            &v1[..7],
+            &v2[..7]
+        )),
+        "{out}"
+    );
+    let words = Env::words(&out);
     for want in [
-        format!("superpowers  {} → {}", &v1[..7], &v2[..7]),
-        "commits (1)".into(),
-        format!("  {} Add a session hook", &v2[..7]),
-        "files (3)".into(),
-        "  A  hooks/hooks.json".into(),
-        "  A  scripts/session-start.sh    (+x)".into(),
-        "  M  .claude-plugin/plugin.json".into(),
-        "flags (4)".into(),
-        "adds hooks".into(),
-        "new executable file".into(),
-        "new script".into(),
-        "plugin manifest changed".into(),
-        "diff".into(),
+        "Risk flags hooks/hooks.json hook: adds hooks scripts/session-start.sh executable · script: new executable file; new script .claude-plugin/plugin.json manifest: plugin manifest changed".to_string(),
+        format!("Commits (1) {} Add a session hook", &v2[..7]),
+        "Files (3)".into(),
+        "A hooks/hooks.json".into(),
+        "A scripts/session-start.sh (+x)".into(),
+        "M .claude-plugin/plugin.json".into(),
+        "Diff".into(),
         "+echo hi".into(),
+        "→ colctl approve superpowers or colctl reject superpowers".into(),
     ] {
-        assert!(out.contains(&want), "{want:?} in:\n{out}");
+        assert!(words.contains(&want), "{want:?} in:\n{out}");
     }
+    let flags = out.find("Risk flags").unwrap();
+    assert!(flags < out.find("Commits").unwrap() && flags < out.find("Diff").unwrap());
     assert_eq!(env.snapshot(), before, "review writes nothing");
 }
 
@@ -623,16 +635,14 @@ fn ac4_21_reviewing_a_skill() {
         out.contains("skills/twg-jira  from ~/.config/twg/skills/twg-jira"),
         "{out}"
     );
+    let words = Env::words(&out);
+    assert!(words.contains("Files (1) M SKILL.md"), "{out}");
     assert!(
-        out.contains("files (1)") && out.contains("  M  SKILL.md"),
-        "{out}"
-    );
-    assert!(
-        out.contains("allowed-tools") && out.contains("grants Bash: Bash"),
+        words.contains("SKILL.md allowed-tools: grants Bash: Bash"),
         "{out}"
     );
     assert!(out.contains("+allowed-tools: Bash"), "{out}");
-    assert!(!out.contains("commits ("), "{out}");
+    assert!(!out.contains("Commits ("), "{out}");
 }
 
 #[test]
@@ -694,7 +704,7 @@ fn ec4_08_review_of_an_older_commit_goes_back() {
     env.ok(&["sync"]);
     env.ok(&["update", "superpowers", "--rev", &v1]);
     let out = env.ok(&["review", "superpowers"]);
-    assert!(out.contains("goes back 2 commits (removed)"), "{out}");
+    assert!(out.contains("Goes back 2 commits (removed)"), "{out}");
     assert!(out.contains("-v3"), "{out}");
     let list = env.expect(1, &["review"]);
     assert!(list.contains("goes back 2 commits"), "{list}");

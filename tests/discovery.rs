@@ -143,20 +143,26 @@ fn ac5_12_search_prints_results() {
     let out = env.ok(&["search", "api", "security"]);
     let lines: Vec<&str> = out.lines().collect();
     assert!(
-        lines[0].starts_with("42crunch-api-security-testing@official"),
+        lines[0].starts_with("   42crunch-api-security-testing@official"),
         "{out}"
     );
     assert!(lines[0].contains("42crunch-ai"), "{out}");
     assert!(
-        lines[1].starts_with("security-guidance@anthropic-plugin-directory"),
+        lines[1].starts_with("✓  security-guidance@anthropic-plugin-directory"),
         "{out}"
     );
-    assert!(lines[1].ends_with("[installed: claude]"), "{out}");
-    assert_eq!(lines.last().unwrap(), &"2 of 2 results");
+    // Cycle 6: installed plugins are marked; the footer has counts and the next step.
+    assert_eq!(
+        lines.last().unwrap(),
+        &"2 of 2 results · ✓ installed · colctl show <id> for details"
+    );
     let out = env.ok(&["search"]);
-    assert!(out.trim_end().ends_with("6 of 6 results"), "{out}");
+    assert!(out.contains("6 of 6 results"), "{out}");
     let out = env.ok(&["search", "--limit", "2"]);
-    assert!(out.contains("2 of 6 results; --limit 0 shows all"), "{out}");
+    assert!(
+        out.contains("2 of 6 results · --limit 0 shows all"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -312,7 +318,7 @@ fn ec5_01_no_catalogs() {
     for args in [&["search"][..], &["developers"]] {
         let (code, out, _) = env.code(args);
         assert_eq!(code, 1, "{args:?}");
-        assert!(out.contains("no catalogs found"), "{out}");
+        assert!(out.contains("No catalogs found"), "{out}");
     }
 }
 
@@ -322,7 +328,7 @@ fn ec5_10_nothing_matches() {
     catalogs(&env);
     let (code, out, _) = env.code(&["search", "zebra"]);
     assert_eq!(code, 1);
-    assert!(out.contains("no plugins match zebra"), "{out}");
+    assert!(out.contains("No plugins match zebra"), "{out}");
     let (code, v) = json_of(&env, &["search", "zebra", "--json"]);
     assert_eq!((code, v["matched"].clone()), (1, json!(0)));
 }
@@ -394,6 +400,8 @@ fn ac5_19_marketplace_list() {
         "[marketplaces]\nofficial = \"github:anthropics/official\"",
         1,
     ));
+    // Cycle 6: a realistic terminal width, so full sources fit.
+    let env = env.var("COLUMNS", "120");
     let out = env.ok(&["marketplace", "list"]);
     let line = |name: &str| {
         out.lines()
@@ -403,7 +411,7 @@ fn ac5_19_marketplace_list() {
     };
     let dir = line("anthropic-plugin-directory");
     assert!(
-        dir.contains("built in") && dir.contains("3 plugins") && dir.contains("claude"),
+        Env::words(&dir).contains("claude built in 3 claude"),
         "{dir}"
     );
     let official = line("official");
@@ -412,12 +420,12 @@ fn ac5_19_marketplace_list() {
         "{official}"
     );
     assert!(
-        official.contains("3 plugins") && official.ends_with("managed"),
+        Env::words(&official).contains(" 3 claude") && official.ends_with("✓ managed"),
         "{official}"
     );
     let tools = line("tools");
     assert!(
-        tools.contains("codex") && tools.contains("1 plugin "),
+        tools.contains("codex") && Env::words(&tools).ends_with(" 1 codex"),
         "{tools}"
     );
     let (code, v) = json_of(&env, &["marketplace", "list", "--json"]);
@@ -434,17 +442,17 @@ fn ac5_20_marketplace_refresh() {
     let env = machine_with_kilo_codex();
     let out = env.ok(&["marketplace", "refresh", "--dry-run"]);
     assert!(
-        out.contains("claude: would run claude plugin marketplace update"),
+        out.contains("· claude: would run claude plugin marketplace update"),
         "{out}"
     );
     assert!(
-        out.contains("kilo-codex: would run codex plugin marketplace upgrade"),
+        out.contains("· kilo-codex: would run codex plugin marketplace upgrade"),
         "{out}"
     );
     assert!(env.log().is_empty() && env.codex_log().is_empty());
     let out = env.ok(&["marketplace", "refresh"]);
     assert!(
-        out.contains("kilo-claude: ✓ claude plugin marketplace update"),
+        out.contains("✓ kilo-claude: claude plugin marketplace update"),
         "{out}"
     );
     let claude = env.log();
@@ -460,7 +468,7 @@ fn ac5_20_marketplace_refresh() {
     let (code, out, _) = env.code(&["marketplace", "refresh"]);
     assert_eq!(code, 1);
     assert!(
-        out.contains("codex: ✗ codex plugin marketplace upgrade"),
+        out.contains("✗ codex: codex plugin marketplace upgrade"),
         "{out}"
     );
 }
@@ -474,10 +482,13 @@ fn ec5_17_refresh_without_a_tool() {
     let (code, out, _) = env.code(&["marketplace", "refresh"]);
     assert_eq!(code, 1);
     assert!(
-        out.contains("claude: skipped: claude isn't on PATH"),
+        out.contains("! claude: skipped: claude isn't on PATH"),
         "{out}"
     );
-    assert!(out.contains("codex: ✓"), "{out}");
+    assert!(
+        out.contains("✓ codex: codex plugin marketplace upgrade"),
+        "{out}"
+    );
 }
 
 // ---------------------------------------------------------------- connectors (T6)
@@ -506,8 +517,11 @@ fn ac5_21_connectors() {
     codex_list(&codex, json!([gmail, slack, local]), json!([]));
     codex_list(&kilo, json!([gmail]), json!([gmail]));
     let out = env.ok(&["connectors", "gmail"]);
-    assert!(out.starts_with("gmail@openai-curated-remote"), "{out}");
-    assert!(out.contains("[installed: kilo-codex]"), "{out}");
+    assert!(out.starts_with("✓  gmail@openai-curated-remote"), "{out}");
+    assert!(
+        Env::words(&out).contains("gmail@openai-curated-remote openai openai-curated-remote"),
+        "{out}"
+    );
     assert!(out.contains("1 of 1 connectors"), "{out}");
     assert_eq!(
         env.codex_log_args(),
