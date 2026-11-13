@@ -95,6 +95,45 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Search every plugin catalog your harnesses know (offline)
+    Search {
+        /// Words that must all appear (name, keywords, description, developer)
+        terms: Vec<String>,
+        /// Only plugins for this tool
+        #[arg(long, value_enum)]
+        tool: Option<ToolArg>,
+        /// Only plugins from this marketplace
+        #[arg(long)]
+        marketplace: Option<String>,
+        /// Only plugins by this developer
+        #[arg(long)]
+        developer: Option<String>,
+        /// Only plugins installed somewhere
+        #[arg(long)]
+        installed: bool,
+        /// Show at most this many results (0 for all)
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one plugin from the catalogs in full
+    Show {
+        /// A plugin id from search, or a name only one plugin has
+        id: String,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
+    /// List developers and their plugin counts, or one developer's plugins
+    Developers {
+        /// A developer (a repo owner such as obra, or an author name)
+        name: Option<String>,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
     /// Install held new versions exactly as reviewed, then sync
     Approve {
         /// Source names, skills/<name> or agents/<name>.md
@@ -181,6 +220,21 @@ enum Add {
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
+enum ToolArg {
+    Claude,
+    Codex,
+}
+
+impl ToolArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            ToolArg::Claude => "claude",
+            ToolArg::Codex => "codex",
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
 enum Kind {
     Skill,
     Agent,
@@ -256,6 +310,28 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             rev,
             dry_run,
         } => commands::update(ctx, &names, check, rev.as_deref(), dry_run),
+        Command::Search {
+            terms,
+            tool,
+            marketplace,
+            developer,
+            installed,
+            limit,
+            json,
+        } => commands::search(
+            ctx,
+            &crate::search::Query {
+                terms,
+                tool: tool.map(|t| t.as_str().to_string()),
+                marketplace,
+                developer,
+                installed,
+                limit,
+            },
+            json,
+        ),
+        Command::Show { id, json } => commands::show(ctx, &id, json),
+        Command::Developers { name, json } => commands::developers(ctx, name.as_deref(), json),
         Command::Approve {
             names,
             all,

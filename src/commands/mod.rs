@@ -16,7 +16,9 @@ use crate::state::{self, Lock, Origin, STATE_DIR, State};
 use crate::vault::{self, CloneState, Vault};
 use std::collections::BTreeMap;
 
+mod discovery;
 mod quarantine;
+pub use discovery::{developers, search, show};
 pub use quarantine::{approve, refresh, reject, review, update};
 
 /// Where source plugin clones live, and colctl-written manifests inside it.
