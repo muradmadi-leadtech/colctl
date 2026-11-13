@@ -52,7 +52,7 @@ fn counts(items: &[Item]) -> String {
 }
 
 /// One row of the "Needs attention" table.
-struct Attention {
+pub(super) struct Attention {
     place: String,
     kind: String,
     name: String,
@@ -60,7 +60,7 @@ struct Attention {
     fix: String,
 }
 
-fn row(a: &Attention) -> (Vec<Cell>, String, Token) {
+pub(super) fn row(a: &Attention) -> (Vec<Cell>, String, Token) {
     (
         vec![
             Cell::styled(Token::Attention.symbol(), Token::Attention),
@@ -76,7 +76,7 @@ fn row(a: &Attention) -> (Vec<Cell>, String, Token) {
 
 /// Item rows, each followed by its fix: on the same line when it fits, else on its own line
 /// underneath (fixes are never cut).
-fn rows_with_fixes(
+pub(super) fn rows_with_fixes(
     caps: &crate::ui::term::Caps,
     rows: &[(Vec<Cell>, String, Token)],
     flex: usize,
@@ -116,23 +116,15 @@ fn rows_with_fixes(
     out
 }
 
-/// The text of `colctl status` (AC6-08 – 11, EC6-10, EC6-11).
-pub(super) fn render(
+/// Everything that needs the person, each with its fix: problem items in usable profiles, uncommitted
+/// files, invalid source items, changed origins and held versions.
+pub(super) fn attention_rows(
     ctx: &Ctx,
     ws: &Workspace,
     planned: &[Planned],
     uncommitted: &[String],
     held: &[View],
-    all: bool,
-) -> Vec<String> {
-    let caps = &ctx.out.caps;
-    if planned.is_empty() {
-        return vec![
-            render::verdict(caps, Token::Attention, "No profiles registered", &[]),
-            String::new(),
-            render::hint(caps, "colctl init"),
-        ];
-    }
+) -> Vec<Attention> {
     let mut attention: Vec<Attention> = Vec::new();
     let source = ctx.tilde(&ctx.source);
     for p in planned {
@@ -205,6 +197,27 @@ pub(super) fn render(
             fix: format!("colctl review {}", escape(&v.name)),
         });
     }
+    attention
+}
+
+/// The text of `colctl status` (AC6-08 – 11, EC6-10, EC6-11).
+pub(super) fn render(
+    ctx: &Ctx,
+    ws: &Workspace,
+    planned: &[Planned],
+    uncommitted: &[String],
+    held: &[View],
+    all: bool,
+) -> Vec<String> {
+    let caps = &ctx.out.caps;
+    if planned.is_empty() {
+        return vec![
+            render::verdict(caps, Token::Attention, "No profiles registered", &[]),
+            String::new(),
+            render::hint(caps, "colctl init"),
+        ];
+    }
+    let attention = attention_rows(ctx, ws, planned, uncommitted, held);
     let unusable = planned.iter().filter(|p| p.plan.root != Root::Ok).count();
     let problems = attention.len() + unusable;
 

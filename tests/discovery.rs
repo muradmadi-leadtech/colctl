@@ -643,7 +643,10 @@ fn ac5_23_add_source_from_a_result() {
     let (v1, v2) = listed_superpowers(&env);
     let out = env.ok(&["add", "source", "superpowers@official"]);
     assert!(
-        out.contains(&format!("added source superpowers at {}", &v1[..7])),
+        out.contains(&format!(
+            "✓ Added source superpowers · github.com/obra/superpowers at {}",
+            &v1[..7]
+        )),
         "{out}"
     );
     let s = &sources(&env)[0];

@@ -2,7 +2,7 @@
 //! [`CliError`] that carries one.
 
 use crate::adapter::{self, CLAUDE_MD, Root};
-use crate::apply::{self, Outcome};
+use crate::apply;
 use crate::config::{self, CONFIG_FILE, Config, Harness, Kind, PluginList};
 use crate::ctx::Ctx;
 use crate::error::{CliError, EXIT_DRIFT};
@@ -13,11 +13,14 @@ use crate::plan::{self, HarnessPlan, Inputs, Item, ItemKind, ItemState};
 use crate::plan::{SourceInput, SourceTarget};
 use crate::source::{self, AGENTS, AGENTS_MD, SKILLS, Source};
 use crate::state::{self, Lock, Origin, STATE_DIR, State};
+use crate::ui::render::{self, Cell};
+use crate::ui::style::Token;
 use crate::vault::{self, CloneState, Vault};
 use std::collections::BTreeMap;
 
 mod discovery;
 mod quarantine;
+mod run_view;
 mod status_view;
 pub use discovery::{connectors, developers, marketplace_list, marketplace_refresh, search, show};
 pub use quarantine::{approve, refresh, reject, review, update};
@@ -25,7 +28,6 @@ pub use quarantine::{approve, refresh, reject, review, update};
 /// Where source plugin clones live, and colctl-written manifests inside it.
 pub const PLUGINS: &str = "plugins";
 pub const MANIFESTS: &str = ".manifests";
-use crate::tool::Tool;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -269,32 +271,6 @@ fn root_hint(root: Root) -> &'static str {
     }
 }
 
-fn item_line(item: &Item) -> String {
-    let hint = item
-        .hint
-        .as_ref()
-        .map(|h| format!("  → {h}"))
-        .unwrap_or_default();
-    format!(
-        "  {:<20} {:<13} {}{hint}",
-        item.state.as_str(),
-        item.kind.as_str(),
-        item.name
-    )
-}
-
-fn harness_heading(ctx: &Ctx, p: &Planned) -> String {
-    let mut line = format!("{} ({})", p.harness.name, ctx.tilde(&p.harness.path));
-    if p.plan.root != Root::Ok {
-        line.push_str(&format!(
-            "  {} → {}",
-            root_str(p.plan.root),
-            root_hint(p.plan.root)
-        ));
-    }
-    line
-}
-
 fn in_sync(ws: &Workspace, planned: &[Planned], uncommitted: &[String]) -> bool {
     uncommitted.is_empty()
         && ws.source.invalid.is_empty()
@@ -395,21 +371,6 @@ pub fn status(ctx: &Ctx, filter: Option<&str>, as_json: bool, all: bool) -> Resu
     })
 }
 
-fn print_plan(ctx: &Ctx, planned: &[Planned]) {
-    for p in planned {
-        println!("{}", harness_heading(ctx, p));
-        if p.plan.actions.is_empty() {
-            println!("  nothing to do");
-        }
-        for action in &p.plan.actions {
-            println!(
-                "  would {}",
-                action.describe(Tool::for_kind(p.harness.kind))
-            );
-        }
-    }
-}
-
 fn cleanup_source_temps(ctx: &Ctx) {
     for dir in [
         ctx.source.clone(),
@@ -438,6 +399,16 @@ fn commit_pending(git: &Git, ctx: &Ctx) -> Result<(), CliError> {
 
 /// The body of `sync`, run with the lock held.
 fn run_sync(ctx: &Ctx, git: &Git, filter: Option<&str>) -> Result<i32, CliError> {
+    run_sync_led(ctx, git, filter, &[])
+}
+
+/// [`run_sync`], printing `lead` (a command's own verdict) before the profile block (AC6-17).
+fn run_sync_led(
+    ctx: &Ctx,
+    git: &Git,
+    filter: Option<&str>,
+    lead: &[String],
+) -> Result<i32, CliError> {
     // Layout first, so a new ignore rule (e.g. plugins/ for sources) is part of this commit.
     ensure_layout(ctx)?;
     commit_pending(git, ctx)?;
@@ -445,73 +416,42 @@ fn run_sync(ctx: &Ctx, git: &Git, filter: Option<&str>) -> Result<i32, CliError>
     let errors = ensure_sources(ctx, git, &ws.config);
     (ws.sources, ws.clones) = prepare_sources(ctx, &ws.config, Some(git), &errors);
     let planned = plan_all(ctx, &ws, filter)?;
+    let busy: Vec<String> = planned
+        .iter()
+        .filter(|p| p.plan.root == Root::Ok && !p.plan.actions.is_empty())
+        .map(|p| p.harness.name.clone())
+        .collect();
+    let mut progress = crate::ui::progress::Run::new(&ctx.out.caps, &busy);
+    let mut results = Vec::new();
     let mut failures = 0;
     for p in &planned {
-        if p.plan.root != Root::Ok {
+        if p.plan.root != Root::Ok || p.plan.actions.is_empty() {
             continue;
         }
-        if p.plan.actions.is_empty() {
-            continue;
-        }
-        println!("{}", harness_heading(ctx, p));
-        let results = apply::apply(
+        let name = p.harness.name.clone();
+        let total = p.plan.actions.len();
+        let applied = apply::apply_observed(
             ctx,
             &p.harness,
             &p.plan.actions,
             ws.state.harness_mut(&p.harness.name),
+            &mut |i, a| progress.step(&name, &run_view::doing(a), i + 1, total),
         );
-        for r in results {
-            match r.outcome {
-                Outcome::Done => println!("  ✓ {}", r.description),
-                Outcome::Failed(reason) => {
-                    failures += 1;
-                    println!("  ✗ {} — {reason}", r.description);
-                }
-                Outcome::Skipped(reason) => {
-                    failures += 1;
-                    println!("  - {} — skipped: {reason}", r.description);
-                }
-            }
-        }
+        progress.done(&name, &run_view::short_summary(&applied));
+        failures += applied.iter().filter(|r| !r.outcome.is_done()).count();
+        results.push((name, applied));
     }
+    progress.clear();
     remove_stale_clones(ctx, &ws.config);
     state::save(&ctx.source, &ws.state)
         .map_err(|e| CliError::usage(format!("saving state: {e:#}")))?;
 
     let after = load(ctx)?;
     let replanned = plan_all(ctx, &after, filter)?;
-    let mut remaining = Vec::new();
-    for p in &replanned {
-        if p.plan.root != Root::Ok {
-            remaining.push(harness_heading(ctx, p));
-        }
-        for item in p.plan.items.iter().filter(|i| i.state != ItemState::Ok) {
-            remaining.push(format!(
-                "{}:{}",
-                p.harness.name,
-                item_line(item).trim_start_matches(' ')
-            ));
-        }
-    }
-    for i in &after.source.invalid {
-        remaining.push(format!(
-            "source: invalid {} {}  → {}",
-            i.kind, i.name, i.reason
-        ));
-    }
-    for (item, _) in &after.origin_changed {
-        remaining.push(format!(
-            "source: origin-changed {item}  → colctl refresh {item}"
-        ));
-    }
-    if !remaining.is_empty() {
-        println!("needs attention:");
-        for line in &remaining {
-            println!("  {line}");
-        }
-    }
     let ok = failures == 0 && in_sync(&after, &replanned, &[]);
-    println!("{}", if ok { "in sync" } else { "not in sync" });
+    ctx.out.lines(run_view::report(
+        ctx, lead, &results, &after, &replanned, ok,
+    ));
     Ok(if ok { 0 } else { EXIT_DRIFT })
 }
 
@@ -521,7 +461,8 @@ pub fn sync(ctx: &Ctx, filter: Option<&str>, dry_run: bool) -> Result<i32, CliEr
     let ws = load(ctx)?;
     check_harness(&ws.config, filter)?;
     if dry_run {
-        print_plan(ctx, &plan_all(ctx, &ws, filter)?);
+        ctx.out
+            .lines(run_view::plan(ctx, &plan_all(ctx, &ws, filter)?));
         return Ok(0);
     }
     let _lock = Lock::acquire(&ctx.source)?;
@@ -591,16 +532,20 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
     let config_path = ctx.source.join(CONFIG_FILE);
     if !config_path.exists() {
         if dry_run {
-            println!(
-                "would create {} with {CONFIG_FILE}, skills/, agents/, .state/, .gitignore and a git repo",
-                ctx.tilde(&ctx.source)
-            );
-            for (name, written, _, _) in &found {
-                println!("would register harness {name} ({written})");
-            }
-            if found.is_empty() {
-                println!("found no known harnesses");
-            }
+            let listed: Vec<(String, String)> = found
+                .iter()
+                .map(|(n, w, _, _)| (n.clone(), w.clone()))
+                .collect();
+            ctx.out.lines(profiles_found(
+                ctx,
+                Token::Info,
+                &format!(
+                    "Would create {} and register {}",
+                    ctx.tilde(&ctx.source),
+                    plural(listed.len(), "profile")
+                ),
+                &listed,
+            ));
             return Ok(0);
         }
         fs::create_dir_all(ctx.source.join(STATE_DIR))
@@ -621,7 +566,20 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
                 .map_err(|e| CliError::usage(format!("{e:#}")))?;
         }
         commit(&git, ctx, "colctl: init")?;
-        println!("created {}", ctx.tilde(&ctx.source));
+        let listed: Vec<(String, String)> = found
+            .iter()
+            .map(|(n, w, _, _)| (n.clone(), w.clone()))
+            .collect();
+        ctx.out.lines(profiles_found(
+            ctx,
+            Token::Ok,
+            &format!(
+                "Created {} and registered {}",
+                ctx.tilde(&ctx.source),
+                plural(listed.len(), "profile")
+            ),
+            &listed,
+        ));
     } else {
         let (config, text) = config::load(&ctx.source, &ctx.home)?;
         let registered: Vec<PathBuf> = config
@@ -644,16 +602,29 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
             taken.push(unique.clone());
             additions.push((unique, written.clone(), *kind));
         }
+        let listed: Vec<(String, String)> = additions
+            .iter()
+            .map(|(n, w, _)| (n.clone(), w.clone()))
+            .collect();
         if dry_run {
-            for (name, written, _) in &additions {
-                println!("would register harness {name} ({written})");
-            }
-            if additions.is_empty() {
-                println!(
-                    "nothing to add; {} is already set up",
-                    ctx.tilde(&ctx.source)
-                );
-            }
+            ctx.out.lines(if listed.is_empty() {
+                vec![render::verdict(
+                    &ctx.out.caps,
+                    Token::Ok,
+                    &format!(
+                        "Nothing to add; {} is already set up",
+                        ctx.tilde(&ctx.source)
+                    ),
+                    &[],
+                )]
+            } else {
+                profiles_found(
+                    ctx,
+                    Token::Info,
+                    &format!("Would register {}", plural(listed.len(), "new profile")),
+                    &listed,
+                )
+            });
             return Ok(0);
         }
         let _lock = Lock::acquire(&ctx.source)?;
@@ -662,7 +633,6 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
             let mut updated = text.clone();
             for (name, written, kind) in &additions {
                 updated = config::append_harness_kind(&updated, name, written, *kind);
-                println!("registered harness {name} ({written})");
             }
             fsx::atomic_write(&config_path, updated.as_bytes())
                 .map_err(|e| CliError::usage(format!("{e:#}")))?;
@@ -672,14 +642,100 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
                 .map_err(|e| CliError::usage(format!("{e:#}")))?;
         }
         commit(&git, ctx, "colctl: init")?;
+        ctx.out.lines(if listed.is_empty() {
+            vec![render::verdict(
+                &ctx.out.caps,
+                Token::Ok,
+                &format!("{} is already set up", ctx.tilde(&ctx.source)),
+                &[],
+            )]
+        } else {
+            profiles_found(
+                ctx,
+                Token::Ok,
+                &format!("Registered {}", plural(listed.len(), "new profile")),
+                &listed,
+            )
+        });
     }
+    ctx.out.line("");
     status(ctx, None, false, false)?;
     Ok(0)
 }
 
-fn dry_or_write(dry_run: bool, what: &str) -> bool {
+/// `<n> <word>s`, singular for one.
+pub(super) fn plural(n: usize, word: &str) -> String {
+    format!("{n} {word}{}", if n == 1 { "" } else { "s" })
+}
+
+/// A verdict and the profiles `init` found or registered (AC6-17).
+fn profiles_found(
+    ctx: &Ctx,
+    tone: Token,
+    verdict: &str,
+    profiles: &[(String, String)],
+) -> Vec<String> {
+    let caps = &ctx.out.caps;
+    let mut lines = vec![render::verdict(caps, tone, verdict, &[])];
+    if profiles.is_empty() {
+        lines.push(render::footer(
+            caps,
+            "  no known profiles found; add one to config.toml",
+        ));
+        return lines;
+    }
+    let name_w = profiles
+        .iter()
+        .map(|(n, _)| render::width(n))
+        .max()
+        .unwrap_or(0);
+    let room = caps.width.saturating_sub(name_w + 4).max(16);
+    let rows: Vec<Vec<Cell>> = profiles
+        .iter()
+        .map(|(n, w)| {
+            vec![
+                Cell::styled(n.clone(), Token::Name),
+                Cell::styled(render::cut_middle(w, room), Token::Dim),
+            ]
+        })
+        .collect();
+    lines.extend(render::table(caps, 2, &rows, 1));
+    lines
+}
+
+/// A verdict and one line per item, each with its symbol (adopt, approve, reject).
+fn item_lines(
+    ctx: &Ctx,
+    tone: Token,
+    verdict: &str,
+    facts: &[String],
+    items: &[(Token, String)],
+) -> Vec<String> {
+    let caps = &ctx.out.caps;
+    let mut lines = vec![render::verdict(caps, tone, verdict, facts)];
+    for (t, text) in items {
+        lines.push(format!(
+            "  {} {}",
+            crate::ui::style::mark(*t, caps.color_out),
+            crate::review::escape(text)
+        ));
+    }
+    lines
+}
+
+/// The one-line verdict a command leads with (AC6-17).
+fn lead(ctx: &Ctx, text: &str, facts: &[String]) -> Vec<String> {
+    vec![render::verdict(&ctx.out.caps, Token::Ok, text, facts)]
+}
+
+fn dry_or_write(ctx: &Ctx, dry_run: bool, what: &str) -> bool {
     if dry_run {
-        println!("would {what}, commit, then sync");
+        ctx.out.line(render::verdict(
+            &ctx.out.caps,
+            Token::Info,
+            &format!("Would {what}, commit and sync"),
+            &[],
+        ));
     }
     dry_run
 }
@@ -723,7 +779,7 @@ pub fn add_skill(
         Some(s) => format!("{from} ({s})"),
         None => from.to_string(),
     };
-    if dry_or_write(dry_run, &format!("add skill {name} from {shown}")) {
+    if dry_or_write(ctx, dry_run, &format!("add skill {name} from {shown}")) {
         return Ok(0);
     }
     let _lock = Lock::acquire(&ctx.source)?;
@@ -749,8 +805,12 @@ pub fn add_skill(
     }
     fsx::copy_tree(&base, &dest, true).map_err(|e| CliError::usage(format!("{e:#}")))?;
     commit(&git, ctx, &format!("colctl: add skill {name}"))?;
-    println!("added skill {name}");
-    run_sync(ctx, &git, None)
+    run_sync_led(
+        ctx,
+        &git,
+        None,
+        &lead(ctx, &format!("Added skill {name}"), &[]),
+    )
 }
 
 /// `colctl add agent` (AC-21).
@@ -775,6 +835,7 @@ pub fn add_agent(ctx: &Ctx, file: &Path, dry_run: bool) -> Result<i32, CliError>
         )));
     }
     if dry_or_write(
+        ctx,
         dry_run,
         &format!("add agent {stem} from {}", file.display()),
     ) {
@@ -786,8 +847,12 @@ pub fn add_agent(ctx: &Ctx, file: &Path, dry_run: bool) -> Result<i32, CliError>
         .and_then(|_| fs::copy(file, &dest))
         .map_err(|e| CliError::usage(format!("copying {}: {e}", file.display())))?;
     commit(&git, ctx, &format!("colctl: add agent {stem}"))?;
-    println!("added agent {stem}");
-    run_sync(ctx, &git, None)
+    run_sync_led(
+        ctx,
+        &git,
+        None,
+        &lead(ctx, &format!("Added agent {stem}"), &[]),
+    )
 }
 
 fn write_config(ctx: &Ctx, text: &str) -> Result<(), CliError> {
@@ -840,15 +905,23 @@ pub fn add_plugin(
     let text =
         config::add_plugin_to(&ws.config_text, list, id, new_market).map_err(CliError::usage)?;
     let label = plugin_label(list);
-    if dry_or_write(dry_run, &format!("enable {label} {id} in {CONFIG_FILE}")) {
+    if dry_or_write(
+        ctx,
+        dry_run,
+        &format!("enable {label} {id} in {CONFIG_FILE}"),
+    ) {
         return Ok(0);
     }
     let _lock = Lock::acquire(&ctx.source)?;
     commit_pending(&git, ctx)?;
     write_config(ctx, &text)?;
     commit(&git, ctx, &format!("colctl: add {label} {id}"))?;
-    println!("added {label} {id}");
-    run_sync(ctx, &git, None)
+    run_sync_led(
+        ctx,
+        &git,
+        None,
+        &lead(ctx, &format!("Added {label} {id}"), &[]),
+    )
 }
 
 fn plugin_label(list: PluginList) -> &'static str {
@@ -899,7 +972,7 @@ pub fn rm(
             "no managed {label} named \"{name}\""
         )));
     }
-    if dry_or_write(dry_run, &format!("remove {label} {name}")) {
+    if dry_or_write(ctx, dry_run, &format!("remove {label} {name}")) {
         return Ok(0);
     }
     let _lock = Lock::acquire(&ctx.source)?;
@@ -926,8 +999,12 @@ pub fn rm(
     if let Some(key) = key {
         quarantine::forget(ctx, &git, &key)?;
     }
-    println!("removed {label} {name}");
-    run_sync(ctx, &git, None)
+    run_sync_led(
+        ctx,
+        &git,
+        None,
+        &lead(ctx, &format!("Removed {label} {name}"), &[]),
+    )
 }
 
 /// The result of adopting one item.
@@ -1286,34 +1363,48 @@ pub fn adopt(
         ));
     }
     let matches = |i: &Item| wanted.as_ref().is_none_or(|w| *w == i.address());
+    let mut said: Vec<(Token, String)> = Vec::new();
     if dry_run {
         for p in plan_all(ctx, &ws, harness)? {
             for i in p.plan.items.iter().filter(|i| matches(i)) {
                 match i.state {
-                    ItemState::Foreign | ItemState::FromAggregator => {
-                        println!("would adopt {} from {}", i.address(), p.harness.name)
-                    }
+                    ItemState::Foreign | ItemState::FromAggregator => said.push((
+                        Token::Info,
+                        format!("would adopt {} from {}", i.address(), p.harness.name),
+                    )),
                     ItemState::Unreviewed if i.kind == ItemKind::Plugin && i.target.is_some() => {
-                        println!(
-                            "would move {} in {} to its source",
-                            i.address(),
-                            p.harness.name
-                        )
+                        said.push((
+                            Token::Info,
+                            format!(
+                                "would move {} in {} to its source",
+                                i.address(),
+                                p.harness.name
+                            ),
+                        ))
                     }
-                    ItemState::ForeignLink if i.can_take_over() => println!(
-                        "would take over {} in {} from {}",
-                        i.address(),
-                        p.harness.name,
-                        i.target
-                            .as_ref()
-                            .map(|t| t.display().to_string())
-                            .unwrap_or_default()
-                    ),
+                    ItemState::ForeignLink if i.can_take_over() => said.push((
+                        Token::Info,
+                        format!(
+                            "would take over {} in {} from {}",
+                            i.address(),
+                            p.harness.name,
+                            i.target
+                                .as_ref()
+                                .map(|t| t.display().to_string())
+                                .unwrap_or_default()
+                        ),
+                    )),
                     _ => {}
                 }
             }
         }
-        println!("then sync");
+        let verdict = if said.is_empty() {
+            "Nothing to adopt".to_string()
+        } else {
+            format!("Would adopt {}, then sync", plural(said.len(), "item"))
+        };
+        ctx.out
+            .lines(item_lines(ctx, Token::Info, &verdict, &[], &said));
         return Ok(0);
     }
     let _lock = Lock::acquire(&ctx.source)?;
@@ -1358,33 +1449,56 @@ pub fn adopt(
                     };
                     commit(&git, ctx, &format!("colctl: adopt {kind} {label}"))?;
                     match &outcome {
-                        Adoption::Adopted => {
-                            println!("adopted {} from {}", i.address(), p.harness.name)
-                        }
-                        Adoption::Relinked(note) => println!(
-                            "relinked {} in {} to the source copy; {note}",
-                            i.address(),
-                            p.harness.name
-                        ),
-                        _ => println!(
-                            "linked (already identical) {} from {}",
-                            i.address(),
-                            p.harness.name
-                        ),
+                        Adoption::Adopted => said.push((
+                            Token::Ok,
+                            format!("adopted {} from {}", i.address(), p.harness.name),
+                        )),
+                        Adoption::Relinked(note) => said.push((
+                            Token::Ok,
+                            format!(
+                                "relinked {} in {} to the source copy; {note}",
+                                i.address(),
+                                p.harness.name
+                            ),
+                        )),
+                        _ => said.push((
+                            Token::Ok,
+                            format!(
+                                "linked (already identical) {} from {}",
+                                i.address(),
+                                p.harness.name
+                            ),
+                        )),
                     }
                 }
                 Adoption::Refused(reason) => {
                     refused += 1;
-                    println!("refused {} in {}: {reason}", i.address(), p.harness.name);
+                    said.push((
+                        Token::Attention,
+                        format!("refused {} in {}: {reason}", i.address(), p.harness.name),
+                    ));
                 }
             }
         }
     }
     if let (Some(w), false) = (&wanted, seen) {
         refused += 1;
-        println!("refused {w}: not found in {}", harness.unwrap_or_default());
+        said.push((
+            Token::Attention,
+            format!("refused {w}: not found in {}", harness.unwrap_or_default()),
+        ));
     }
-    let code = run_sync(ctx, &git, None)?;
+    let adopted = said.iter().filter(|(t, _)| *t == Token::Ok).count();
+    let (tone, verdict) = match (adopted, refused) {
+        (0, 0) => (Token::Info, "Nothing to adopt".to_string()),
+        (a, 0) => (Token::Ok, format!("Adopted {}", plural(a, "item"))),
+        (a, r) => (
+            Token::Attention,
+            format!("Adopted {} · refused {r}", plural(a, "item")),
+        ),
+    };
+    let lead = item_lines(ctx, tone, &verdict, &[], &said);
+    let code = run_sync_led(ctx, &git, None, &lead)?;
     Ok(if refused > 0 { EXIT_DRIFT } else { code })
 }
 
@@ -1526,7 +1640,11 @@ pub fn add_source(
         .as_ref()
         .map(|p| format!(" (folder {p})"))
         .unwrap_or_default();
-    if dry_or_write(dry_run, &format!("clone {repo}{folder} as source {name}")) {
+    if dry_or_write(
+        ctx,
+        dry_run,
+        &format!("clone {repo}{folder} as source {name}"),
+    ) {
         return Ok(0);
     }
     let _lock = Lock::acquire(&ctx.source)?;
@@ -1556,8 +1674,17 @@ pub fn add_source(
     let text = config::add_source(&ws.config_text, &source).map_err(CliError::usage)?;
     write_config(ctx, &text)?;
     commit(&git, ctx, &format!("colctl: add source {name}"))?;
-    println!("added source {name} at {}", vault::short(&pinned));
-    run_sync(ctx, &git, None)
+    let at = format!(
+        "{} at {}",
+        repo.trim_start_matches("https://").trim_end_matches(".git"),
+        vault::short(&pinned)
+    );
+    run_sync_led(
+        ctx,
+        &git,
+        None,
+        &lead(ctx, &format!("Added source {name}"), &[at]),
+    )
 }
 
 /// What `add source` clones: from a repo argument as before, or from a plugin id in the catalogs.
@@ -1697,10 +1824,10 @@ fn adopt_plugin_from_source(ctx: &Ctx, harness: &Harness, id: &str) -> Option<Ad
         )));
     }
     if found.rev.is_none() {
-        println!(
+        ctx.out.warn(&format!(
             "{id}: installed commit unknown; pinned to {}",
             vault::short(&pinned)
-        );
+        ));
     }
     let source = config::Source {
         name: name.clone(),

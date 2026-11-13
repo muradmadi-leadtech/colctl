@@ -362,3 +362,137 @@ fn ec6_07_long_paths_are_cut_in_the_middle() {
         assert!(console::measure_text_width(l) <= 80, "{l}");
     }
 }
+
+// ---------------------------------------------------------------- running commands (T3)
+
+fn two_profiles_with_plugins() -> Env {
+    let env = Env::new();
+    env.native();
+    env.kilo();
+    env.ok(&["init"]);
+    env.source_skill("alpha");
+    env.source_skill("beta");
+    let config = env.config().replace(
+        "enabled = []",
+        "enabled = [\"tool@anthropic-plugin-directory\"]",
+    );
+    env.write_config(&config);
+    env
+}
+
+#[test]
+fn ac6_12_outcomes_not_calls() {
+    let env = two_profiles_with_plugins();
+    let out = env.ok(&["sync"]);
+    let words = Env::words(&out);
+    assert!(out.starts_with("✓ Synced 2 profiles · 6 changes"), "{out}");
+    assert!(
+        words.contains("✓ claude linked skills alpha, beta · installed tool"),
+        "{out}"
+    );
+    assert!(!out.contains("claude plugin install"), "{out}");
+    let again = env.ok(&["sync"]);
+    assert!(
+        again.starts_with("✓ Everything was already in sync"),
+        "{again}"
+    );
+}
+
+#[test]
+fn ac6_13_informational_outcomes_do_not_contradict() {
+    let env = Env::new();
+    env.native();
+    env.codex();
+    env.ok(&["init"]);
+    let (_, url, _) = env.upstream("clonly", true, false, Some("m"));
+    let out = env.ok(&["add", "source", &url]);
+    assert!(out.starts_with("✓ Added source clonly"), "{out}");
+    let words = Env::words(&out);
+    assert!(
+        words.contains("· codex · clonly: the repo has no Codex packaging"),
+        "{out}"
+    );
+    assert!(!out.to_lowercase().contains("needs attention"), "{out}");
+    assert!(!out.contains("not in sync"), "{out}");
+}
+
+#[test]
+fn ac6_14_failures_say_what_failed_and_what_to_do() {
+    let env = two_profiles_with_plugins().var("FAKE_CLAUDE_FAIL", "install tool");
+    let (code, out, _) = env.code(&["sync"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.starts_with("✗ Synced 0 of 2 profiles · 2 failed"),
+        "{out}"
+    );
+    let words = Env::words(&out);
+    assert!(
+        words.contains(
+            "✗ install tool failed: claude plugin install tool@anthropic-plugin-directory exited 1"
+        ),
+        "{out}"
+    );
+    assert!(
+        words.contains("→ colctl sync retries · colctl sync -v shows each call"),
+        "{out}"
+    );
+}
+
+#[test]
+fn ac6_15_no_control_characters_when_piped() {
+    let env = two_profiles_with_plugins();
+    let (_, out, err) = env.code(&["sync"]);
+    for text in [&out, &err] {
+        assert!(!text.contains('\u{1b}') && !text.contains('\r'), "{text:?}");
+    }
+}
+
+#[test]
+fn ac6_16_verbose_and_quiet() {
+    let env = two_profiles_with_plugins();
+    let out = env.ok(&["sync", "-v"]);
+    assert!(
+        Env::words(&out).contains("✓ claude plugin install tool@anthropic-plugin-directory"),
+        "{out}"
+    );
+    assert!(
+        out.lines()
+            .any(|l| l.trim_end().ends_with('s') && l.contains("s") && l.contains("0.")),
+        "{out}"
+    );
+    env.source_skill("gamma");
+    let quiet = env.ok(&["sync", "-q"]);
+    assert_eq!(quiet.lines().count(), 1, "{quiet}");
+    assert!(
+        quiet.starts_with("✓ Synced 2 profiles · 2 changes"),
+        "{quiet}"
+    );
+    let status = env.ok(&["status", "-q"]);
+    assert_eq!(status.lines().count(), 1, "{status}");
+}
+
+#[test]
+fn ac6_17_commands_lead_with_their_result() {
+    let env = two_profiles_with_plugins();
+    env.ok(&["sync"]);
+    let skill = env.skill_dir(&env.home, "delta", "x");
+    let out = env.ok(&["add", "skill", skill.to_str().unwrap()]);
+    assert!(out.starts_with("✓ Added skill delta"), "{out}");
+    assert!(
+        Env::words(&out).contains("✓ claude linked skill delta"),
+        "{out}"
+    );
+    let out = env.ok(&["rm", "skill", "delta"]);
+    assert!(out.starts_with("✓ Removed skill delta"), "{out}");
+    let dry = env.ok(&["rm", "skill", "alpha", "--dry-run"]);
+    assert!(
+        dry.starts_with("· Would remove skill alpha, commit and sync"),
+        "{dry}"
+    );
+    let plan = env.ok(&["sync", "--dry-run"]);
+    assert!(plan.starts_with("✓ Nothing to change"), "{plan}");
+    env.skill_dir(&env.home.join(".claude/skills"), "mine", "x");
+    let out = env.ok(&["adopt", "claude", "skills/mine"]);
+    assert!(out.starts_with("✓ Adopted 1 item"), "{out}");
+    assert!(out.contains("✓ adopted skills/mine from claude"), "{out}");
+}
