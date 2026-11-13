@@ -40,6 +40,79 @@ fn hook_text(h: &repackage::KeptHook) -> String {
     }
 }
 
+/// What a converted source's held commit means for Codex (AC7-15, AC7-16).
+pub(super) enum ConversionChange {
+    /// The commit packages for Codex itself; the conversion will stop.
+    Native,
+    /// The package that commit gives, and what changes against the installed one.
+    Package {
+        review: crate::review::Review,
+        package: Box<Package>,
+    },
+}
+
+/// Builds the Codex package of `rev` for a converted source, from a throwaway shared clone (the
+/// source's clone isn't touched), and compares it with the installed package.
+pub(super) fn change_at(
+    ctx: &Ctx,
+    git: &Git,
+    s: &config::Source,
+    rev: &str,
+    with_diff: bool,
+) -> Result<ConversionChange, String> {
+    let err = |e: anyhow::Error| format!("{e:#}");
+    let clone = plugins_dir(ctx).join(&s.name);
+    let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let at = tmp.path().join("at");
+    let at_str = at.to_string_lossy().into_owned();
+    let clone_str = clone.to_string_lossy().into_owned();
+    git.run(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "--shared",
+            "--no-checkout",
+            &clone_str,
+            &at_str,
+        ],
+    )
+    .map_err(err)?;
+    git.run(&at, &["checkout", "-q", "--detach", rev])
+        .map_err(err)?;
+    let p = packaging::inspect_with(
+        false,
+        &at,
+        &tmp.path().join("manifests"),
+        &s.name,
+        &s.plugin,
+        s.path.as_deref(),
+    );
+    if matches!(p.codex, packaging::ToolPackaging::Supported(_)) {
+        return Ok(ConversionChange::Native);
+    }
+    let folder = packaging::claude_folder(&at, &s.plugin, s.path.as_deref()).ok_or_else(|| {
+        format!(
+            "{} has no Claude packaging to convert at {}",
+            s.name,
+            vault::short(rev)
+        )
+    })?;
+    let package = repackage::build(&folder, &s.plugin)?;
+    let built = tmp.path().join("package");
+    repackage::write(&package, &built)?;
+    let installed = plugins_dir(ctx).join(super::CONVERTED).join(&s.name);
+    let empty = tmp.path().join("empty");
+    std::fs::create_dir_all(&empty).map_err(|e| e.to_string())?;
+    let installed = if installed.is_dir() { installed } else { empty };
+    let review = crate::review::copies(git, tmp.path(), &installed, &built, true, with_diff)?;
+    // The package's files are read from the throwaway clone; keep only what's been read.
+    Ok(ConversionChange::Package {
+        review,
+        package: Box::new(package.detached()),
+    })
+}
+
 /// The rows that sum a package up: what it carries, what Codex never runs, what isn't carried over.
 pub(super) fn summary(pkg: &Package) -> Vec<(&'static str, String)> {
     let mut carries = super::plural(pkg.skills.len(), "skill");

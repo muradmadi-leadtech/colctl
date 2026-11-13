@@ -464,6 +464,8 @@ pub(super) struct View {
     pub warning: Option<String>,
     /// A held conversion's package, rebuilt from the clone (cycle 7).
     pub package: Option<crate::repackage::Package>,
+    /// For an update of a converted source: what it means for its Codex package (cycle 7).
+    pub conversion: Option<super::convert::ConversionChange>,
 }
 
 /// The short name shown for a key: the source name, or the key itself for skills and agents.
@@ -559,6 +561,7 @@ pub(super) fn inspect(
         error: None,
         warning: None,
         package: None,
+        conversion: None,
     };
     let result = match candidate {
         Candidate::Source(c) => {
@@ -579,7 +582,17 @@ pub(super) fn inspect(
                     "the held commit for {name} is missing; run colctl update {name}"
                 ))
             } else {
-                review::commits(git, &vault.path(&name), &c.from, &c.to, with_diff)
+                let r = review::commits(git, &vault.path(&name), &c.from, &c.to, with_diff);
+                if let (Ok(_), Some(s)) = (
+                    &r,
+                    declared.filter(|s| s.convert.contains(&crate::tool::Tool::Codex)),
+                ) {
+                    match super::convert::change_at(ctx, git, s, &c.to, with_diff) {
+                        Ok(change) => view.conversion = Some(change),
+                        Err(e) => view.warning = Some(format!("{name}'s Codex package: {e}")),
+                    }
+                }
+                r
             }
         }
         Candidate::Skill(c) | Candidate::Agent(c) => {
@@ -886,6 +899,48 @@ fn detail_lines(ctx: &Ctx, v: &View) -> Vec<String> {
             .collect();
         lines.extend(render::table(caps, 2, &cells, 1));
     }
+    match &v.conversion {
+        Some(super::convert::ConversionChange::Native) => {
+            section(&mut lines, "Codex package");
+            lines.push(format!(
+                "  From this version {} packages for Codex itself; colctl's conversion will no longer be used",
+                escape(&v.name)
+            ));
+        }
+        Some(super::convert::ConversionChange::Package {
+            review: cr,
+            package,
+        }) => {
+            let flagged = flagged_files(cr);
+            section(
+                &mut lines,
+                &format!(
+                    "Codex package ({}, {})",
+                    plural(cr.files.len(), "file changes", "files change"),
+                    if flagged == 0 {
+                        "no flags".to_string()
+                    } else {
+                        plural(flagged, "file flagged", "files flagged")
+                    }
+                ),
+            );
+            lines.extend(super::convert::summary_lines(
+                ctx,
+                &super::convert::summary(package),
+            ));
+            for (path, what) in flag_rows(cr) {
+                lines.push(format!(
+                    "  {}  {}",
+                    crate::ui::style::paint(&escape(&path), Token::Name, c),
+                    crate::ui::style::paint(&what, Token::Attention, c)
+                ));
+            }
+            for f in &cr.files {
+                lines.push(format!("  {}  {}", f.status.letter(), escape(&f.path)));
+            }
+        }
+        None => {}
+    }
     section(&mut lines, &format!("Files ({})", r.files.len()));
     for f in &r.files {
         let extra = match (&f.symlink, f.executable) {
@@ -973,6 +1028,24 @@ pub(super) fn view_json(v: &View, full: bool) -> Value {
     if let Some(diff) = r.and_then(|r| r.diff.clone()) {
         out["diff"] = json!(diff);
     }
+    match &v.conversion {
+        Some(super::convert::ConversionChange::Native) => {
+            out["conversion"] = json!({"native": true});
+        }
+        Some(super::convert::ConversionChange::Package {
+            review: cr,
+            package,
+        }) => {
+            let mut conv = json!({"native": false, "files": cr.files, "flags": cr.flags});
+            if let (Value::Object(o), Value::Object(more)) =
+                (&mut conv, super::convert::package_json(package))
+            {
+                o.extend(more);
+            }
+            out["conversion"] = conv;
+        }
+        None => {}
+    }
     if let (Some(pkg), Value::Object(o)) = (&v.package, &mut out)
         && let Value::Object(more) = super::convert::package_json(pkg)
     {
@@ -997,6 +1070,7 @@ pub(super) fn held_views(ctx: &Ctx, ws: &Workspace, git: Option<&Git>) -> Vec<Vi
                 error: None,
                 warning: None,
                 package: None,
+                conversion: None,
             },
         })
         .collect()
@@ -1233,8 +1307,17 @@ fn approve_one(
             )
             .map_err(commit_err)?;
             st.quarantine.remove(key);
+            let hooks = matches!(
+                &view.conversion,
+                Some(super::convert::ConversionChange::Package { package, .. }) if !package.hooks.is_empty()
+            );
+            let trust = if hooks {
+                "; Codex asks you to trust its hooks before they run: open Codex and use /hooks"
+            } else {
+                ""
+            };
             Ok(format!(
-                "approved {name}: {} → {}",
+                "approved {name}: {} → {}{trust}",
                 vault::short(&c.from),
                 vault::short(&c.to)
             ))

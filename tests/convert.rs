@@ -586,3 +586,122 @@ fn ec7_20_a_different_conversion_reinstalls_once() {
     env.ok(&["sync"]);
     assert_eq!(env.codex_log().len(), calls);
 }
+
+// ---------------------------------------------------------------- updates (T6)
+
+/// A new upstream commit for qdrant: a skill and a hook.
+fn new_version(env: &Env, repo: &Path) -> String {
+    write(&repo.join("skills/new/SKILL.md"), "---\nname: new\n---\n");
+    write(
+        &repo.join("hooks/hooks.json"),
+        r#"{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo hi"}]}]}}"#,
+    );
+    let head = env.upstream_commit(repo, "v2");
+    env.ok(&["update"]);
+    head
+}
+
+#[test]
+fn ac7_16_review_shows_what_changes_in_the_codex_package() {
+    let env = machine();
+    let repo = converted(&env);
+    new_version(&env, &repo);
+    let out = env.ok(&["review", "qdrant", "--color", "never"]);
+    let words = Env::words(&out);
+    assert!(words.contains("Codex package"), "{out}");
+    assert!(words.contains("A skills/new/SKILL.md"), "{out}");
+    assert!(words.contains("A hooks/hooks.json"), "{out}");
+    assert!(
+        words.contains("Carries 3 skills · 1 hook (SessionStart)"),
+        "{out}"
+    );
+    let v: Value = serde_json::from_str(&env.ok(&["review", "qdrant", "--json"])).unwrap();
+    let conv = &v["candidates"][0]["conversion"];
+    let files: Vec<&str> = conv["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert!(files.contains(&"skills/new/SKILL.md"), "{conv}");
+    assert!(
+        conv["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "hook"),
+        "{conv}"
+    );
+    assert_eq!(conv["skills"], json!(["edge", "new", "scaling"]));
+    // The clone is untouched by building the review.
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(env.source.join("plugins/qdrant"))
+        .args(["status", "--porcelain"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&status.stdout).trim().is_empty());
+}
+
+#[test]
+fn ac7_16_approve_installs_both() {
+    let env = machine();
+    let repo = converted(&env);
+    let head = new_version(&env, &repo);
+    let out = env.ok(&["approve", "qdrant"]);
+    assert!(out.contains("/hooks"), "the new hook needs trusting: {out}");
+    assert!(
+        env.source
+            .join("plugins/.converted/qdrant/skills/new/SKILL.md")
+            .is_file()
+    );
+    let st = state(&env);
+    let rec = st["harnesses"]["codex"]["sources"]["qdrant"]["rev"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(rec.starts_with(&format!("{head}+")), "{rec}");
+    assert_eq!(
+        st["harnesses"]["claude"]["sources"]["qdrant"]["rev"],
+        json!(head)
+    );
+    env.ok(&["status"]);
+}
+
+#[test]
+fn ac7_16_reject_keeps_both() {
+    let env = machine();
+    let repo = converted(&env);
+    new_version(&env, &repo);
+    let config = env.config();
+    env.ok(&["reject", "qdrant"]);
+    env.ok(&["sync"]);
+    assert_eq!(env.config(), config);
+    assert!(
+        !env.source
+            .join("plugins/.converted/qdrant/skills/new")
+            .exists()
+    );
+    env.ok(&["status"]);
+}
+
+#[test]
+fn ac7_15_review_says_when_the_repo_starts_packaging_for_codex() {
+    let env = machine();
+    let repo = converted(&env);
+    write(
+        &repo.join(".codex-plugin/plugin.json"),
+        &json!({"name": "qdrant"}).to_string(),
+    );
+    env.upstream_commit(&repo, "v2");
+    env.ok(&["update"]);
+    let out = env.ok(&["review", "qdrant", "--color", "never"]);
+    assert!(
+        Env::words(&out).contains(
+            "From this version qdrant packages for Codex itself; colctl's conversion will no longer be used"
+        ),
+        "{out}"
+    );
+    let v: Value = serde_json::from_str(&env.ok(&["review", "qdrant", "--json"])).unwrap();
+    assert_eq!(v["candidates"][0]["conversion"]["native"], true);
+}
