@@ -4,8 +4,8 @@ expression: "normalise(&env, &text)"
 ---
 exit 0
 --- stdout
-NAME          TOOL    SOU…  PLUGINS  PROFILES
-official      claude  git…  1        claude
-superpowers…  claude  ~/.…  1        claude, kil…  ✓ managed
-superpowers…  codex   ~/.…  1        codex         ✓ managed
+NAME        TOOL    SOURCE    PLUGINS  PROFILES
+official    claude  github:…  1        claude
+superpowe…  claude  ~/.colc…  1        claude, k…  ✓ managed
+superpowe…  codex   ~/.colc…  1        codex       ✓ managed
 --- stderr

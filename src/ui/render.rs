@@ -133,8 +133,8 @@ impl Cell {
 }
 
 /// An aligned table (AC6-05): columns sized to their widest cell, two spaces apart, `indent` spaces in.
-/// Column `flex` (the description, usually) is cut so a row never exceeds the width; other columns are
-/// only capped (at two fifths of the width) when cutting `flex` isn't enough. The last column is never padded.
+/// Column `flex` (the description, usually) is cut first so a row never exceeds the width; when that isn't
+/// enough, the widest other column is narrowed, so one long id doesn't cut every id. The last column is never padded.
 pub fn table(caps: &Caps, indent: usize, rows: &[Vec<Cell>], flex: usize) -> Vec<String> {
     let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
     let natural: Vec<usize> = (0..cols)
@@ -155,31 +155,25 @@ pub fn table(caps: &Caps, indent: usize, rows: &[Vec<Cell>], flex: usize) -> Vec
                 .map(|(_, w)| w + 2)
                 .sum::<usize>()
     };
-    // The flexible column shrinks first (to no less than 8); other columns are capped only when
-    // that isn't enough, so ids and names are cut last.
+    // The flexible column shrinks first (to no less than 8); then the widest of the other columns is
+    // narrowed until the row fits, so short ids and names are never cut because of one long one.
     const FLEX_MIN: usize = 8;
-    if others(&widths) + FLEX_MIN.min(natural.get(flex).copied().unwrap_or(0)) > caps.width {
-        let cap = (caps.width * 2 / 5).max(8);
-        for (c, w) in widths.iter_mut().enumerate() {
-            if c != flex {
-                *w = (*w).min(cap);
-            }
-        }
+    if flex < cols && others(&widths) + widths[flex] > caps.width {
+        let room = caps.width.saturating_sub(others(&widths));
+        widths[flex] = room
+            .max(FLEX_MIN.min(natural[flex]))
+            .max(4.min(natural[flex]));
     }
-    if flex < cols {
-        widths[flex] = widths[flex].min(caps.width.saturating_sub(others(&widths)).max(4));
-    }
-    // Last resort for very narrow terminals: narrow the widest column until the row fits.
     while others(&widths) + widths.get(flex).copied().unwrap_or(0) > caps.width {
-        let Some((c, w)) = widths
+        let Some(c) = widths
             .iter()
             .enumerate()
-            .filter(|(_, w)| **w > 4)
+            .filter(|(c, w)| **w > 4 && (*c != flex || widths.len() == 1))
             .max_by_key(|(_, w)| **w)
+            .map(|(c, _)| c)
         else {
             break;
         };
-        let _ = w;
         widths[c] -= 1;
     }
     rows.iter()
@@ -340,6 +334,31 @@ mod tests {
             0,
         );
         assert!(width(&lines[0]) <= 40);
+    }
+
+    #[test]
+    fn one_long_id_does_not_cut_the_short_ones() {
+        let rows = vec![
+            vec![
+                Cell::plain("databricks@claude-plugins-official"),
+                Cell::plain("databricks"),
+                Cell::plain("Databricks skills"),
+            ],
+            vec![
+                Cell::plain(
+                    "oracle-ai-data-platform-workbench-databricks-migrator@claude-plugins-official",
+                ),
+                Cell::plain("oracle-samples"),
+                Cell::plain("Drive the migration"),
+            ],
+        ];
+        let lines = table(&at(80), 0, &rows, 2);
+        assert!(
+            lines[0].starts_with("databricks@claude-plugins-official "),
+            "{lines:?}"
+        );
+        assert!(lines[1].contains('…'), "{lines:?}");
+        assert!(lines.iter().all(|l| width(l) <= 80));
     }
 
     #[test]

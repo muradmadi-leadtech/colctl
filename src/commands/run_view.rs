@@ -420,8 +420,11 @@ fn profile_block(
                     .to_string(),
             );
         } else {
-            out.push(format!("  {mark}  {name}"));
-            for part in &stacked[i] {
+            // The first outcome on the profile's line, the rest aligned under it.
+            let mut parts = stacked[i].iter();
+            let first = parts.next().cloned().unwrap_or_default();
+            out.push(format!("  {mark}  {name}{pad}  {first}"));
+            for part in parts {
                 out.push(format!("{}{part}", " ".repeat(indent)));
             }
         }
