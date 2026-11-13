@@ -263,9 +263,47 @@ fn ec7_09_links_leaving_the_folder_are_not_followed() {
 }
 
 #[test]
+fn ac7_02_without_hooks_only_what_codex_reads_is_carried() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = qdrant(tmp.path());
+    write(&src.join("LICENSE"), "MIT");
+    write(&src.join("scripts/eval.sh"), "#!/bin/sh");
+    write(&src.join(".github/workflows/ci.yml"), "on: push");
+    let pkg = repackage::build(&src, "x").unwrap();
+    assert_eq!(
+        pkg.files(),
+        vec![
+            ".codex-plugin/plugin.json",
+            "LICENSE",
+            "README.md",
+            "skills/edge/SKILL.md",
+            "skills/scaling/SKILL.md",
+            "skills/scaling/refs/sizing.md",
+        ]
+    );
+    // With a hook kept, the scripts it may run come along: the whole folder.
+    write(
+        &src.join("hooks/hooks.json"),
+        r#"{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "sh scripts/eval.sh"}]}]}}"#,
+    );
+    let pkg = repackage::build(&src, "x").unwrap();
+    assert!(
+        pkg.files().contains(&"scripts/eval.sh"),
+        "{:?}",
+        pkg.files()
+    );
+    assert!(pkg.files().contains(&".github/workflows/ci.yml"));
+}
+
+#[test]
 fn ec7_17_bytes_and_executable_bits_are_kept() {
     let tmp = tempfile::tempdir().unwrap();
     let src = qdrant(tmp.path());
+    // A hook, so the whole folder is carried.
+    write(
+        &src.join("hooks/hooks.json"),
+        r#"{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "bin/run.sh"}]}]}}"#,
+    );
     fs::write(src.join("blob.bin"), [0u8, 159, 146, 150, 255]).unwrap();
     write(&src.join("bin/run.sh"), "#!/bin/sh\n");
     fs::set_permissions(src.join("bin/run.sh"), fs::Permissions::from_mode(0o775)).unwrap();
