@@ -288,3 +288,5 @@ tests themselves before pushing GREEN. The PR title also failed its check: `fix(
 - [ ] `colctl status` in your usual terminal, and in a narrow one
 - [ ] `colctl`, `colctl help`, `colctl help sync`
 - [ ] Decide the disposition
+
+**Disposition: Accept** (owner, 2026-11-13).
