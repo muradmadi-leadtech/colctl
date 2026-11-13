@@ -50,3 +50,9 @@ IDs are `EC6-NN`; each needs a test whose name contains `ec6_NN`.
 |---|---|---|
 | EC6-21 | A repo whose Claude manifest points inside the repo but whose Codex manifest points to GitHub (or the reverse) | Decided per tool: the wrapper only where the repo's own manifest points elsewhere |
 | EC6-22 | The wrapper's id is already installed by hand from another marketplace | Treated like any foreign install of that id: left alone, reported |
+
+## Revise
+
+| ID | Case | Expected |
+|---|---|---|
+| EC6-23 | `colctl` with no command, before `colctl init` (no ~/.colctl) | The welcome help, exit 0; nothing is created |

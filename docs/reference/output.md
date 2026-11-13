@@ -16,6 +16,13 @@ exit codes follow semver.
 
 They work before or after the command. `-q` with `-v` is a usage error.
 
+## Help
+
+`colctl` on its own, `colctl help`, `colctl -h` and `colctl --help` show the same page: what colctl does, **Start here**
+(`init`, `status`, `sync`), every command grouped by task, the global options and where to learn more. Nothing is read
+or created, so it works before `colctl init`. `colctl help <command>` is `colctl <command> --help`: its options,
+wrapped to the terminal, and examples. In a terminal headings are bold and commands cyan.
+
 ## What the terminal decides
 
 | | Rule |

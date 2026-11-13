@@ -267,3 +267,19 @@ Each command's `--help` ends with an `Examples:` section of 2–4 real invocatio
 ## Text stability
 
 Human-readable text may change in any release; scripts should use `--json` and exit codes, which follow semver.
+
+## Revise: status profile lines and help
+
+Profile line: `<mark>  <name>  <path>  <contents>`, where contents lists kinds in a fixed order with counts:
+`<n> skills · <n> agents · <n> plugins · CLAUDE.md|AGENTS.md` (kinds with none are left out), then for a Codex profile
+when an agents harness is registered `skills via ~/.agents`, then problem states (`1 missing`), then informational
+(`1 not packaged`, `1 unreviewed`). Plugins count list plugins and source plugins together; marketplaces aren't
+counted. An empty profile shows `nothing yet`.
+
+Path column: shown in full when `indent + name + path + contents` fits the width; otherwise every path is cut with the
+same (head, tail) parts kept, chosen as the most that lets all of them fit.
+
+Welcome help (`colctl`, `colctl --help`, `colctl help`, `-h`): one description column for the whole page; the first
+group's names carry `colctl ` so they can be copied; the others are task groups (Change what you have, Updates and
+review, Find plugins, Other); then Options, then `More:` and `Docs:` lines. Descriptions wrap under their column.
+`colctl help <command>` re-runs as `colctl <command> --help`, styled (bold headings, cyan literals) and wrapped by clap.

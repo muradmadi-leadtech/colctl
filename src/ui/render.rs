@@ -40,6 +40,37 @@ pub fn cut_middle(path: &str, max: usize) -> String {
     cut(path, max)
 }
 
+/// Shortens paths that share a column the same way (AC6-35): each keeps its first `head` and last
+/// `tail` parts, with one (head, tail) choice for all of them, the most that lets every path fit.
+/// Paths are left whole when they all fit.
+pub fn cut_alike(paths: &[String], max: usize) -> Vec<String> {
+    if paths.iter().all(|p| width(p) <= max) {
+        return paths.to_vec();
+    }
+    let split: Vec<Vec<&str>> = paths.iter().map(|p| p.split('/').collect()).collect();
+    let most = split.iter().map(Vec::len).max().unwrap_or(0);
+    let shape = |head: usize, tail: usize, parts: &[&str]| -> String {
+        if parts.len() <= head + tail {
+            parts.join("/")
+        } else {
+            format!(
+                "{}/…/{}",
+                parts[..head].join("/"),
+                parts[parts.len() - tail..].join("/")
+            )
+        }
+    };
+    for total in (2..most).rev() {
+        for tail in (1..total).rev() {
+            let cut: Vec<String> = split.iter().map(|p| shape(total - tail, tail, p)).collect();
+            if cut.iter().all(|c| width(c) <= max) {
+                return cut;
+            }
+        }
+    }
+    paths.iter().map(|p| cut_middle(p, max)).collect()
+}
+
 /// Word-wraps prose to `max` columns; continuation lines start with `indent` spaces. A word longer than
 /// a line is cut with "…" so no line ever exceeds `max`.
 pub fn wrap(text: &str, max: usize, first_prefix: usize, indent: usize) -> Vec<String> {
@@ -84,8 +115,15 @@ pub fn wrap(text: &str, max: usize, first_prefix: usize, indent: usize) -> Vec<S
 /// A verdict: the first line of a result (`✓ All 5 profiles in sync · 3 sources`).
 pub fn verdict(caps: &Caps, tone: Token, text: &str, facts: &[String]) -> String {
     let mut line = format!("{} {}", mark(tone, caps.color_out), text);
+    let mut used = 2 + width(text);
+    // Facts that don't fit are left out: they're context, not the verdict.
     for f in facts {
-        line.push_str(&paint(&format!(" · {f}"), Token::Dim, caps.color_out));
+        let fact = format!(" · {f}");
+        if used + width(&fact) > caps.width {
+            break;
+        }
+        used += width(&fact);
+        line.push_str(&paint(&fact, Token::Dim, caps.color_out));
     }
     line
 }
@@ -253,6 +291,30 @@ pub fn warning(caps: &Caps, text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cut_alike_keeps_the_same_parts_of_every_path() {
+        let paths = vec![
+            "~/.claude".to_string(),
+            "~/Library/Application Support/kilo/profiles/claude".to_string(),
+            "~/Library/Application Support/kilo/profiles/codex".to_string(),
+        ];
+        assert_eq!(cut_alike(&paths, 60), paths);
+        assert_eq!(
+            cut_alike(&paths, 30),
+            vec![
+                "~/.claude",
+                "~/…/kilo/profiles/claude",
+                "~/…/kilo/profiles/codex"
+            ]
+        );
+        assert_eq!(
+            cut_alike(&paths, 20),
+            vec!["~/.claude", "~/…/profiles/claude", "~/…/profiles/codex"]
+        );
+        // Too narrow for any two parts: each is cut on its own.
+        assert!(cut_alike(&paths, 6).iter().all(|p| width(p) <= 6));
+    }
 
     fn at(width: usize) -> Caps {
         Caps {

@@ -254,3 +254,39 @@ Given a source that's still at another commit than its pin right after its updat
 Then sync reports it as failed ("still at <commit> after updating; …") with a hint, instead of reporting success, and
   the exit code is 1
 ```
+
+## Revise (after the owner's first evaluation)
+
+The owner's `colctl status` showed `claude … 17 ok` next to `codex … 2 ok · 1 unsupported`, which reads like Codex is
+missing most things. It isn't: Codex reads skills from `~/.agents`, listed separately; counting states hid that. Two
+Library paths in the same column were shortened differently (`~/…/kilo-proxy-headless/profiles/claude` vs
+`~/Library/…/kilo-proxy-headless/profiles/codex`). And the help reads like a reference for developers, not a welcome.
+
+**AC6-34 Profile lines say what each profile has**
+```gherkin
+Given a Claude profile with 14 skills and 3 source plugins, and a Codex profile with 2 source plugins, one source not
+  packaged for Codex, and an agents folder with 14 skills
+When I run colctl status
+Then the Claude line reads "14 skills · 3 plugins", the Codex line "2 plugins · skills via ~/.agents · 1 not packaged",
+  and the agents line "14 skills"
+And instructions show as CLAUDE.md or AGENTS.md, and problem states are added with their counts ("1 missing")
+```
+
+**AC6-35 Paths in a column are shortened alike, and only when needed**
+```gherkin
+Given profile paths of different lengths in one status column
+When they fit in the width left after the other columns
+Then they're shown in full
+And when they don't, every path is shortened the same way (the same leading and trailing parts kept), so similar paths
+  look similar
+```
+
+**AC6-36 Help for someone arriving**
+```gherkin
+When I run colctl --help, colctl help, or colctl with no command
+Then the help starts with one sentence on what colctl does, then "Start here" with init, status and sync, then the
+  command groups separated by blank lines with aligned descriptions, then the global options in short, then where to
+  learn more (colctl <command> --help, the docs)
+And in a terminal headings are bold and commands cyan; piped it's plain text that fits the width
+And each command's --help uses the same styles
+```
