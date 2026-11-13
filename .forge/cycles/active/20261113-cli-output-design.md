@@ -30,16 +30,16 @@ Design how colctl presents information and interacts, as one system applied to e
 
 ---
 
-<!-- FORGE_PHASE:Orchestrate:Active -->
+<!-- FORGE_PHASE:Orchestrate:Complete -->
 ## Phase 2: Orchestrate
 
 **Purpose**: Break the work into session-sized pieces.
 
 ### Required Outputs
-- [ ] Container architecture (C4 L2) designed
-- [ ] Component architecture (C4 L3) designed
-- [ ] Dependency map created
-- [ ] Tasks sized for single AI sessions
+- [x] Container architecture (C4 L2) designed
+- [x] Component architecture (C4 L3) designed
+- [x] Dependency map created
+- [x] Tasks sized for single AI sessions
 
 ### Tasks
 
@@ -48,7 +48,7 @@ Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 
 ---
 
-<!-- FORGE_PHASE:Refine:Pending -->
+<!-- FORGE_PHASE:Refine:Active -->
 ## Phase 3: Refine
 
 **Purpose**: Define exactly what "done" looks like.
@@ -62,6 +62,8 @@ Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 **CRITICAL**: No code in this phase - specifications only.
 
 ### Specifications
+
+`docs/cli-output-design/interfaces.md` (flags, Caps, tokens, components, per-command layouts, interaction, help), `acceptance-criteria.md` (AC6-01–30), `edge-cases.md` (EC6-01–20). Constraints: `--json` and exit codes unchanged; no full-screen views; nothing asks without a terminal.
 
 <!-- Document specifications here -->
 

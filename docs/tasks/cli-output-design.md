@@ -23,3 +23,15 @@ flowchart LR
 ```
 
 T2–T5 all build on T1 and touch different commands, so they can go in any order.
+
+## Criteria per task (from Refine)
+
+| Task | Acceptance criteria | Edge cases |
+|---|---|---|
+| T1 | AC6-01 – 07 | EC6-01, 02, 03, 09, 16, 17, 18, 20 |
+| T2 | AC6-08 – 11 | EC6-07, 08, 10, 11 |
+| T3 | AC6-12 – 17 | EC6-04, 19 |
+| T4 | AC6-18 – 20 | EC6-05, 06, 12, 13, 14, 15 |
+| T5 | AC6-21 – 24 | — |
+| T6 | AC6-25 – 27 | — |
+| T7 | AC6-28 – 30 | — |
