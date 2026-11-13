@@ -351,3 +351,236 @@ fn ec7_11_nothing_codex_can_use() {
     assert!(err.contains("cmds has nothing Codex can use"), "{err}");
     assert!(state(&env)["quarantine"].get("conversions/cmds").is_none());
 }
+
+// ---------------------------------------------------------------- sync and status (T5)
+
+/// qdrant, converted and approved.
+fn converted(env: &Env) -> PathBuf {
+    let repo = claude_only(env, "qdrant", &[]);
+    env.ok(&["convert", "qdrant"]);
+    env.ok(&["approve", "qdrant"]);
+    repo
+}
+
+fn codex_item(env: &Env, name: &str) -> Value {
+    let v = env.status_json();
+    v["harnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["name"] == "codex")
+        .unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["kind"] == "source" && i["name"] == name)
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+#[test]
+fn ac7_09_approve_installs_it_in_codex() {
+    let env = machine();
+    converted(&env);
+    let codex = env.home.join(".codex");
+    assert_eq!(env.codex_installed(&codex), vec!["qdrant@colctl-qdrant"]);
+    assert_eq!(
+        env.installed(&env.home.join(".claude")),
+        vec!["qdrant@qdrant"]
+    );
+    let package = env.source.join("plugins/.converted/qdrant");
+    assert!(package.join(".codex-plugin/plugin.json").is_file());
+    assert!(package.join("skills/edge/SKILL.md").is_file());
+    let (code, out, _) = env.code(&["status", "--color", "never"]);
+    assert_eq!(code, 0, "{out}");
+    let line = out.lines().find(|l| l.contains(" codex ")).unwrap();
+    assert!(Env::words(line).ends_with("1 plugin"), "{out}");
+    assert!(!out.contains("not packaged"), "{out}");
+    let item = codex_item(&env, "qdrant");
+    assert_eq!(item["state"], "ok", "{item}");
+    assert_eq!(item["converted"], true, "{item}");
+    let v = env.status_json();
+    assert_eq!(v["sources"][0]["convert"], json!(["codex"]));
+    // Converged: nothing more to do.
+    let calls = env.codex_log().len();
+    env.ok(&["sync"]);
+    assert_eq!(env.codex_log().len(), calls);
+}
+
+#[test]
+fn ac7_09_approving_hooks_says_codex_asks_to_trust_them() {
+    let env = machine();
+    hooks_fixture(&env);
+    env.ok(&["convert", "dbx"]);
+    let out = env.ok(&["approve", "dbx"]);
+    assert!(
+        Env::words(&out).contains(
+            "Codex asks you to trust its hooks before they run: open Codex and use /hooks"
+        ),
+        "{out}"
+    );
+    assert!(
+        env.source
+            .join("plugins/.converted/dbx/hooks/hooks.json")
+            .is_file()
+    );
+}
+
+#[test]
+fn ac7_11_undo() {
+    let env = machine();
+    converted(&env);
+    let before = env.config();
+    let out = env.ok(&["convert", "--undo", "qdrant", "--dry-run"]);
+    assert!(out.contains("Would stop converting qdrant"), "{out}");
+    assert_eq!(env.config(), before);
+    let out = env.ok(&["convert", "--undo", "qdrant"]);
+    assert!(out.contains("Stopped converting qdrant"), "{out}");
+    assert!(env.codex_installed(&env.home.join(".codex")).is_empty());
+    assert!(!env.source.join("plugins/.converted/qdrant").exists());
+    assert!(!env.config().contains("convert"), "{}", env.config());
+    assert!(
+        !env.source
+            .join("plugins/.manifests/qdrant/.agents/plugins/marketplace.json")
+            .exists()
+            || !fs::read_to_string(
+                env.source
+                    .join("plugins/.manifests/qdrant/.agents/plugins/marketplace.json")
+            )
+            .unwrap()
+            .contains("plugin-codex")
+    );
+    assert_eq!(codex_item(&env, "qdrant")["state"], "unsupported");
+    let v: Value =
+        serde_json::from_str(&env.ok(&["convert", "--undo", "qdrant", "--json"])).unwrap();
+    assert_eq!(v["undone"], false, "{v}");
+}
+
+#[test]
+fn ac7_13_status_points_at_convert() {
+    let env = machine();
+    claude_only(&env, "qdrant", &[]);
+    let (code, out, _) = env.code(&["status", "--all", "--color", "never"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        Env::words(&out).contains("unsupported source qdrant → colctl convert qdrant"),
+        "{out}"
+    );
+}
+
+#[test]
+fn ac7_14_sync_keeps_the_package_as_approved() {
+    let env = machine();
+    converted(&env);
+    let package = env.source.join("plugins/.converted/qdrant");
+    for damage in ["delete", "edit"] {
+        if damage == "delete" {
+            fs::remove_dir_all(&package).unwrap();
+        } else {
+            fs::write(package.join("skills/edge/SKILL.md"), "tampered").unwrap();
+        }
+        let (code, out, _) = env.code(&["status"]);
+        assert_eq!(code, 1, "{damage}: {out}");
+        assert_eq!(codex_item(&env, "qdrant")["state"], "outdated", "{damage}");
+        env.ok(&["sync"]);
+        assert_eq!(
+            fs::read_to_string(package.join("skills/edge/SKILL.md")).unwrap(),
+            "---\nname: edge\n---\n",
+            "{damage}"
+        );
+        env.ok(&["status"]);
+    }
+}
+
+#[test]
+fn ac7_15_native_packaging_wins() {
+    let env = machine();
+    let repo = converted(&env);
+    write(
+        &repo.join(".codex-plugin/plugin.json"),
+        &json!({"name": "qdrant"}).to_string(),
+    );
+    write(
+        &repo.join(".agents/plugins/marketplace.json"),
+        &json!({"name": "qdrant", "plugins": [{"name": "qdrant", "source": {"source": "local", "path": "./"}}]}).to_string(),
+    );
+    let head = env.upstream_commit(&repo, "v2");
+    let old = env.config();
+    let rev = old
+        .lines()
+        .find(|l| l.starts_with("rev = "))
+        .unwrap()
+        .to_string();
+    env.write_config(&old.replace(&rev, &format!("rev = \"{head}\"")));
+    let out = env.ok(&["sync"]);
+    assert!(
+        Env::words(&out).contains(
+            "qdrant now packages for Codex itself; colctl's conversion is no longer used"
+        ),
+        "{out}"
+    );
+    assert_eq!(
+        env.codex_installed(&env.home.join(".codex")),
+        vec!["qdrant@qdrant"]
+    );
+    assert!(!env.source.join("plugins/.converted/qdrant").exists());
+    assert!(!env.config().contains("convert"), "{}", env.config());
+    env.ok(&["status"]);
+}
+
+#[test]
+fn ec7_14_undo_when_not_converted() {
+    let env = machine();
+    claude_only(&env, "qdrant", &[]);
+    let out = env.ok(&["convert", "--undo", "qdrant"]);
+    assert!(out.contains("qdrant isn't converted"), "{out}");
+}
+
+#[test]
+fn ec7_15_undo_drops_a_held_conversion() {
+    let env = machine();
+    claude_only(&env, "qdrant", &[]);
+    env.ok(&["convert", "qdrant"]);
+    env.ok(&["convert", "--undo", "qdrant"]);
+    assert!(
+        state(&env)["quarantine"]
+            .get("conversions/qdrant")
+            .is_none()
+    );
+    assert!(
+        !env.source
+            .join(".state/quarantine/conversions/qdrant")
+            .exists()
+    );
+}
+
+#[test]
+fn ec7_16_removing_the_source_removes_its_conversion() {
+    let env = machine();
+    converted(&env);
+    env.ok(&["rm", "source", "qdrant", "-y"]);
+    assert!(env.codex_installed(&env.home.join(".codex")).is_empty());
+    assert!(!env.source.join("plugins/.converted/qdrant").exists());
+}
+
+#[test]
+fn ec7_20_a_different_conversion_reinstalls_once() {
+    let env = machine();
+    converted(&env);
+    // What a colctl that converted differently would have recorded.
+    let path = env.source.join(".state/state.json");
+    let text = fs::read_to_string(&path).unwrap();
+    let mut v: Value = serde_json::from_str(&text).unwrap();
+    let rec = &mut v["harnesses"]["codex"]["sources"]["qdrant"]["rev"];
+    let rev = rec.as_str().unwrap().to_string();
+    assert!(rev.contains('+'), "{rev}");
+    *rec = json!(format!("{}+000000000000", rev.split('+').next().unwrap()));
+    fs::write(&path, v.to_string()).unwrap();
+    assert_eq!(codex_item(&env, "qdrant")["state"], "outdated");
+    let calls = env.codex_log().len();
+    env.ok(&["sync"]);
+    assert!(env.codex_log().len() > calls);
+    let calls = env.codex_log().len();
+    env.ok(&["sync"]);
+    assert_eq!(env.codex_log().len(), calls);
+}
