@@ -147,7 +147,10 @@ fn ac2_06_adopt_a_codex_agents_md() {
     fs::remove_file(&kilo).unwrap();
     fs::write(&kilo, "different").unwrap();
     let out = env.expect(1, &["adopt", "kilo-codex", "AGENTS.md"]);
-    assert!(out.contains("already exists with different text"), "{out}");
+    assert!(
+        Env::words(&out).contains("already exists with different text"),
+        "{out}"
+    );
     assert_eq!(fs::read_to_string(&kilo).unwrap(), "different");
 }
 
@@ -162,7 +165,7 @@ fn ac2_10_foreign_codex_agent_toml_is_refused() {
     .unwrap();
     let out = env.expect(1, &["adopt", "codex", "agents/mine.toml"]);
     assert!(
-        out.contains(
+        Env::words(&out).contains(
             "Codex agents can't be converted back to .md; recreate it in ~/.colctl/agents"
         ),
         "{out}"
@@ -341,7 +344,7 @@ fn ac2_27_the_tool_re_links_over_colctl() {
     fs::write(origin.join("SKILL.md"), "v2").unwrap();
     let out = env.expect(1, &["adopt", "agents", "skills/twg-jira"]);
     assert!(
-        out.contains("origin has changes; run colctl refresh skills/twg-jira"),
+        Env::words(&out).contains("origin has changes; run colctl refresh skills/twg-jira"),
         "{out}"
     );
     assert_eq!(
@@ -367,13 +370,13 @@ fn ac2_28_what_adopt_still_refuses() {
     symlink("/elsewhere/AGENTS.md", env.home.join(".codex/AGENTS.md")).unwrap();
     let out = env.expect(1, &["adopt"]);
     assert!(
-        out.contains(
+        Env::words(&out).contains(
             "refused skills/dangling in agents: it links to /no/such/folder, which doesn't exist"
         ),
         "{out}"
     );
     assert!(
-        out.contains(
+        Env::words(&out).contains(
             "refused skills/not-a-folder in agents: it links to a file, not a skill folder"
         ),
         "{out}"

@@ -1,0 +1,11 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+NAME             TOOL    SOURCE                         PLUGINS  PROFILES
+official         claude  github:o/official              1        claude
+superpowers-dev  claude  ~/.colctl/plugins/superpowers  1        claude, kilo-claude  ✓ managed
+superpowers-dev  codex   ~/.colctl/plugins/superpowers  1        codex                ✓ managed
+--- stderr

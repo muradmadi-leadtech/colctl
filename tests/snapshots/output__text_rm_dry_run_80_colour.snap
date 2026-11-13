@@ -1,0 +1,8 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+[2m·[0m Would remove skill alpha, commit and sync
+--- stderr

@@ -101,6 +101,9 @@ fn ac_34_docs_exist_for_everything_shipped() {
         "docs/reference/connectors.md",
         "docs/how-to/find-and-add-a-plugin.md",
         "docs/explanation/catalogs.md",
+        // Cycle 6 (AC6-29)
+        "docs/reference/output.md",
+        "docs/explanation/how-colctl-talks.md",
     ];
     for page in pages {
         assert!(read(page).starts_with("# "), "{page} needs a title");
@@ -162,6 +165,7 @@ fn defined_ids() -> BTreeSet<String> {
         ("plugins-from-source", "AC3", "EC3"),
         ("quarantine", "AC4", "EC4"),
         ("discovery", "AC5", "EC5"),
+        ("cli-output-design", "AC6", "EC6"),
     ] {
         for (file, prefix, id) in [
             ("acceptance-criteria.md", format!("**{ac}-"), ac),
@@ -208,7 +212,8 @@ fn tested_ids() -> BTreeSet<String> {
             let parts: Vec<&str> = name.split('_').collect();
             for pair in parts.windows(2) {
                 if [
-                    "ac", "ec", "ac2", "ec2", "ac3", "ec3", "ac4", "ec4", "ac5", "ec5",
+                    "ac", "ec", "ac2", "ec2", "ac3", "ec3", "ac4", "ec4", "ac5", "ec5", "ac6",
+                    "ec6",
                 ]
                 .contains(&pair[0])
                     && pair[1].len() == 2
@@ -223,7 +228,7 @@ fn tested_ids() -> BTreeSet<String> {
 }
 
 #[test]
-fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_every_criterion_and_edge_case_has_a_named_test() {
+fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_ac6_30_every_criterion_and_edge_case_has_a_named_test() {
     let defined = defined_ids();
     for (prefix, count) in [
         ("AC-", 35),
@@ -236,6 +241,8 @@ fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_every_criterion_and_edge_case_has_a_named_t
         ("EC4-", 23),
         ("AC5-", 28),
         ("EC5-", 24),
+        ("AC6-", 33),
+        ("EC6-", 22),
     ] {
         assert_eq!(
             defined.iter().filter(|i| i.starts_with(prefix)).count(),
@@ -282,7 +289,7 @@ fn ac3_27_docs_cover_source_plugins() {
 }
 
 #[test]
-fn ac3_26_ac4_33_ac5_28_earlier_suites_are_still_complete() {
+fn ac3_26_ac4_33_ac5_28_ac6_30_earlier_suites_are_still_complete() {
     for (file, count) in [
         ("tests/cli.rs", 55),
         ("tests/codex.rs", 19),
@@ -290,6 +297,7 @@ fn ac3_26_ac4_33_ac5_28_earlier_suites_are_still_complete() {
         ("tests/sources.rs", 17),
         ("tests/source_commands.rs", 17),
         ("tests/quarantine.rs", 51),
+        ("tests/discovery.rs", 29),
     ] {
         let text = read(file);
         assert_eq!(text.matches("#[test]").count(), count, "{file}");
@@ -369,4 +377,28 @@ fn ac5_27_docs_cover_discovery() {
         );
     }
     assert!(read("README.md").contains("Discovery"));
+}
+
+#[test]
+fn ac6_29_docs_cover_the_output_design() {
+    let output = read("docs/reference/output.md");
+    for needle in [
+        "--color",
+        "NO_COLOR",
+        "CLICOLOR_FORCE",
+        "--no-pager",
+        "Needs attention",
+        "may change in any release",
+        "colctl completions",
+    ] {
+        assert!(
+            output.contains(needle),
+            "reference/output.md lacks {needle}"
+        );
+    }
+    assert!(read("docs/reference/status.md").contains("✓ All 5 profiles in sync"));
+    assert!(read("docs/reference/review.md").contains("Risk flags come first"));
+    assert!(read("docs/reference/sync.md").contains("✓ Synced 5 profiles"));
+    assert!(read("docs/reference/commands.md").contains("colctl completions"));
+    assert!(read("README.md").contains("Readable output"));
 }

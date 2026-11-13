@@ -1,0 +1,11 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+NAME          TOOL    SOU…  PLUGINS  PROFILES
+official      claude  git…  1        claude
+superpowers…  claude  ~/.…  1        claude, kil…  ✓ managed
+superpowers…  codex   ~/.…  1        codex         ✓ managed
+--- stderr

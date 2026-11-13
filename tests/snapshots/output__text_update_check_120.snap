@@ -1,0 +1,11 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 1
+--- stdout
+! 1 update available
+  ! superpowers: [SHORT] → [SHORT] (1 new commit) (held for review)
+
+→ colctl review superpowers
+--- stderr

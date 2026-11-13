@@ -566,7 +566,7 @@ fn ec3_19_a_list_plugin_without_a_known_source() {
         ],
     );
     assert!(
-        out.contains("not a foreign item (state: unreviewed)"),
+        Env::words(&out).contains("not a foreign item (state: unreviewed)"),
         "{out}"
     );
 }

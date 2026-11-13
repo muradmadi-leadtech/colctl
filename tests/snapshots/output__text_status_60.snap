@@ -1,0 +1,20 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 1
+--- stdout
+! 2 things need attention
+
+  !  claude       ~/.claude            1 ok · 1 missing
+  ✓  kilo-claude  ~/…/profiles/claude  2 ok
+  ✓  codex        ~/.codex             1 ok
+
+Needs attention
+  !  claude  skill   alpha        missing
+      → colctl sync
+  !  held    source  superpowers  [SHORT] → [SHORT]
+      → colctl review superpowers
+
+→ colctl status --all lists every item
+--- stderr

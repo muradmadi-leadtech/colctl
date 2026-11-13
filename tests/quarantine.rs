@@ -87,7 +87,7 @@ fn ac4_11_update_holds_instead_of_installing() {
     let before = untouched(&env);
     let out = env.ok(&["update"]);
     assert!(
-        out.contains(&format!(
+        Env::words(&out).contains(&format!(
             "superpowers: {} → {} (2 new commits), held for review; colctl review superpowers",
             &v1[..7],
             &v3[..7]
@@ -120,7 +120,10 @@ fn ac4_13_a_newer_commit_replaces_the_held_one() {
     env.ok(&["update"]);
     let v3 = env.upstream_commit(&repo, "v3");
     let out = env.ok(&["update"]);
-    assert!(out.contains(&format!("(replaces {})", &v2[..7])), "{out}");
+    assert!(
+        Env::words(&out).contains(&format!("(replaces {})", &v2[..7])),
+        "{out}"
+    );
     assert_eq!(
         state(&env)["quarantine"]["sources/superpowers"]["to"],
         v3.as_str()
@@ -1007,7 +1010,7 @@ fn ec4_14_approve_refuses_when_the_pin_changed_by_hand() {
     env.write_config(&env.config().replace(&v1, &v3));
     let out = env.expect(1, &["approve", "superpowers"]);
     assert!(
-        out.contains(
+        Env::words(&out).contains(
             "superpowers's pin changed since it was held; run colctl update superpowers again"
         ),
         "{out}"
@@ -1035,7 +1038,7 @@ fn ec4_16_approve_refuses_a_dirty_clone() {
     fs::write(clone(&env).join("local.txt"), "mine").unwrap();
     let commits = env.commits();
     let out = env.expect(1, &["approve", "superpowers"]);
-    assert!(out.contains("has local changes"), "{out}");
+    assert!(Env::words(&out).contains("has local changes"), "{out}");
     assert_eq!(pin(&env), v1);
     assert_eq!(env.commits(), commits);
 }

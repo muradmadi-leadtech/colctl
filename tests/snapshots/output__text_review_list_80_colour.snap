@@ -1,0 +1,12 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 1
+--- stdout
+[33m![0m 1 version held for review
+
+  [1msources/superpowers[0m  [SHORT] → [SHORT]  1 commit  [2mno flags[0m
+
+[2m→[0m [36mcolctl review superpowers[0m
+--- stderr

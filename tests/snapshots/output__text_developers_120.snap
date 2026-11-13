@@ -1,0 +1,11 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+ann      1 plugin  official
+unknown  1 plugin  colctl
+
+2 developers · colctl developers <name> lists one's plugins
+--- stderr
