@@ -126,6 +126,14 @@ impl Package {
         crate::fsx::hex(&h.finalize())
     }
 
+    /// The same package without its files (for showing what it carries after its folder is gone).
+    pub fn detached(&self) -> Package {
+        Package {
+            entries: Vec::new(),
+            ..self.clone()
+        }
+    }
+
     /// Paths in the package, sorted.
     pub fn files(&self) -> Vec<&str> {
         self.entries.iter().map(|e| e.path.as_str()).collect()
