@@ -257,10 +257,10 @@ Then sync reports it as failed ("still at <commit> after updating; …") with a 
 
 ## Revise (after the owner's first evaluation)
 
-The owner's \`colctl status\` showed \`claude … 17 ok\` next to \`codex … 2 ok · 1 unsupported\`, which reads like Codex is
-missing most things. It isn't: Codex reads skills from \`~/.agents\`, listed separately; counting states hid that. Two
-Library paths in the same column were shortened differently (\`~/…/kilo-proxy-headless/profiles/claude\` vs
-\`~/Library/…/kilo-proxy-headless/profiles/codex\`). And the help reads like a reference for developers, not a welcome.
+The owner's `colctl status` showed `claude … 17 ok` next to `codex … 2 ok · 1 unsupported`, which reads like Codex is
+missing most things. It isn't: Codex reads skills from `~/.agents`, listed separately; counting states hid that. Two
+Library paths in the same column were shortened differently (`~/…/kilo-proxy-headless/profiles/claude` vs
+`~/Library/…/kilo-proxy-headless/profiles/codex`). And the help reads like a reference for developers, not a welcome.
 
 **AC6-34 Profile lines say what each profile has**
 ```gherkin

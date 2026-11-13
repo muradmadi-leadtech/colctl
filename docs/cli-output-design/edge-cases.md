@@ -55,4 +55,4 @@ IDs are `EC6-NN`; each needs a test whose name contains `ec6_NN`.
 
 | ID | Case | Expected |
 |---|---|---|
-| EC6-23 | \`colctl\` with no command, before \`colctl init\` (no ~/.colctl) | The welcome help, exit 0; nothing is created |
+| EC6-23 | `colctl` with no command, before `colctl init` (no ~/.colctl) | The welcome help, exit 0; nothing is created |
