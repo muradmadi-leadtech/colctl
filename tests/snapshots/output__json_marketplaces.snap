@@ -1,0 +1,41 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &out)"
+---
+{
+  "marketplaces": [
+    {
+      "managed": false,
+      "name": "official",
+      "plugins": 1,
+      "profiles": [
+        "claude"
+      ],
+      "source": "github:o/official",
+      "tool": "claude"
+    },
+    {
+      "managed": true,
+      "name": "superpowers-dev",
+      "plugins": 1,
+      "profiles": [
+        "claude",
+        "kilo-claude"
+      ],
+      "source": "[ROOT]/home/.colctl/plugins/superpowers",
+      "tool": "claude"
+    },
+    {
+      "managed": true,
+      "name": "superpowers-dev",
+      "plugins": 1,
+      "profiles": [
+        "codex"
+      ],
+      "source": "[ROOT]/home/.colctl/plugins/superpowers",
+      "tool": "codex"
+    }
+  ],
+  "version": 1,
+  "warnings": []
+}

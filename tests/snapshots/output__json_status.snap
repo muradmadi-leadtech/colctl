@@ -1,0 +1,99 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &out)"
+---
+{
+  "harnesses": [
+    {
+      "items": [
+        {
+          "hint": "colctl sync",
+          "kind": "skill",
+          "name": "alpha",
+          "state": "missing",
+          "target": null
+        },
+        {
+          "hint": null,
+          "kind": "source",
+          "name": "superpowers",
+          "state": "ok",
+          "target": null
+        }
+      ],
+      "kind": "claude",
+      "name": "claude",
+      "path": "[ROOT]/home/.claude",
+      "state": "ok"
+    },
+    {
+      "items": [
+        {
+          "hint": null,
+          "kind": "skill",
+          "name": "alpha",
+          "state": "ok",
+          "target": null
+        },
+        {
+          "hint": null,
+          "kind": "source",
+          "name": "superpowers",
+          "state": "ok",
+          "target": null
+        }
+      ],
+      "kind": "claude",
+      "name": "kilo-claude",
+      "path": "[ROOT]/home/Library/Application Support/kilo-proxy-headless/profiles/claude",
+      "state": "ok"
+    },
+    {
+      "items": [
+        {
+          "hint": null,
+          "kind": "source",
+          "name": "superpowers",
+          "state": "ok",
+          "target": null
+        }
+      ],
+      "kind": "codex",
+      "name": "codex",
+      "path": "[ROOT]/home/.codex",
+      "state": "ok"
+    }
+  ],
+  "in_sync": false,
+  "quarantine": [
+    {
+      "direction": "forward",
+      "error": null,
+      "flags": 0,
+      "from": "[SHA]",
+      "held_at": [TIME],
+      "key": "sources/superpowers",
+      "kind": "source",
+      "name": "superpowers",
+      "repo": "file://[ROOT]/upstreams/superpowers",
+      "state": "pending-review",
+      "to": "[SHA]",
+      "warning": null
+    }
+  ],
+  "source": {
+    "invalid": [],
+    "origin_changed": [],
+    "path": "[ROOT]/home/.colctl",
+    "uncommitted": []
+  },
+  "sources": [
+    {
+      "clone": "ok",
+      "name": "superpowers",
+      "repo": "file://[ROOT]/upstreams/superpowers",
+      "rev": "[SHA]"
+    }
+  ],
+  "version": 1
+}
