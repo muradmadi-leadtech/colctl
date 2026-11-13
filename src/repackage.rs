@@ -455,6 +455,16 @@ pub fn build(folder: &Path, fallback: &str) -> Result<Package, String> {
     let mut entries: Vec<Entry> = files
         .into_iter()
         .filter(|(path, _)| Some(path.as_str()) != hooks_file.as_deref())
+        // AC7-02: without a hook to run scripts, Codex reads only the skills, so carry those and the
+        // top-level README, LICENSE and NOTICE; with one, the whole folder, wherever its scripts are.
+        .filter(|(path, _)| {
+            hooks_out.is_some()
+                || path.starts_with(&format!("{skills_dir}/"))
+                || (!path.contains('/')
+                    && ["README", "LICENSE", "LICENCE", "NOTICE", "COPYING"]
+                        .iter()
+                        .any(|p| path.to_ascii_uppercase().starts_with(p)))
+        })
         .map(|(path, real)| {
             let executable = fs::metadata(&real)
                 .map(|m| m.permissions().mode() & 0o111 != 0)
