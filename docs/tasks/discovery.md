@@ -25,3 +25,16 @@ flowchart LR
 ```
 
 T1 and T2 are independent. **Release:** new commands only, no breaking change, so v2.1.0.
+
+## Criteria per task (from Refine)
+
+| Task | Acceptance criteria | Edge cases |
+|---|---|---|
+| T1 | AC5-01 – 07 | EC5-02, 03, 04, 05, 06 |
+| T2 | AC5-08 – 11 | EC5-07, 08, 09 |
+| T3 | AC5-12 – 16 | EC5-01, 10, 11, 12, 13, 14 |
+| T4 | AC5-17, 18 | — |
+| T5 | AC5-19, 20 | EC5-17 |
+| T6 | AC5-21, 22 | EC5-15, 16 |
+| T7 | AC5-23 – 26 | EC5-18 – 21 |
+| T8 | AC5-27, 28 | — |

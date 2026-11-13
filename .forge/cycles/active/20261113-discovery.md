@@ -62,6 +62,8 @@ Dependency map: T1, T2 independent; T1 → T3–T7; T2 → T3, T4; T3–T7 → T
 
 ### Specifications
 
+`docs/discovery/acceptance-criteria.md` (AC5-01–28), `interfaces.md`, `edge-cases.md` (EC5-01–21). Constraints: no new crates, discovery read-only and offline except refresh/add/connectors, JSON is a contract for the TUI.
+
 <!-- Document specifications here -->
 
 ---
