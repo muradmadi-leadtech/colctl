@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.3.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.2.1...v2.3.0) (2026-11-13)
+
+
+### Features
+
+* **config:** record conversions ([#87](https://github.com/muradmadi-leadtech/colctl/issues/87)) ([22cc5a8](https://github.com/muradmadi-leadtech/colctl/commit/22cc5a8e03f3bd9b00713246676189da4ca1fa13))
+* **convert:** hold a Codex package for review ([#88](https://github.com/muradmadi-leadtech/colctl/issues/88)) ([cbc3ddc](https://github.com/muradmadi-leadtech/colctl/commit/cbc3ddcf2b59d29dfbf2fa370e40ac697db2f611))
+* **convert:** install conversions in Codex profiles ([#89](https://github.com/muradmadi-leadtech/colctl/issues/89)) ([3ae9339](https://github.com/muradmadi-leadtech/colctl/commit/3ae933995b94aec13dfeb7a027dbd1349794d702))
+* **convert:** review a converted source's update with its Codex package ([#90](https://github.com/muradmadi-leadtech/colctl/issues/90)) ([c0b2d04](https://github.com/muradmadi-leadtech/colctl/commit/c0b2d043efa05a6665f2a3122c723a39147ce857))
+* **repackage:** build a Codex package from a Claude plugin ([#84](https://github.com/muradmadi-leadtech/colctl/issues/84)) ([4c0f606](https://github.com/muradmadi-leadtech/colctl/commit/4c0f60683a20bbd0fbeba1f5cb6919406861e8db))
+* **repackage:** carry over the hooks Codex runs ([#85](https://github.com/muradmadi-leadtech/colctl/issues/85)) ([2d2fd46](https://github.com/muradmadi-leadtech/colctl/commit/2d2fd463c3b112a9a2dee4d7ef35cdded0766b60))
+
+
+### Bug Fixes
+
+* **repackage:** carry only what Codex reads when there are no hooks ([#92](https://github.com/muradmadi-leadtech/colctl/issues/92)) ([9c89447](https://github.com/muradmadi-leadtech/colctl/commit/9c8944754ecd7bf9dc9df4cd592d7b41fe2c8f91))
+
 ## [2.2.1](https://github.com/muradmadi-leadtech/colctl/compare/v2.2.0...v2.2.1) (2026-11-13)
 
 
