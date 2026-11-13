@@ -353,11 +353,13 @@ impl Builder {
                 s.path.as_deref(),
             );
             let folder = s.path.as_ref().map_or(clone.clone(), |p| clone.join(p));
-            let description = [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]
+            let manifest = [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]
                 .iter()
                 .find_map(|m| read_json(&folder.join(m)).ok().flatten())
-                .and_then(|m| text(&m, "description"))
-                .unwrap_or_default();
+                .unwrap_or(Value::Null);
+            let description = text(&manifest, "description").unwrap_or_default();
+            // EC5-23: the version at the pinned commit, not another catalog's.
+            let version = text(&manifest, "version");
             for (tool, p) in [("claude", &packaging.claude), ("codex", &packaging.codex)] {
                 if let ToolPackaging::Supported(t) = p {
                     self.add(vec![Entry {
@@ -367,6 +369,8 @@ impl Builder {
                         tool: tool.into(),
                         kind: "plugin".into(),
                         description: description.clone(),
+                        version: version.clone(),
+                        display_name: text(&manifest, "displayName"),
                         repo: Some(s.clone_url()),
                         subpath: s.path.clone(),
                         commit: Some(s.rev.clone()),
@@ -730,7 +734,7 @@ mod tests {
     }
 
     #[test]
-    fn ac5_04_colctl_sources_are_entries() {
+    fn ac5_04_ec5_23_colctl_sources_are_entries() {
         let mut f = Fx::new();
         let clone = f.root.join("source/plugins/superpowers");
         write(
@@ -739,7 +743,7 @@ mod tests {
         );
         write(
             &clone.join(".claude-plugin/plugin.json"),
-            &json!({"name": "superpowers", "description": "Core skills"}),
+            &json!({"name": "superpowers", "description": "Core skills", "version": "7.0.2"}),
         );
         f.config.sources.push(config::Source {
             name: "superpowers".into(),
@@ -767,6 +771,8 @@ mod tests {
             Some("https://github.com/obra/superpowers")
         );
         assert_eq!(e.description, "Core skills");
+        // EC5-23: the version at the pin, from the clone itself.
+        assert_eq!(e.version.as_deref(), Some("7.0.2"));
         assert_eq!(e.commit, Some("a".repeat(40)));
         assert_eq!(c.entries.len(), 1);
     }

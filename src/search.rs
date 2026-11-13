@@ -108,12 +108,8 @@ fn merge_key(e: &Entry) -> String {
                 .or(hash)
                 .map(|s| s.trim_matches('/').trim_start_matches("./").to_string())
                 .unwrap_or_default();
-            format!(
-                "{}\u{0}{}\u{0}{}",
-                url.to_lowercase(),
-                sub,
-                e.name.to_lowercase()
-            )
+            // Repo and folder identify the code; catalogs disagree on names (EC5-22).
+            format!("{}\u{0}{}", url.to_lowercase(), sub)
         }
         None => format!("id\u{0}{}\u{0}{}", e.tool, e.id),
     }
@@ -137,7 +133,7 @@ fn add_text(p: &Plugin, tool_of_first: &str) -> String {
     }
 }
 
-/// Merges entries that are the same plugin (AC5-08): same normalised repo, subpath and name, or
+/// Merges entries that are the same plugin (AC5-08): same normalised repo and folder, or
 /// (without a repo) the same tool and id.
 pub fn merge(entries: &[Entry]) -> Vec<Plugin> {
     let mut sorted: Vec<&Entry> = entries.iter().collect();
