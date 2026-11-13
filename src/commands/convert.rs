@@ -1,0 +1,227 @@
+//! `colctl convert` (cycle 7, docs/convert/interfaces.md § Command line): builds a Codex package
+//! from a source that only packages for Claude and holds it for review. Approving it (in
+//! `quarantine.rs`) records `convert = ["codex"]`; sync installs it.
+
+use super::{load, plugins_dir};
+use crate::config::{self, Kind};
+use crate::ctx::Ctx;
+use crate::error::CliError;
+use crate::git::Git;
+use crate::packaging;
+use crate::plan::SourceTarget;
+use crate::repackage::{self, Package};
+use crate::review::escape;
+use crate::state::{self, Candidate, HeldConversion, Lock};
+use crate::tool::Tool;
+use crate::ui::render;
+use crate::ui::style::Token;
+use crate::vault;
+use serde_json::{Value, json};
+
+/// The quarantine key of a source's held conversion.
+pub(super) fn conversion_key(name: &str) -> String {
+    format!("conversions/{name}")
+}
+
+/// The Codex package for a source at its pin, built from its clone (never written to).
+pub(super) fn package_for(ctx: &Ctx, s: &config::Source) -> Result<Package, CliError> {
+    let clone = plugins_dir(ctx).join(&s.name);
+    let folder =
+        packaging::claude_folder(&clone, &s.plugin, s.path.as_deref()).ok_or_else(|| {
+            CliError::refused(format!("{} has no Claude packaging to convert", s.name))
+        })?;
+    repackage::build(&folder, &s.plugin).map_err(CliError::refused)
+}
+
+fn hook_text(h: &repackage::KeptHook) -> String {
+    match &h.matcher {
+        Some(m) if !m.is_empty() => format!("{} on {m}", h.event),
+        _ => h.event.clone(),
+    }
+}
+
+/// The rows that sum a package up: what it carries, what Codex never runs, what isn't carried over.
+pub(super) fn summary(pkg: &Package) -> Vec<(&'static str, String)> {
+    let mut carries = super::plural(pkg.skills.len(), "skill");
+    if !pkg.hooks.is_empty() {
+        let list: Vec<String> = pkg.hooks.iter().map(hook_text).collect();
+        carries.push_str(&format!(
+            " · {} ({})",
+            super::plural(pkg.hooks.len(), "hook"),
+            list.join(", ")
+        ));
+    }
+    let not_carried: Vec<String> = pkg
+        .report
+        .not_carried
+        .iter()
+        .map(|n| format!("{} {}", n.kind, n.name))
+        .collect();
+    vec![
+        ("Carries", carries),
+        ("Codex never runs", pkg.report.never_runs.join(" · ")),
+        ("Not carried over", not_carried.join(" · ")),
+    ]
+}
+
+/// Key-value rows whose values wrap under themselves; empty rows are left out.
+pub(super) fn summary_lines(ctx: &Ctx, rows: &[(&str, String)]) -> Vec<String> {
+    let caps = &ctx.out.caps;
+    let rows: Vec<&(&str, String)> = rows.iter().filter(|(_, v)| !v.is_empty()).collect();
+    let key_w = rows
+        .iter()
+        .map(|(k, _)| render::width(k))
+        .max()
+        .unwrap_or(0);
+    let indent = 2 + key_w + 3;
+    let mut lines = Vec::new();
+    for (k, v) in rows {
+        for (i, text) in render::wrap(&escape(v), caps.width, indent, indent)
+            .into_iter()
+            .enumerate()
+        {
+            if i == 0 {
+                lines.push(format!(
+                    "  {}{}   {text}",
+                    render::footer(caps, k),
+                    " ".repeat(key_w - render::width(k))
+                ));
+            } else {
+                lines.push(text);
+            }
+        }
+    }
+    lines
+}
+
+/// A package's contents as JSON (skills, hooks, the report).
+pub(super) fn package_json(pkg: &Package) -> Value {
+    json!({
+        "skills": pkg.skills,
+        "hooks": pkg.hooks.iter().map(|h| json!({
+            "event": h.event, "matcher": h.matcher, "type": h.kind, "command": h.command,
+        })).collect::<Vec<_>>(),
+        "never_runs": pkg.report.never_runs,
+        "not_carried": pkg.report.not_carried.iter()
+            .map(|n| json!({"kind": n.kind, "name": n.name})).collect::<Vec<_>>(),
+    })
+}
+
+/// A one-line answer (nothing to do), as text or JSON.
+fn said(ctx: &Ctx, as_json: bool, name: &str, tone: Token, text: &str) -> i32 {
+    if as_json {
+        ctx.out.raw(&format!(
+            "{:#}\n",
+            json!({"source": name, "held": false, "dry_run": false, "note": text})
+        ));
+    } else {
+        ctx.out
+            .line(render::verdict(&ctx.out.caps, tone, text, &[]));
+    }
+    0
+}
+
+/// `colctl convert <source>` (AC7-07, AC7-12, EC7-01 – 05, 10, 11).
+pub fn convert(
+    ctx: &Ctx,
+    name: &str,
+    undo: bool,
+    dry_run: bool,
+    as_json: bool,
+) -> Result<i32, CliError> {
+    let _git = Git::find(&ctx.path_var)?;
+    let ws = load(ctx)?;
+    let Some(s) = ws.config.sources.iter().find(|s| s.name == name).cloned() else {
+        return Err(CliError::usage(format!("no source named \"{name}\"")).hint("colctl status"));
+    };
+    if undo {
+        return Err(CliError::usage("convert --undo isn't available yet"));
+    }
+    if !ws.config.harnesses.iter().any(|h| h.kind == Kind::Codex) {
+        return Err(CliError::refused("no Codex profile is registered").hint("colctl init"));
+    }
+    if s.convert.contains(&Tool::Codex) {
+        return Ok(said(
+            ctx,
+            as_json,
+            name,
+            Token::Ok,
+            &format!("{name} is already converted"),
+        ));
+    }
+    match ws.sources.iter().find(|i| i.name == name).map(|i| &i.codex) {
+        Some(SourceTarget::Ready(_)) => {
+            return Ok(said(
+                ctx,
+                as_json,
+                name,
+                Token::Ok,
+                &format!("{name} already packages for Codex"),
+            ));
+        }
+        Some(SourceTarget::Pending(why)) => {
+            return Err(CliError::refused(format!("{name}: {why}")).hint("colctl sync"));
+        }
+        _ => {}
+    }
+    let pkg = package_for(ctx, &s)?;
+    if pkg.skills.is_empty() && pkg.hooks.is_empty() {
+        return Err(CliError::refused(format!(
+            "{name} has nothing Codex can use: no skills and no hook Codex runs"
+        )));
+    }
+    let digest = pkg.digest();
+    if !dry_run {
+        let _lock = Lock::acquire(&ctx.source)?;
+        let key = conversion_key(name);
+        repackage::write(&pkg, &state::snapshot_path(&ctx.source, &key))
+            .map_err(CliError::refused)?;
+        let mut st = state::load(&ctx.source)?;
+        st.quarantine.insert(
+            key,
+            Candidate::Conversion(HeldConversion {
+                rev: s.rev.clone(),
+                digest: digest.clone(),
+                held_at: state::now(),
+            }),
+        );
+        state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))?;
+    }
+    if as_json {
+        let mut out = json!({
+            "source": name, "held": !dry_run, "rev": s.rev, "digest": digest, "dry_run": dry_run,
+        });
+        if let (Value::Object(o), Value::Object(more)) = (&mut out, package_json(&pkg)) {
+            o.extend(more);
+        }
+        ctx.out.raw(&format!("{out:#}\n"));
+        return Ok(0);
+    }
+    let caps = &ctx.out.caps;
+    let built = format!("built from {}", vault::short(&s.rev));
+    let mut lines = vec![if dry_run {
+        render::verdict(
+            caps,
+            Token::Info,
+            &format!("Would hold {name}'s Codex package for review"),
+            &[built],
+        )
+    } else {
+        render::verdict(
+            caps,
+            Token::Attention,
+            &format!("Held {name}'s Codex package for review"),
+            &[built],
+        )
+    }];
+    if !caps.quiet {
+        lines.push(String::new());
+        lines.extend(summary_lines(ctx, &summary(&pkg)));
+        if !dry_run {
+            lines.push(String::new());
+            lines.push(render::hint(caps, &format!("colctl review {name}")));
+        }
+    }
+    ctx.out.lines(lines);
+    Ok(0)
+}

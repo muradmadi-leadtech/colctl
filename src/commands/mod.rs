@@ -18,16 +18,20 @@ use crate::ui::style::Token;
 use crate::vault::{self, CloneState, Vault};
 use std::collections::BTreeMap;
 
+mod convert;
 mod discovery;
 mod quarantine;
 mod run_view;
 mod status_view;
+pub use convert::convert;
 pub use discovery::{connectors, developers, marketplace_list, marketplace_refresh, search, show};
 pub use quarantine::{approve, refresh, reject, review, update};
 
 /// Where source plugin clones live, and colctl-written manifests inside it.
 pub const PLUGINS: &str = "plugins";
 pub const MANIFESTS: &str = ".manifests";
+/// Codex packages colctl built (cycle 7), inside the plugins folder.
+pub const CONVERTED: &str = ".converted";
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};

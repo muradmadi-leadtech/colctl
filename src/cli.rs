@@ -28,6 +28,7 @@ const GROUPS: &[(&str, &[(&str, &str)])] = &[
             ),
             ("rm", "Remove one, everywhere"),
             ("adopt", "Move what a profile already has into ~/.colctl"),
+            ("convert", "Package a Claude-only source plugin for Codex"),
         ],
     ),
     (
@@ -459,6 +460,23 @@ enum Command {
         /// The command, and subcommand if any
         command: Vec<String>,
     },
+    /// Package a source plugin that only packages for Claude for Codex, held for review
+    #[command(
+        after_help = "Examples:\n  colctl convert qdrant-skills\n  colctl convert qdrant-skills --dry-run\n  colctl convert --undo qdrant-skills"
+    )]
+    Convert {
+        /// The source's name
+        source: String,
+        /// Stop converting it: uninstall it from Codex profiles
+        #[arg(long)]
+        undo: bool,
+        /// Print what would happen without changing anything
+        #[arg(long)]
+        dry_run: bool,
+        /// Print one JSON document
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the version
     #[command(after_help = "Examples:\n  colctl version\n  colctl --version")]
     Version,
@@ -674,6 +692,12 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             ctx.out.raw(&String::from_utf8_lossy(&script));
             Ok(0)
         }
+        Command::Convert {
+            source,
+            undo,
+            dry_run,
+            json,
+        } => commands::convert(ctx, &source, undo, dry_run, json),
         // Handled in `run`, before a context is needed.
         Command::Help { .. } => Ok(0),
         Command::Version => {
