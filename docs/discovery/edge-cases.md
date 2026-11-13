@@ -49,3 +49,11 @@ IDs are `EC5-NN`; each needs a test whose name contains `ec5_NN`.
 | EC5-19 | `add source <id>` where several results share the bare name, or the id is unknown | Exit 2, as EC5-11, nothing written |
 | EC5-20 | `add source <id>` when the repo can't be cloned | As cycle 3: exit 2 with git's error, nothing written |
 | EC5-21 | `add source <id> --name n --plugin p` | `--name` and `--plugin` override the defaults taken from the result |
+
+## Found by the smoke test (added during Generate)
+
+| ID | Case | Expected |
+|---|---|---|
+| EC5-22 | A catalog lists a plugin under another name than its own manifest (the plugin directory's `1password-developer-tools` is `1password` in its repo) | `add source <id>` (and `adopt`) use the name from the clone's `plugin.json`, or the only plugin in its marketplace manifest; the source keeps the catalog's name. Results merge on repo and folder, so the listing and the source are one result |
+| EC5-23 | A source plugin's version | Read from the clone's `plugin.json` at the pinned commit, never from another catalog's listing |
+| EC5-24 | Output piped into a reader that closes early (`colctl search \| head`) | colctl stops quietly with exit 141, as a process killed by SIGPIPE would; no panic message |

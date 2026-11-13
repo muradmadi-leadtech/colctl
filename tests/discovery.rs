@@ -793,3 +793,105 @@ fn ec5_21_name_and_plugin_override_the_result() {
     env.ok(&["add", "source", "superpowers@official", "--name", "sp"]);
     assert_eq!(sources(&env)[0]["name"].as_str(), Some("sp"));
 }
+
+// ---------------------------------------------------------------- found by the smoke test
+
+#[test]
+fn ec5_22_a_catalog_name_that_differs_from_the_plugins_own() {
+    let env = machine();
+    let base = env.github_is_local();
+    let repo = base.join("acme/tools-plugin");
+    write(
+        &repo.join(".claude-plugin/plugin.json"),
+        &json!({"name": "onepw", "version": "0.2.2"}),
+    );
+    write(
+        &repo.join(".claude-plugin/marketplace.json"),
+        &json!({"name": "acme", "plugins": [{"name": "onepw", "source": "./"}]}),
+    );
+    sh(&repo, &["init", "-q"]);
+    sh(&repo, &["add", "-A"]);
+    sh(&repo, &["commit", "-qm", "init"]);
+    let head = sh(&repo, &["rev-parse", "HEAD"]);
+    let native = env.home.join(".claude");
+    write(
+        &native.join("plugins/plugin-directory-cache-v2.json"),
+        &json!({"schemaVersion": 2, "entryNames": {"p0": "acme-developer-tools"},
+            "listings": [{"id": "p0", "name": "Acme Developer Tools", "summary": "Tools",
+                "surfaces": ["claude_code"],
+                "source": {"type": "directory", "repository": {
+                    "url": "https://github.com/acme/tools-plugin", "reviewed_commit": head}}}]}),
+    );
+    env.ok(&[
+        "add",
+        "source",
+        "acme-developer-tools@anthropic-plugin-directory",
+    ]);
+    let s = &sources(&env)[0];
+    assert_eq!(s["name"].as_str(), Some("acme-developer-tools"));
+    assert_eq!(s["plugin"].as_str(), Some("onepw"), "the plugin's own name");
+    assert!(env.installed(&native).contains(&"onepw@acme".to_string()));
+    // The directory listing and the source are now one result.
+    let (code, _, err) = env.code(&[
+        "add",
+        "source",
+        "acme-developer-tools@anthropic-plugin-directory",
+    ]);
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("is already source plugin acme-developer-tools"),
+        "{err}"
+    );
+    let (_, v) = json_of(
+        &env,
+        &[
+            "show",
+            "acme-developer-tools@anthropic-plugin-directory",
+            "--json",
+        ],
+    );
+    assert_eq!(
+        v["result"]["version"], "0.2.2",
+        "EC5-23: the source's own version"
+    );
+}
+
+#[test]
+fn ec5_24_a_closed_pipe_ends_quietly() {
+    let env = machine();
+    let listings: Vec<(String, String, String, String)> = (0..4000)
+        .map(|i| {
+            (
+                format!("plugin-{i}"),
+                format!("Plugin {i}"),
+                "x".repeat(50),
+                format!("https://github.com/o{i}/r"),
+            )
+        })
+        .collect();
+    directory(
+        &env.home.join(".claude"),
+        listings
+            .iter()
+            .map(|(a, b, c, d)| (a.as_str(), b.as_str(), c.as_str(), d.as_str()))
+            .collect(),
+    );
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("colctl"))
+        .args(["search", "--limit", "0"])
+        .env_clear()
+        .env("HOME", &env.home)
+        .env("PATH", &env.path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Read;
+        let mut first = [0u8; 16];
+        child.stdout.take().unwrap().read_exact(&mut first).unwrap();
+    }
+    let out = child.wait_with_output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("panicked"), "{err}");
+    assert_eq!(out.status.code(), Some(141), "{err}");
+}
