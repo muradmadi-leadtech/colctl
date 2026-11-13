@@ -320,9 +320,20 @@ pub struct SourceInput {
     pub replaces: Vec<String>,
     pub claude: SourceTarget,
     pub codex: SourceTarget,
+    /// What Codex installs when it differs from `rev`: a converted package's `<rev>+<digest>`
+    /// (cycle 7).
+    pub codex_rev: Option<String>,
 }
 
 impl SourceInput {
+    /// The version `kind`'s profiles should have installed.
+    pub fn rev_for(&self, kind: Kind) -> &str {
+        match (kind, &self.codex_rev) {
+            (Kind::Codex, Some(r)) => r,
+            _ => &self.rev,
+        }
+    }
+
     pub fn target(&self, kind: Kind) -> Option<&SourceTarget> {
         match kind {
             Kind::Claude => Some(&self.claude),
@@ -799,6 +810,23 @@ impl Builder<'_> {
                     };
                     item.hint = Some(reason.clone());
                     self.items.push(item);
+                    // It was installed here before (e.g. a conversion that was undone): take it out.
+                    if let Some(old) = state.sources.get(name) {
+                        if plugins.installed.contains(&old.id) {
+                            self.actions.push(Action::UninstallSource {
+                                source: name.to_string(),
+                                id: old.id.clone(),
+                            });
+                        }
+                        if plugins.marketplaces.contains_key(&old.marketplace) {
+                            self.actions.push(Action::RemoveSourceMarketplace {
+                                name: old.marketplace.clone(),
+                            });
+                        }
+                        self.actions.push(Action::ForgetSource {
+                            source: name.to_string(),
+                        });
+                    }
                     continue;
                 }
                 Some(SourceTarget::Invalid(reason)) => {
@@ -907,7 +935,8 @@ impl Builder<'_> {
                     rev.to_string(),
                 )
             };
-            let (s_name, id, marketplace, rev) = record(&source.rev);
+            let want = source.rev_for(kind);
+            let (s_name, id, marketplace, rev) = record(want);
             // A replaced id equal to the source's own id is uninstalled above, so it needs installing.
             if !plugins.installed.contains(&target.id) || own_id_replaced {
                 self.item(ItemKind::Source, name, ItemState::Missing);
@@ -917,9 +946,9 @@ impl Builder<'_> {
                     marketplace,
                     rev,
                 });
-            } else if installed_rev == Some(source.rev.as_str()) {
+            } else if installed_rev == Some(want) {
                 self.item(ItemKind::Source, name, ItemState::Ok);
-                if recorded != Some(source.rev.as_str()) {
+                if recorded != Some(want) {
                     // Installed at the pin but not recorded: record it with a no-op install.
                     self.actions.push(Action::InstallSource {
                         source: s_name,
@@ -1620,6 +1649,7 @@ mod tests {
             replaces: vec!["superpowers@anthropic-plugin-directory".into()],
             claude: SourceTarget::Unsupported("x".into()),
             codex: SourceTarget::Unsupported("x".into()),
+            codex_rev: None,
         };
         let inputs = Inputs {
             config: &Config::default(),

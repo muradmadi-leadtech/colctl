@@ -1187,7 +1187,14 @@ fn approve_one(
             commit(git, ctx, &format!("colctl: convert {name} for Codex")).map_err(commit_err)?;
             st.quarantine.remove(key);
             let _ = fsx::remove_any(&state::snapshot_path(&ctx.source, key));
-            Ok(format!("approved {name}'s Codex package"))
+            let hooks = view.package.as_ref().is_some_and(|p| !p.hooks.is_empty());
+            Ok(if hooks {
+                format!(
+                    "approved {name}'s Codex package; Codex asks you to trust its hooks before they run: open Codex and use /hooks"
+                )
+            } else {
+                format!("approved {name}'s Codex package")
+            })
         }
         Candidate::Source(c) => {
             let name = &view.name;
