@@ -53,10 +53,10 @@ Dependency map: T1, T2 independent; T1 → T3–T7; T2 → T3, T4; T3–T7 → T
 **Purpose**: Define exactly what "done" looks like.
 
 ### Required Outputs
-- [ ] Acceptance criteria in Given-When-Then format
-- [ ] Interface specifications documented
-- [ ] Edge cases enumerated by category
-- [ ] Constraints vs criteria documented
+- [x] Acceptance criteria in Given-When-Then format
+- [x] Interface specifications documented
+- [x] Edge cases enumerated by category
+- [x] Constraints vs criteria documented
 
 **CRITICAL**: No code in this phase - specifications only.
 
