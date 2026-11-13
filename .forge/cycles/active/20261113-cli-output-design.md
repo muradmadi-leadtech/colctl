@@ -69,37 +69,37 @@ Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 
 ---
 
-<!-- FORGE_PHASE:Generate:Active -->
+<!-- FORGE_PHASE:Generate:Complete -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.
 
 ### Process
-- [ ] RED: Write failing tests
-- [ ] GREEN: Minimal code to pass
-- [ ] REFACTOR: Improve while green
-- [ ] Code review: Linter and type checks pass
-- [ ] Code review: TDD compliance verified
-- [ ] Code review: Acceptance criteria alignment checked
+- [x] RED: Write failing tests
+- [x] GREEN: Minimal code to pass
+- [x] REFACTOR: Improve while green
+- [x] Code review: Linter and type checks pass
+- [x] Code review: TDD compliance verified
+- [x] Code review: Acceptance criteria alignment checked
 
 ### Implementation Notes
 
-<!-- Document implementation progress here -->
+T0 #66, #69 (v2.1.1, v2.1.2); T1 #68; T2 #72; T3 #73; T4+T5 #74; T6 #75; T7 #76; smoke fixes #77; v2.2.0 (#71). RED runs, slips and plan changes in `docs/cli-output-design/cycle-review.md`.
 
 ---
 
-<!-- FORGE_PHASE:Evaluate:Pending -->
+<!-- FORGE_PHASE:Evaluate:Active -->
 ## Phase 5: Evaluate
 
 **Purpose**: Verify output matches intent.
 
 ### Checklist
-- [ ] Criteria verified line-by-line
-- [ ] Edge cases tested
-- [ ] Code review: Full test suite passes with coverage threshold met
-- [ ] Code review: Security review completed
-- [ ] Code review: Integration and interface contracts verified
-- [ ] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
+- [x] Criteria verified line-by-line
+- [x] Edge cases tested
+- [x] Code review: Full test suite passes with coverage threshold met
+- [x] Code review: Security review completed
+- [x] Code review: Integration and interface contracts verified
+- [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
 - [ ] Disposition decision made
 
 ### Disposition

@@ -46,6 +46,16 @@ CI only runs on pull requests, so a RED commit pushed before the PR exists never
 
 Fixture data that agrees with itself hides mismatches real data has (directory slugs vs plugin names). Run discovery-style features on a copy of the owner's real data before release.
 
+### Test layout in a real pty
+*Added: 2026-11-13*
+
+A Python pty with TIOCSWINSZ reproduces a real terminal (colour, width, live progress) where script(1) can't run; snapshot tests with a width check catch overflow that piped output hides.
+
+### Fakes that model the tool's real rules
+*Added: 2026-11-13*
+
+The fake codex accepted any url source, so tests passed while real Codex failed. Fakes should enforce the same constraints as the real tool (here: url sources are cloned with git).
+
 ## Anti-Patterns
 
 <!-- Approaches to avoid -->
@@ -79,6 +89,11 @@ Docs-only pushes still run typos and link checks; the cycle 4 plan PR failed on 
 *Added: 2026-11-13*
 
 Fakes that append to a log by rewriting it lose lines when colctl calls them in parallel; append in one write.
+
+### Starting the next task before pushing GREEN
+*Added: 2026-11-13*
+
+Twice in cycle 6 a task's GREEN was still local when the next task started on the same files; T4 and T5 then had to ship together. Push GREEN as soon as RED has failed, before touching the next task.
 
 ## Decisions
 
