@@ -227,8 +227,7 @@ gitleaks. All green on `main`.
 ## Follow-ups
 
 - `-v` prints absolute paths for link steps; showing them as `~/…` would read better.
-- `cut_middle` at wide terminals keeps the tail over `~/Library` (`~/…/kilo-proxy-headless/profiles/claude`); a
-  smarter split could keep both.
+- ~~`cut_middle` keeps the tail over `~/Library`~~: replaced by `cut_alike` in the Revise.
 - Carried: the `ETXTBSY` test flake; `review` flag noise on real releases (now grouped per file, which helps).
 
 ## Autonomy gate: what was not done
@@ -245,4 +244,47 @@ gitleaks. All green on `main`.
 - [ ] `colctl review`, `colctl search databricks`, `colctl show databricks`
 - [ ] In fish: `colctl completions fish > ~/.config/fish/completions/colctl.fish`
 - [ ] Optional: `colctl rm source qdrant-skills` to see the confirmation (answer n)
+- [ ] Decide the disposition
+
+---
+
+## Revise (2026-11-13, v2.2.1)
+
+Your evaluation of 2.2.0 found three things; all three are fixed in #79 and released as **2.2.1**.
+
+| Your note | Cause | Now | Criteria |
+|---|---|---|---|
+| Claude says 17 ok, Codex 2 ok | Lines counted states. Codex reads skills from `~/.agents`, so its profiles hold only plugins and `AGENTS.md`; the counts were right but didn't say so | Lines say what each profile has: `14 skills · 3 plugins` vs `2 plugins · skills via ~/.agents · 1 not packaged` | AC6-34 |
+| `~/…/kilo-proxy-headless/profiles/claude` next to `~/Library/…/profiles/codex` | Each path was cut on its own, keeping as much as fit; the Codex path is 1 character shorter, so it kept `Library` | Paths are shown whole when they fit; otherwise every path keeps the same parts (`~/Library/…/profiles/claude`, `~/Library/…/profiles/codex`); contents wrap under themselves instead of being cut | AC6-35 |
+| Help is a long list for developers | One flat list with no spacing; bare `colctl` printed an empty error | A welcome page: one sentence on what colctl does, **Start here** (init, status, sync), task groups separated by blank lines with one aligned column, short options, More/Docs. Bare `colctl` and `colctl help` show it; `colctl help <command>` works with flags; command help is styled and wrapped to the terminal | AC6-36, EC6-23 |
+
+Also found by the new width tests: the verdict line ran past 60 columns (`✓ All 5 profiles in sync · 0 sources ·
+nothing held for review`). Facts that don't fit are now left off.
+
+**Process.** The criteria were added before code (#79's first commit). RED went up with the PR. Its first CI run
+stopped at the format check before the tests ran, so I pushed the formatted tests and waited for CI to fail on the 8
+tests themselves before pushing GREEN. The PR title also failed its check: `fix(status,help)` isn't a valid scope.
+
+**Verified.** 34 + 1 new tests, coverage 94.87%, `just check` green. Smoke test on a copy of your setup in a real 80- and
+60-column pseudo-terminal:
+
+```
+✓ All 5 profiles in sync · 3 sources · nothing held for review
+
+  ✓  claude       ~/.claude                    14 skills · 3 plugins
+  ✓  kilo-claude  ~/Library/…/profiles/claude  14 skills · 3 plugins
+  ✓  codex        ~/.codex                     2 plugins · skills via ~/.agents
+                                               1 not packaged
+  ✓  kilo-codex   ~/Library/…/profiles/codex   2 plugins · skills via ~/.agents
+                                               1 not packaged
+  ✓  agents       ~/.agents                    14 skills
+```
+
+`1 not packaged` is a source plugin whose repo has no Codex packaging (cycle 7's converter is the fix for that).
+
+### Reviewer checklist (Revise)
+
+- [ ] `mise use -g github:muradmadi-leadtech/colctl@2.2.1`
+- [ ] `colctl status` in your usual terminal, and in a narrow one
+- [ ] `colctl`, `colctl help`, `colctl help sync`
 - [ ] Decide the disposition

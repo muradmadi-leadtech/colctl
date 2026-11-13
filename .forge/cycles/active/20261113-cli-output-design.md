@@ -48,7 +48,7 @@ Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 
 ---
 
-<!-- FORGE_PHASE:Refine:Active -->
+<!-- FORGE_PHASE:Refine:Complete -->
 ## Phase 3: Refine
 
 **Purpose**: Define exactly what "done" looks like.
@@ -63,13 +63,13 @@ Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 
 ### Specifications
 
-`docs/cli-output-design/interfaces.md` (flags, Caps, tokens, components, per-command layouts, interaction, help), `acceptance-criteria.md` (AC6-01–30), `edge-cases.md` (EC6-01–20). Constraints: `--json` and exit codes unchanged; no full-screen views; nothing asks without a terminal.
+`docs/cli-output-design/interfaces.md` (flags, Caps, tokens, components, per-command layouts, interaction, help), `acceptance-criteria.md` (AC6-01–36), `edge-cases.md` (EC6-01–23; AC6-34–36 and EC6-23 from the Revise). Constraints: `--json` and exit codes unchanged; no full-screen views; nothing asks without a terminal.
 
 <!-- Document specifications here -->
 
 ---
 
-<!-- FORGE_PHASE:Generate:Pending -->
+<!-- FORGE_PHASE:Generate:Complete -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.
@@ -84,11 +84,11 @@ Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 
 ### Implementation Notes
 
-T0 #66, #69 (v2.1.1, v2.1.2); T1 #68; T2 #72; T3 #73; T4+T5 #74; T6 #75; T7 #76; smoke fixes #77; v2.2.0 (#71). RED runs, slips and plan changes in `docs/cli-output-design/cycle-review.md`.
+T0 #66, #69 (v2.1.1, v2.1.2); T1 #68; T2 #72; T3 #73; T4+T5 #74; T6 #75; T7 #76; smoke fixes #77; v2.2.0 (#71). Revise: T9 + T10 #79 (v2.2.1). RED runs, slips and plan changes in `docs/cli-output-design/cycle-review.md`.
 
 ---
 
-<!-- FORGE_PHASE:Evaluate:Pending -->
+<!-- FORGE_PHASE:Evaluate:Active -->
 ## Phase 5: Evaluate
 
 **Purpose**: Verify output matches intent.
