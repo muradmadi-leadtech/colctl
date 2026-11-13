@@ -140,12 +140,6 @@ fn add_text(p: &Plugin, tool_of_first: &str) -> String {
 /// Merges entries that are the same plugin (AC5-08): same normalised repo, subpath and name, or
 /// (without a repo) the same tool and id.
 pub fn merge(entries: &[Entry]) -> Vec<Plugin> {
-    let _ = entries; // RED
-    Vec::new()
-}
-
-#[allow(dead_code)]
-fn merge_impl(entries: &[Entry]) -> Vec<Plugin> {
     let mut sorted: Vec<&Entry> = entries.iter().collect();
     sorted.sort_by_key(|e| priority(e));
     let mut groups: BTreeMap<String, Vec<&Entry>> = BTreeMap::new();
@@ -270,12 +264,6 @@ fn passes(p: &Plugin, q: &Query) -> bool {
 
 /// The results for a query, ranked and limited, and how many matched in all (AC5-09, AC5-10).
 pub fn search(plugins: &[Plugin], q: &Query) -> (Vec<Plugin>, usize) {
-    let _ = (plugins, q); // RED
-    (Vec::new(), 0)
-}
-
-#[allow(dead_code)]
-fn search_impl(plugins: &[Plugin], q: &Query) -> (Vec<Plugin>, usize) {
     let mut hits: Vec<(u32, &Plugin)> = plugins
         .iter()
         .filter(|p| passes(p, q))
