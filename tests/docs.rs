@@ -104,6 +104,10 @@ fn ac_34_docs_exist_for_everything_shipped() {
         // Cycle 6 (AC6-29)
         "docs/reference/output.md",
         "docs/explanation/how-colctl-talks.md",
+        // Cycle 7
+        "docs/reference/convert.md",
+        "docs/how-to/use-a-claude-only-plugin-in-codex.md",
+        "docs/explanation/converting-plugins.md",
     ];
     for page in pages {
         assert!(read(page).starts_with("# "), "{page} needs a title");
@@ -166,6 +170,7 @@ fn defined_ids() -> BTreeSet<String> {
         ("quarantine", "AC4", "EC4"),
         ("discovery", "AC5", "EC5"),
         ("cli-output-design", "AC6", "EC6"),
+        ("convert", "AC7", "EC7"),
     ] {
         for (file, prefix, id) in [
             ("acceptance-criteria.md", format!("**{ac}-"), ac),
@@ -213,7 +218,7 @@ fn tested_ids() -> BTreeSet<String> {
             for pair in parts.windows(2) {
                 if [
                     "ac", "ec", "ac2", "ec2", "ac3", "ec3", "ac4", "ec4", "ac5", "ec5", "ac6",
-                    "ec6",
+                    "ec6", "ac7", "ec7",
                 ]
                 .contains(&pair[0])
                     && pair[1].len() == 2
@@ -243,6 +248,8 @@ fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_ac6_30_every_criterion_and_edge_case_has_a_
         ("EC5-", 24),
         ("AC6-", 36),
         ("EC6-", 23),
+        ("AC7-", 17),
+        ("EC7-", 20),
     ] {
         assert_eq!(
             defined.iter().filter(|i| i.starts_with(prefix)).count(),

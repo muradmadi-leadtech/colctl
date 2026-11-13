@@ -705,3 +705,70 @@ fn ac7_15_review_says_when_the_repo_starts_packaging_for_codex() {
     let v: Value = serde_json::from_str(&env.ok(&["review", "qdrant", "--json"])).unwrap();
     assert_eq!(v["candidates"][0]["conversion"]["native"], true);
 }
+
+// ---------------------------------------------------------------- the rest (T7)
+
+#[test]
+fn ec7_12_convert_waits_for_the_lock() {
+    let env = machine();
+    claude_only(&env, "qdrant", &[]);
+    fs::write(
+        env.source.join(".state/lock"),
+        std::process::id().to_string(),
+    )
+    .unwrap();
+    assert_eq!(env.code(&["convert", "qdrant"]).0, 3);
+    assert!(
+        state(&env)["quarantine"]
+            .get("conversions/qdrant")
+            .is_none()
+    );
+    // A dry run doesn't need it.
+    env.ok(&["convert", "qdrant", "--dry-run"]);
+    fs::remove_file(env.source.join(".state/lock")).unwrap();
+}
+
+#[test]
+fn ec7_13_a_failed_codex_install_is_retried() {
+    let env = machine();
+    claude_only(&env, "qdrant", &[]);
+    env.ok(&["convert", "qdrant"]);
+    let mut env = env.var("FAKE_CODEX_FAIL", "add qdrant@colctl-qdrant");
+    let (code, out, _) = env.code(&["approve", "qdrant"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(env.config().contains("convert = [\"codex\"]"));
+    assert!(env.codex_installed(&env.home.join(".codex")).is_empty());
+    env.vars.retain(|(k, _)| k != "FAKE_CODEX_FAIL");
+    env.ok(&["sync"]);
+    assert_eq!(
+        env.codex_installed(&env.home.join(".codex")),
+        vec!["qdrant@colctl-qdrant"]
+    );
+}
+
+#[test]
+fn ac7_17_machine_output_only_gains_fields() {
+    let env = machine();
+    claude_only(&env, "qdrant", &[]);
+    // Nothing converted: none of the new fields (the 2.2 goldens, AC6-01, stay byte-identical).
+    let before = env.status_json();
+    assert!(before["sources"][0].get("convert").is_none());
+    assert!(!before.to_string().contains("\"converted\""));
+    // Converted: the source gains "convert", the Codex item gains "converted", nothing else moves.
+    env.ok(&["convert", "qdrant"]);
+    env.ok(&["approve", "qdrant"]);
+    let after = env.status_json();
+    let mut source = after["sources"][0].clone();
+    assert_eq!(source["convert"], json!(["codex"]));
+    source.as_object_mut().unwrap().remove("convert");
+    let mut was = before["sources"][0].clone();
+    was.as_object_mut().unwrap().remove("rev");
+    source.as_object_mut().unwrap().remove("rev");
+    assert_eq!(source, was);
+    let item = codex_item(&env, "qdrant");
+    let keys: Vec<&String> = item.as_object().unwrap().keys().collect();
+    assert_eq!(
+        keys,
+        ["converted", "hint", "kind", "name", "state", "target"]
+    );
+}

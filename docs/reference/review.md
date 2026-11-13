@@ -11,6 +11,13 @@ lock.
 Versions are held by [`update`](update.md) (source plugins) and [`refresh`](refresh.md) (taken-over skills and
 agents). Decide them with [`approve`](approve.md) or [`reject`](reject.md).
 
+A source's Codex package held by [`convert`](convert.md) answers to the source's name too (its key is
+`conversions/<name>`): review shows its skills, hooks (event, matcher, command), risk flags, what Codex never runs and
+what isn't carried over. For an update of a converted source, review adds a **Codex package** section: what changes
+in its package, with flags, or that the new version packages for Codex itself. In `--json`, a held conversion has
+`"kind": "conversion"` with `skills`, `hooks`, `never_runs` and `not_carried`; an update of a converted source has a
+`conversion` object (`native`, `files`, `flags` and the same fields).
+
 ## Without a name
 
 A verdict, then one row per held version:
