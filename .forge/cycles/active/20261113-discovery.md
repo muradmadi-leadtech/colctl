@@ -10,16 +10,16 @@ Find plugins across every catalog Claude and Codex already keep on this machine 
 
 ---
 
-<!-- FORGE_PHASE:Focus:Active -->
+<!-- FORGE_PHASE:Focus:Complete -->
 ## Phase 1: Focus
 
 **Purpose**: Define what you're building and why.
 
 ### Required Outputs
-- [ ] Problem statement and target users defined
-- [ ] Testable success criteria written
-- [ ] System Context diagram (C4 L1) created
-- [ ] Clear boundaries on what you WON'T build
+- [x] Problem statement and target users defined
+- [x] Testable success criteria written
+- [x] System Context diagram (C4 L1) created
+- [x] Clear boundaries on what you WON'T build
 
 ### Notes
 
@@ -29,7 +29,7 @@ Find plugins across every catalog Claude and Codex already keep on this machine 
 
 ---
 
-<!-- FORGE_PHASE:Orchestrate:Pending -->
+<!-- FORGE_PHASE:Orchestrate:Active -->
 ## Phase 2: Orchestrate
 
 **Purpose**: Break the work into session-sized pieces.
@@ -42,7 +42,8 @@ Find plugins across every catalog Claude and Codex already keep on this machine 
 
 ### Tasks
 
-<!-- List tasks here -->
+See `docs/tasks/discovery.md` (T1–T9), `docs/discovery/containers.md`, `docs/discovery/components.md`.
+Dependency map: T1, T2 independent; T1 → T3–T7; T2 → T3, T4; T3–T7 → T8 → T9.
 
 ---
 
