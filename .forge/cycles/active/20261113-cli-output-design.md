@@ -1,0 +1,110 @@
+# Cycle: cli-output-design
+
+**Created**: 2026-11-13T09:23:22.709026+00:00
+**Priority**: medium
+**Status**: Active
+
+## Overview
+
+Design how colctl presents information and interacts, as one system applied to every command: answers first, calm defaults, live progress, disciplined colour, width-aware layout, errors with fixes, safe interaction, guiding help. `--json` and exit codes unchanged. Cycle 6 of the roadmap in `.forge/context.md`.
+
+---
+
+<!-- FORGE_PHASE:Focus:Active -->
+## Phase 1: Focus
+
+**Purpose**: Define what you're building and why.
+
+### Required Outputs
+- [ ] Problem statement and target users defined
+- [ ] Testable success criteria written
+- [ ] System Context diagram (C4 L1) created
+- [ ] Clear boundaries on what you WON'T build
+
+### Notes
+
+- PRD: `docs/prd/cli-output-design.md`; system context: `docs/cli-output-design/system-context.md`.
+- Owner's decisions (2026-11-13): rich + interactive in a terminal (confirm, pickers, pager; no full-screen views);
+  small standard crates allowed; `status` summary first, problems only, `--all` for everything; minor release
+  (2.2.0) with human text declared unstable.
+
+---
+
+<!-- FORGE_PHASE:Orchestrate:Pending -->
+## Phase 2: Orchestrate
+
+**Purpose**: Break the work into session-sized pieces.
+
+### Required Outputs
+- [ ] Container architecture (C4 L2) designed
+- [ ] Component architecture (C4 L3) designed
+- [ ] Dependency map created
+- [ ] Tasks sized for single AI sessions
+
+### Tasks
+
+<!-- List tasks here -->
+
+---
+
+<!-- FORGE_PHASE:Refine:Pending -->
+## Phase 3: Refine
+
+**Purpose**: Define exactly what "done" looks like.
+
+### Required Outputs
+- [ ] Acceptance criteria in Given-When-Then format
+- [ ] Interface specifications documented
+- [ ] Edge cases enumerated by category
+- [ ] Constraints vs criteria documented
+
+**CRITICAL**: No code in this phase - specifications only.
+
+### Specifications
+
+<!-- Document specifications here -->
+
+---
+
+<!-- FORGE_PHASE:Generate:Pending -->
+## Phase 4: Generate
+
+**Purpose**: AI writes code following TDD.
+
+### Process
+- [ ] RED: Write failing tests
+- [ ] GREEN: Minimal code to pass
+- [ ] REFACTOR: Improve while green
+- [ ] Code review: Linter and type checks pass
+- [ ] Code review: TDD compliance verified
+- [ ] Code review: Acceptance criteria alignment checked
+
+### Implementation Notes
+
+<!-- Document implementation progress here -->
+
+---
+
+<!-- FORGE_PHASE:Evaluate:Pending -->
+## Phase 5: Evaluate
+
+**Purpose**: Verify output matches intent.
+
+### Checklist
+- [ ] Criteria verified line-by-line
+- [ ] Edge cases tested
+- [ ] Code review: Full test suite passes with coverage threshold met
+- [ ] Code review: Security review completed
+- [ ] Code review: Integration and interface contracts verified
+- [ ] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
+- [ ] Disposition decision made
+
+### Disposition
+
+<!-- Accept / Accept with issues / Revise / Reject -->
+
+---
+
+## Learnings
+
+<!-- Capture learnings during and after the cycle -->
