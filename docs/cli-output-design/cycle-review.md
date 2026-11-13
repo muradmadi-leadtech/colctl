@@ -265,7 +265,7 @@ nothing held for review`). Facts that don't fit are now left off.
 stopped at the format check before the tests ran, so I pushed the formatted tests and waited for CI to fail on the 8
 tests themselves before pushing GREEN. The PR title also failed its check: `fix(status,help)` isn't a valid scope.
 
-**Verified.** 34 + 1 new tests, coverage 94.87%, `just check` green. Smoke test on a copy of your setup in a real 80- and
+**Verified.** 461 tests (6 new, 3 updated), coverage 94.87%, `just check` green. Smoke test on a copy of your setup in a real 80- and
 60-column pseudo-terminal:
 
 ```
