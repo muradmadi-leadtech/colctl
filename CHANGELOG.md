@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.1.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.0.0...v2.1.0) (2026-11-13)
+
+
+### Features
+
+* add a source plugin straight from a search result ([#60](https://github.com/muradmadi-leadtech/colctl/issues/60)) ([4b295e9](https://github.com/muradmadi-leadtech/colctl/commit/4b295e9b78b4162e30ef669c7331a9abd23b2db4))
+* list and refresh marketplaces, and search Codex connectors ([#59](https://github.com/muradmadi-leadtech/colctl/issues/59)) ([6a69346](https://github.com/muradmadi-leadtech/colctl/commit/6a6934611b18fed552bc7e1a0dfef2ff652dc852))
+* merge, match and rank catalog entries ([#57](https://github.com/muradmadi-leadtech/colctl/issues/57)) ([f48c9a0](https://github.com/muradmadi-leadtech/colctl/commit/f48c9a0aba028da70e7bf746a185d785cc852fc4))
+* read every plugin catalog the harnesses keep ([#55](https://github.com/muradmadi-leadtech/colctl/issues/55)) ([d981e43](https://github.com/muradmadi-leadtech/colctl/commit/d981e433cf79fe6fb876888f4e4a1e18721f92c3))
+* search, show and browse developers across every catalog ([#58](https://github.com/muradmadi-leadtech/colctl/issues/58)) ([93dd67c](https://github.com/muradmadi-leadtech/colctl/commit/93dd67cfef1d53868727081bc09837156d2e529b))
+
+
+### Bug Fixes
+
+* use a plugin's own name, its source's version, and exit quietly on a closed pipe ([#62](https://github.com/muradmadi-leadtech/colctl/issues/62)) ([43f4005](https://github.com/muradmadi-leadtech/colctl/commit/43f400522313acb1cb52e964311212c4552378ac))
+
 ## [2.0.0](https://github.com/muradmadi-leadtech/colctl/compare/v1.2.1...v2.0.0) (2026-11-12)
 
 
