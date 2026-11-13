@@ -48,16 +48,16 @@ Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 
 ---
 
-<!-- FORGE_PHASE:Refine:Active -->
+<!-- FORGE_PHASE:Refine:Complete -->
 ## Phase 3: Refine
 
 **Purpose**: Define exactly what "done" looks like.
 
 ### Required Outputs
-- [ ] Acceptance criteria in Given-When-Then format
-- [ ] Interface specifications documented
-- [ ] Edge cases enumerated by category
-- [ ] Constraints vs criteria documented
+- [x] Acceptance criteria in Given-When-Then format
+- [x] Interface specifications documented
+- [x] Edge cases enumerated by category
+- [x] Constraints vs criteria documented
 
 **CRITICAL**: No code in this phase - specifications only.
 
@@ -69,7 +69,7 @@ Dependency map: T1 → T2, T3, T4, T5 → T6 → T7 → T8.
 
 ---
 
-<!-- FORGE_PHASE:Generate:Pending -->
+<!-- FORGE_PHASE:Generate:Active -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.

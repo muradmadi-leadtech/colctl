@@ -37,9 +37,9 @@ Harnesses link to that source instead of keeping their own copies. Public repo:
 
 ## Operating policy (autonomous)
 
-Set by the user on 2026-11-12 for cycle 1, and extended to cycle 2 (codex-cli-support), cycle 3 (plugins-from-source) the same day, cycle 4 (quarantine, v2.0.0) the same day, and cycle 5 (discovery, v2.1.0) on 2026-11-13: run Generate to
+Set by the user on 2026-11-12 for cycle 1, and extended to cycle 2 (codex-cli-support), cycle 3 (plugins-from-source) the same day, cycle 4 (quarantine, v2.0.0) the same day, cycle 5 (discovery, v2.1.0) on 2026-11-13, and cycle 6 (CLI output design, v2.1.1 for T0 then v2.2.0) on 2026-11-13: run Generate to
 completion without pausing, open PRs and squash-auto-merge them once `check` passes, and cut the release (v1.0.0 for
-cycle 1, v1.1.0 for cycle 2, v1.2.0 for cycle 3, v2.0.0 for cycle 4, v2.1.0 for cycle 5). The owner then evaluates.
+cycle 1, v1.1.0 for cycle 2, v1.2.0 for cycle 3, v2.0.0 for cycle 4, v2.1.0 for cycle 5, v2.1.1 and v2.2.0 for cycle 6). The owner then evaluates.
 
 - **Always autonomous:** phase docs, tests, RED → GREEN → REFACTOR, refactors, PRs into `main`, merging green PRs,
   release-please release PRs, phase advancement.
