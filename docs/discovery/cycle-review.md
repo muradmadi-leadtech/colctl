@@ -11,7 +11,7 @@ _Cycle 5 · Evaluate · 2026-11-13_
 | **Released** | [v2.1.0](https://github.com/muradmadi-leadtech/colctl/releases/tag/v2.1.0): both archives attested (`gh attestation verify` exit 0); `mise exec github:muradmadi-leadtech/colctl@2.1.0 -- colctl --version` prints `colctl 2.1.0` |
 | **PRs** | #54 plan · #55 T1 · #57 T2 · #58 T3+T4 · #59 T5+T6 · #60 T7 · #61 T8 · #62 smoke fixes · #56 release |
 | **Production impact** | None on this machine. Real profiles were only read; the smoke test ran on a copy |
-| **Disposition** | _Yours to decide_ |
+| **Disposition** | **Accept**, signed off by the owner on 2026-11-13 after using it on the real profiles (`add source qdrant-skills@claude-plugins-official` cloned github.com/qdrant/skills and installed `qdrant@qdrant` in both Claude profiles) |
 
 ## Your story, on a copy of your real setup
 
@@ -215,4 +215,4 @@ instrumentation too.
 - [ ] `colctl search api security`, `colctl show superpowers`, `colctl developers | head`
 - [ ] `colctl marketplace list`, `colctl connectors gmail`
 - [ ] Optional: `colctl add source <id>` for a plugin you want (it installs everywhere it's packaged; `colctl rm source <name>` undoes it)
-- [ ] Decide the disposition
+- [x] Decide the disposition: **Accept**

@@ -99,11 +99,11 @@ T1–T8 merged as #55, #57–#61; smoke fixes #62 (EC5-22–24); v2.1.0 released
 - [x] Code review: Security review completed
 - [x] Code review: Integration and interface contracts verified
 - [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
-- [ ] Disposition decision made
+- [x] Disposition decision made
 
 ### Disposition
 
-<!-- Accept / Accept with issues / Revise / Reject -->
+**Accept** (owner, 2026-11-13).
 
 ---
 

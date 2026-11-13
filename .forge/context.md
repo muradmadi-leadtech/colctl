@@ -49,11 +49,13 @@ cycle 1, v1.1.0 for cycle 2, v1.2.0 for cycle 3, v2.0.0 for cycle 4, v2.1.0 for 
 
 ## Roadmap
 
-Agreed with the owner on 2026-11-12. The CLI comes first; the TUI only displays logic the CLI already has.
+Agreed with the owner on 2026-11-12, reordered on 2026-11-13: the CLI is made complete and consistent before any TUI.
+The TUI only displays logic the CLI already has.
 
-| Cycle | Name | What it adds |
+| Cycle | Name | Status / what it adds |
 |---|---|---|
-| 4 | quarantine (CLI) | New versions of plugins and skills wait for the owner's approval before they install. |
-| 5 | discovery (CLI) | List marketplaces, search plugins, browse by developer; all with `--json`. |
-| 6 | TUI | `colctl` with no arguments opens a full-screen UI over status, sync, adopt, update, review and browse. The aim is Claude Code-level polish: ratatui + tachyonfx transitions, nucleo fuzzy search, a design spec (tokens, keymap, components, motion) before code, snapshot tests per screen. Followed by a dedicated refinement pass. |
-| later | convert | Repackage a plugin for a tool its repo doesn't package. |
+| 4 | quarantine | Done, v2.0.0. New versions wait for approval |
+| 5 | discovery | Done, v2.1.0. Search, show, developers, marketplaces, connectors, `add source <id>` |
+| 6 | CLI output design | One consistent output system for every command: layout, wording, states, colour (with `NO_COLOR`), summaries, errors and hints, so the CLI is pleasant on its own. Includes the follow-ups put off so far (review flag noise and alignment, sync's "needs attention" wording, connector fields) |
+| 7 | convert | Repackage plugins, skills, agents and hooks for a tool their repo doesn't package (e.g. a Claude-only plugin into Codex) |
+| 8 | TUI | `colctl` with no arguments opens a full-screen UI over everything above. Claude Code-level polish: ratatui + tachyonfx transitions, nucleo fuzzy search, a design spec (tokens, keymap, components, motion) before code, snapshot tests per screen; followed by a refinement pass |
