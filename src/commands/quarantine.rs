@@ -462,11 +462,16 @@ pub(super) struct View {
     pub error: Option<String>,
     /// Something to know before approving (EC4-14).
     pub warning: Option<String>,
+    /// A held conversion's package, rebuilt from the clone (cycle 7).
+    pub package: Option<crate::repackage::Package>,
 }
 
 /// The short name shown for a key: the source name, or the key itself for skills and agents.
 fn name_of(key: &str) -> String {
-    key.strip_prefix("sources/").unwrap_or(key).to_string()
+    key.strip_prefix("sources/")
+        .or_else(|| key.strip_prefix("conversions/"))
+        .unwrap_or(key)
+        .to_string()
 }
 
 /// Turns a name from the command line into a candidate key, checking it names something colctl
@@ -481,9 +486,58 @@ pub(super) fn resolve(ws: &Workspace, name: &str) -> Result<String, CliError> {
         )));
     }
     if ws.config.sources.iter().any(|s| s.name == name) {
+        // A source's held conversion answers to the source's name when no update is held.
+        let conversion = super::convert::conversion_key(name);
+        if !ws.state.quarantine.contains_key(&source_key(name))
+            && ws.state.quarantine.contains_key(&conversion)
+        {
+            return Ok(conversion);
+        }
         return Ok(source_key(name));
     }
     Err(CliError::usage(format!("no source named \"{name}\"")))
+}
+
+/// A held conversion: what it changes against the installed package (none yet, the first time),
+/// and its contents rebuilt from the clone, which must give the held digest.
+fn inspect_conversion(
+    ctx: &Ctx,
+    ws: &Workspace,
+    git: &Git,
+    key: &str,
+    c: &state::HeldConversion,
+    with_diff: bool,
+    view: &mut View,
+) -> Result<Review, String> {
+    let name = view.name.clone();
+    let held = state::snapshot_path(&ctx.source, key);
+    if !held.is_dir() {
+        return Err(format!(
+            "the held package for {name} is missing; run colctl convert {name}"
+        ));
+    }
+    if let Some(s) = ws.config.sources.iter().find(|s| s.name == name) {
+        view.repo = Some(s.repo.clone());
+        match super::convert::package_for(ctx, s) {
+            Ok(pkg) => {
+                if pkg.digest() != c.digest || s.rev != c.rev {
+                    view.warning = Some(format!(
+                        "{name} changed since its package was held; run colctl convert {name} again"
+                    ));
+                }
+                view.package = Some(pkg);
+            }
+            Err(e) => view.warning = Some(e.message),
+        }
+    }
+    let installed = plugins_dir(ctx).join(super::CONVERTED).join(&name);
+    let empty = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let installed = if installed.is_dir() {
+        installed
+    } else {
+        empty.path().to_path_buf()
+    };
+    review::copies(git, &ctx.source, &installed, &held, true, with_diff)
 }
 
 /// Reads one candidate: checks it's intact, and gathers its review (with the diff when asked).
@@ -504,6 +558,7 @@ pub(super) fn inspect(
         review: None,
         error: None,
         warning: None,
+        package: None,
     };
     let result = match candidate {
         Candidate::Source(c) => {
@@ -545,10 +600,7 @@ pub(super) fn inspect(
                 )
             }
         }
-        // Built and reviewed by `colctl convert` (T4).
-        Candidate::Conversion(_) => Err(format!(
-            "{name}'s Codex package can't be reviewed by this version"
-        )),
+        Candidate::Conversion(c) => inspect_conversion(ctx, ws, git, key, c, with_diff, &mut view),
     };
     match result {
         Ok(r) => view.review = Some(r),
@@ -744,6 +796,50 @@ fn detail_lines(ctx: &Ctx, v: &View) -> Vec<String> {
         lines.push(String::new());
         lines.push(render::heading(caps, title));
     };
+    if let Some(pkg) = &v.package {
+        section(&mut lines, "Skills");
+        lines.extend(
+            render::wrap(&escape(&pkg.skills.join(", ")), caps.width, 2, 2)
+                .into_iter()
+                .enumerate()
+                .map(|(i, l)| if i == 0 { format!("  {l}") } else { l }),
+        );
+        section(&mut lines, &format!("Hooks ({})", pkg.hooks.len()));
+        if pkg.hooks.is_empty() {
+            lines.push(format!("  {} none", crate::ui::style::mark(Token::Info, c)));
+        }
+        let cells: Vec<Vec<Cell>> = pkg
+            .hooks
+            .iter()
+            .map(|h| {
+                vec![
+                    Cell::styled(escape(&h.event), Token::Name),
+                    Cell::plain(escape(h.matcher.as_deref().unwrap_or(""))),
+                    Cell::styled(escape(&h.command), Token::Dim),
+                ]
+            })
+            .collect();
+        lines.extend(render::table(caps, 2, &cells, 2));
+        for (title, items) in [
+            ("Codex never runs", pkg.report.never_runs.clone()),
+            (
+                "Not carried over",
+                pkg.report
+                    .not_carried
+                    .iter()
+                    .map(|n| format!("{} {}", n.kind, n.name))
+                    .collect(),
+            ),
+        ] {
+            if items.is_empty() {
+                continue;
+            }
+            section(&mut lines, title);
+            for i in items {
+                lines.push(format!("  {}", escape(&i)));
+            }
+        }
+    }
     section(&mut lines, "Risk flags");
     let rows = flag_rows(r);
     if rows.is_empty() {
@@ -877,6 +973,11 @@ pub(super) fn view_json(v: &View, full: bool) -> Value {
     if let Some(diff) = r.and_then(|r| r.diff.clone()) {
         out["diff"] = json!(diff);
     }
+    if let (Some(pkg), Value::Object(o)) = (&v.package, &mut out)
+        && let Value::Object(more) = super::convert::package_json(pkg)
+    {
+        o.extend(more);
+    }
     out
 }
 
@@ -895,6 +996,7 @@ pub(super) fn held_views(ctx: &Ctx, ws: &Workspace, git: Option<&Git>) -> Vec<Vi
                 review: None,
                 error: None,
                 warning: None,
+                package: None,
             },
         })
         .collect()
@@ -1072,10 +1174,21 @@ fn approve_one(
     }
     let commit_err = |e: CliError| e.message;
     match &candidate {
-        Candidate::Conversion(_) => Err(format!(
-            "{}'s Codex package can't be approved by this version",
-            view.name
-        )),
+        Candidate::Conversion(_) => {
+            let name = &view.name;
+            if view.warning.is_some() {
+                return Err(format!(
+                    "{name} changed since its package was held; run colctl convert {name} again"
+                ));
+            }
+            let text = config::set_source_convert(config_text, name, true)?;
+            write_config(ctx, &text).map_err(commit_err)?;
+            *config_text = text;
+            commit(git, ctx, &format!("colctl: convert {name} for Codex")).map_err(commit_err)?;
+            st.quarantine.remove(key);
+            let _ = fsx::remove_any(&state::snapshot_path(&ctx.source, key));
+            Ok(format!("approved {name}'s Codex package"))
+        }
         Candidate::Source(c) => {
             let name = &view.name;
             if view.warning.is_some() {

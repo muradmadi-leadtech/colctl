@@ -28,6 +28,15 @@ impl CliError {
         }
     }
 
+    /// The command can't do what was asked (exit 1).
+    pub fn refused(message: impl Into<String>) -> Self {
+        Self {
+            code: EXIT_DRIFT,
+            message: message.into(),
+            hint: None,
+        }
+    }
+
     /// The lock is held by another colctl (exit 3).
     pub fn locked(message: impl Into<String>) -> Self {
         Self {

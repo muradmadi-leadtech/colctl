@@ -182,6 +182,38 @@ fn plan(tool: &Tool, clone: &Path, plugin: &str, subpath: Option<&str>) -> Plan 
     }
 }
 
+/// The folder of the clone holding the plugin's Claude packaging (cycle 7 converts from it): the
+/// folder the repo's Claude marketplace entry names when it's inside the repo, else `subpath`, else
+/// the clone itself.
+pub fn claude_folder(clone: &Path, plugin: &str, subpath: Option<&str>) -> Option<PathBuf> {
+    let entry_path = read_json(&clone.join(CLAUDE.marketplace))
+        .ok()
+        .and_then(|v| {
+            let entry = v
+                .get("plugins")?
+                .as_array()?
+                .iter()
+                .find(|p| p.get("name").and_then(Value::as_str) == Some(plugin))?
+                .clone();
+            let source = entry.get("source")?;
+            if !is_local(source) {
+                return None;
+            }
+            source
+                .as_str()
+                .or_else(|| source.get("path").and_then(Value::as_str))
+                .or_else(|| source.get("url").and_then(Value::as_str))
+                .map(str::to_string)
+        });
+    let candidates: Vec<Option<&str>> = vec![entry_path.as_deref(), subpath, None];
+    plugin_folder(&CLAUDE, clone, &candidates).filter(|f| {
+        fs::canonicalize(f)
+            .ok()
+            .zip(fs::canonicalize(clone).ok())
+            .is_some_and(|(f, c)| f.starts_with(c))
+    })
+}
+
 /// Writes (or, without `write`, only describes) colctl's one-plugin marketplace for `tool`, whose plugin
 /// entry points at `./<link>`, a symlink to `folder`.
 fn wrap(
