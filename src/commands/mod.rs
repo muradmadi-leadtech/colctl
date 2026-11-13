@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 
 mod discovery;
 mod quarantine;
-pub use discovery::{developers, search, show};
+pub use discovery::{connectors, developers, marketplace_list, marketplace_refresh, search, show};
 pub use quarantine::{approve, refresh, reject, review, update};
 
 /// Where source plugin clones live, and colctl-written manifests inside it.

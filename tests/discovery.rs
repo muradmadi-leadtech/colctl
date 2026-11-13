@@ -22,6 +22,17 @@ fn machine() -> Env {
     env
 }
 
+/// [`machine`] plus the kilo Codex profile, registered by init.
+fn machine_with_kilo_codex() -> Env {
+    let env = Env::new();
+    env.native();
+    env.kilo();
+    env.codex();
+    env.kilo_codex();
+    env.ok(&["init"]);
+    env
+}
+
 /// A Claude marketplace in `profile`, stored under the temp root.
 fn claude_market(env: &Env, profile: &Path, name: &str, repo: &str, plugins: Value) -> PathBuf {
     let dir = env.home.parent().unwrap().join("markets").join(name);
@@ -370,4 +381,199 @@ fn ec5_13_control_characters_are_escaped() {
         v["results"][0]["description"],
         "ok \u{1b}]0;pwned\u{07} here"
     );
+}
+
+// ---------------------------------------------------------------- marketplaces (T5)
+
+#[test]
+fn ac5_19_marketplace_list() {
+    let env = machine();
+    catalogs(&env);
+    env.write_config(&env.config().replacen(
+        "[marketplaces]",
+        "[marketplaces]\nofficial = \"github:anthropics/official\"",
+        1,
+    ));
+    let out = env.ok(&["marketplace", "list"]);
+    let line = |name: &str| {
+        out.lines()
+            .find(|l| l.starts_with(name))
+            .unwrap_or_else(|| panic!("{name} in {out}"))
+            .to_string()
+    };
+    let dir = line("anthropic-plugin-directory");
+    assert!(
+        dir.contains("built in") && dir.contains("3 plugins") && dir.contains("claude"),
+        "{dir}"
+    );
+    let official = line("official");
+    assert!(
+        official.contains("github:anthropics/official"),
+        "{official}"
+    );
+    assert!(
+        official.contains("3 plugins") && official.ends_with("managed"),
+        "{official}"
+    );
+    let tools = line("tools");
+    assert!(
+        tools.contains("codex") && tools.contains("1 plugin "),
+        "{tools}"
+    );
+    let (code, v) = json_of(&env, &["marketplace", "list", "--json"]);
+    assert_eq!(code, 0);
+    let ms = v["marketplaces"].as_array().unwrap();
+    assert_eq!(ms.len(), 3);
+    let o = ms.iter().find(|m| m["name"] == "official").unwrap();
+    assert_eq!(o["managed"], true);
+    assert_eq!(o["profiles"], json!(["claude"]));
+}
+
+#[test]
+fn ac5_20_marketplace_refresh() {
+    let env = machine_with_kilo_codex();
+    let out = env.ok(&["marketplace", "refresh", "--dry-run"]);
+    assert!(
+        out.contains("claude: would run claude plugin marketplace update"),
+        "{out}"
+    );
+    assert!(
+        out.contains("kilo-codex: would run codex plugin marketplace upgrade"),
+        "{out}"
+    );
+    assert!(env.log().is_empty() && env.codex_log().is_empty());
+    let out = env.ok(&["marketplace", "refresh"]);
+    assert!(
+        out.contains("kilo-claude: ✓ claude plugin marketplace update"),
+        "{out}"
+    );
+    let claude = env.log();
+    assert_eq!(claude.len(), 2, "native and kilo");
+    assert!(
+        claude.iter().any(|c| c["config_dir"]
+            .as_str()
+            .is_some_and(|d| d.ends_with("profiles/claude"))),
+        "{claude:?}"
+    );
+    assert_eq!(env.codex_log_args(), vec!["plugin marketplace upgrade"; 2]);
+    let env = env.var("FAKE_CODEX_FAIL", "upgrade");
+    let (code, out, _) = env.code(&["marketplace", "refresh"]);
+    assert_eq!(code, 1);
+    assert!(
+        out.contains("codex: ✗ codex plugin marketplace upgrade"),
+        "{out}"
+    );
+}
+
+#[test]
+fn ec5_17_refresh_without_a_tool() {
+    let env = Env::without_claude();
+    env.native();
+    env.codex();
+    env.ok(&["init"]);
+    let (code, out, _) = env.code(&["marketplace", "refresh"]);
+    assert_eq!(code, 1);
+    assert!(
+        out.contains("claude: skipped: claude isn't on PATH"),
+        "{out}"
+    );
+    assert!(out.contains("codex: ✓"), "{out}");
+}
+
+// ---------------------------------------------------------------- connectors (T6)
+
+fn codex_list(profile: &Path, available: Value, installed: Value) {
+    write(
+        &profile.join("fake-plugin-list.json"),
+        &json!({"installed": installed, "available": available}),
+    );
+}
+
+fn connector(id: &str, name: &str) -> Value {
+    json!({"pluginId": id, "name": name, "marketplaceName": "openai-curated-remote",
+           "version": "0.1.0", "source": {"source": "remote", "id": "x"}})
+}
+
+#[test]
+fn ac5_21_connectors() {
+    let env = machine_with_kilo_codex();
+    let codex = env.home.join(".codex");
+    let kilo = env.kilo_codex();
+    let gmail = connector("gmail@openai-curated-remote", "gmail");
+    let slack = connector("slack@openai-curated-remote", "slack");
+    let local =
+        json!({"pluginId": "p@local", "name": "p", "source": {"source": "git", "url": "/x"}});
+    codex_list(&codex, json!([gmail, slack, local]), json!([]));
+    codex_list(&kilo, json!([gmail]), json!([gmail]));
+    let out = env.ok(&["connectors", "gmail"]);
+    assert!(out.starts_with("gmail@openai-curated-remote"), "{out}");
+    assert!(out.contains("[installed: kilo-codex]"), "{out}");
+    assert!(out.contains("1 of 1 connectors"), "{out}");
+    assert_eq!(
+        env.codex_log_args(),
+        vec!["plugin list --available --json"; 2]
+    );
+    let out = env.ok(&["connectors"]);
+    assert!(out.contains("2 of 2 connectors"), "{out}");
+    assert!(!out.contains("p@local"), "{out}");
+    let (code, v) = json_of(&env, &["connectors", "slack", "--json"]);
+    assert_eq!(code, 0);
+    assert_eq!(v["results"][0]["kind"], "connector");
+    assert_eq!(
+        v["results"][0]["add"],
+        "installed by codex: codex plugin add slack@openai-curated-remote"
+    );
+}
+
+#[test]
+fn ac5_22_connectors_stay_out_of_search() {
+    let env = machine();
+    catalogs(&env);
+    codex_list(
+        &env.home.join(".codex"),
+        json!([connector("gmail@openai-curated-remote", "gmail")]),
+        json!([]),
+    );
+    assert_eq!(env.code(&["search", "gmail"]).0, 1);
+    assert!(env.codex_log().is_empty());
+}
+
+#[test]
+fn ec5_15_connectors_need_codex_and_a_profile() {
+    let env = Env::without_codex();
+    env.native();
+    env.codex();
+    env.ok(&["init"]);
+    let (code, _, err) = env.code(&["connectors"]);
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("connectors come from codex, and it isn't on PATH"),
+        "{err}"
+    );
+    let env = Env::new();
+    env.native();
+    env.ok(&["init"]);
+    let (code, _, err) = env.code(&["connectors"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("no Codex profiles registered"), "{err}");
+}
+
+#[test]
+fn ec5_16_one_profile_failing_still_lists_the_rest() {
+    let env = machine_with_kilo_codex();
+    let kilo = env.kilo_codex();
+    codex_list(
+        &env.home.join(".codex"),
+        json!([connector("gmail@openai-curated-remote", "gmail")]),
+        json!([]),
+    );
+    fs::write(kilo.join("fake-plugin-list.json"), "not json").unwrap();
+    let (code, out, err) = env.code(&["connectors"]);
+    assert_eq!(code, 1);
+    assert!(out.contains("gmail@openai-curated-remote"), "{out}");
+    assert!(err.contains("warning: kilo-codex: invalid JSON"), "{err}");
+    let env = env.var("FAKE_CODEX_FAIL", "list");
+    let (code, _, err) = env.code(&["connectors"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("warning: codex:"), "{err}");
 }

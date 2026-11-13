@@ -1,6 +1,7 @@
 //! A stand-in for the `codex` CLI, used by colctl's integration tests (never shipped).
 //!
-//! It understands `plugin marketplace add|remove` and `plugin add|remove`, keeps
+//! It understands `plugin marketplace add|remove|upgrade`, `plugin add|remove` and
+//! `plugin list --available --json` (from `$CODEX_HOME/fake-plugin-list.json`), keeps
 //! `$CODEX_HOME/config.toml` (`[marketplaces.<name>]`, `[plugins."<id>"]`) the way Codex does,
 //! and appends one JSON line per call to `$FAKE_CODEX_LOG`. `FAKE_CODEX_FAIL=<text>` makes any
 //! call containing `<text>` exit 1; `FAKE_CODEX_MARKET_NAME` overrides the name a marketplace
@@ -30,10 +31,14 @@ fn main() {
             "codex_home": codex_home.map(|d| d.to_string_lossy().into_owned()),
             "openai": openai,
         });
-        let mut text = fs::read_to_string(&log).unwrap_or_default();
-        text.push_str(&line.to_string());
-        text.push('\n');
-        fs::write(&log, text).unwrap();
+        // One append per call, so calls running in parallel don't overwrite each other.
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+            .unwrap();
+        file.write_all(format!("{line}\n").as_bytes()).unwrap();
     }
     if let Some(secs) = env::var("FAKE_CODEX_SLEEP")
         .ok()
@@ -48,6 +53,24 @@ fn main() {
     {
         eprintln!("fake codex failure for: {joined}");
         exit(1);
+    }
+
+    // Read-only calls: answered and done, without touching config.toml.
+    match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        ["plugin", "list", "--available", "--json"] => {
+            // The catalog a test put in the profile, or an empty one.
+            let list = fs::read_to_string(dir.join("fake-plugin-list.json"))
+                .unwrap_or_else(|_| r#"{"installed": [], "available": []}"#.into());
+            println!("{list}");
+            exit(0);
+        }
+        ["plugin", "marketplace", "upgrade"] => exit(0),
+        _ => {}
     }
 
     let path = dir.join("config.toml");
