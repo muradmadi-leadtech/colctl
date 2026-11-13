@@ -838,6 +838,23 @@ impl Builder<'_> {
                     self.actions.push(Action::Uninstall { id: id.clone() });
                 }
             }
+            // AC6-32: colctl installed this source under another id before (e.g. from the repo's own
+            // marketplace, which 2.1 used even when it pointed outside the repo). Move it over.
+            if let Some(old) = state.sources.get(name).filter(|s| s.id != target.id) {
+                if plugins.installed.contains(&old.id) {
+                    self.actions.push(Action::UninstallSource {
+                        source: name.to_string(),
+                        id: old.id.clone(),
+                    });
+                }
+                if old.marketplace != target.marketplace
+                    && plugins.marketplaces.contains_key(&old.marketplace)
+                {
+                    self.actions.push(Action::RemoveSourceMarketplace {
+                        name: old.marketplace.clone(),
+                    });
+                }
+            }
             let market = &target.marketplace;
             if !plugins.marketplace_is(market, &target.marketplace_dir) {
                 if plugins.marketplaces.contains_key(market) {

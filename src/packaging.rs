@@ -48,24 +48,24 @@ struct Tool {
     label: &'static str,
     marketplace: &'static str,
     plugin: &'static str,
-    entry: fn(&str) -> Value,
+    entry: fn(&str, &str) -> Value,
 }
 
 const CLAUDE: Tool = Tool {
     label: "Claude",
     marketplace: ".claude-plugin/marketplace.json",
     plugin: ".claude-plugin/plugin.json",
-    entry: |name| json!({"name": name, "source": "./plugin"}),
+    entry: |name, link| json!({"name": name, "source": format!("./{link}")}),
 };
 
 const CODEX: Tool = Tool {
     label: "Codex",
     marketplace: ".agents/plugins/marketplace.json",
     plugin: ".codex-plugin/plugin.json",
-    entry: |name| {
+    entry: |name, link| {
         json!({
             "name": name,
-            "source": {"source": "url", "url": "./plugin"},
+            "source": {"source": "url", "url": format!("./{link}")},
             "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
         })
     },
@@ -76,58 +76,123 @@ fn read_json(path: &Path) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|e| format!("{} doesn't parse: {e}", path.display()))
 }
 
-fn one(
-    write: bool,
-    tool: &Tool,
-    clone: &Path,
-    manifests: &Path,
-    name: &str,
-    plugin: &str,
-    subpath: Option<&str>,
-) -> ToolPackaging {
+/// What a repo offers one tool for a plugin, before anything is written.
+enum Plan {
+    /// The repo's own marketplace lists the plugin inside the repo: use it as is.
+    Repo(Target),
+    /// colctl writes a one-plugin marketplace pointing at this folder of the clone.
+    Wrap {
+        folder: PathBuf,
+        plugin_name: String,
+    },
+    Done(ToolPackaging),
+}
+
+/// True when a marketplace entry's `source` is a folder inside the marketplace's own repo.
+fn is_local(source: &Value) -> bool {
+    match source {
+        Value::String(s) => !s.contains("://"),
+        Value::Object(o) => {
+            let field = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or_default();
+            match field("source") {
+                "url" | "git" => field("url").starts_with('.'),
+                "local" | "path" | "directory" => true,
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// The folder holding `tool`'s plugin manifest, from the first candidate that has one.
+fn plugin_folder(tool: &Tool, clone: &Path, candidates: &[Option<&str>]) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .map(|c| c.map_or(clone.to_path_buf(), |sub| clone.join(sub)))
+        .find(|folder| folder.join(tool.plugin).is_file())
+}
+
+fn wrap_plan(tool: &Tool, folder: PathBuf, plugin: &str) -> Plan {
+    match read_json(&folder.join(tool.plugin)) {
+        Ok(v) => Plan::Wrap {
+            plugin_name: v
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(plugin)
+                .to_string(),
+            folder,
+        },
+        Err(e) => Plan::Done(ToolPackaging::Invalid(e)),
+    }
+}
+
+fn plan(tool: &Tool, clone: &Path, plugin: &str, subpath: Option<&str>) -> Plan {
     let manifest = clone.join(tool.marketplace);
     if manifest.is_file() {
         let value = match read_json(&manifest) {
             Ok(v) => v,
-            Err(e) => return ToolPackaging::Invalid(e),
+            Err(e) => return Plan::Done(ToolPackaging::Invalid(e)),
         };
         let Some(market) = value.get("name").and_then(Value::as_str) else {
-            return ToolPackaging::Invalid(format!("{} has no \"name\"", manifest.display()));
+            return Plan::Done(ToolPackaging::Invalid(format!(
+                "{} has no \"name\"",
+                manifest.display()
+            )));
         };
-        let listed = value
+        let entry = value
             .get("plugins")
             .and_then(Value::as_array)
-            .is_some_and(|list| {
+            .and_then(|list| {
                 list.iter()
-                    .any(|p| p.get("name").and_then(Value::as_str) == Some(plugin))
+                    .find(|p| p.get("name").and_then(Value::as_str) == Some(plugin))
             });
-        if !listed {
-            return ToolPackaging::Invalid(format!("no plugin {plugin} in {}", manifest.display()));
+        let Some(entry) = entry else {
+            return Plan::Done(ToolPackaging::Invalid(format!(
+                "no plugin {plugin} in {}",
+                manifest.display()
+            )));
+        };
+        let source = entry.get("source").cloned().unwrap_or(Value::Null);
+        if is_local(&source) {
+            return Plan::Repo(Target {
+                marketplace_dir: clone.to_path_buf(),
+                marketplace: market.to_string(),
+                id: format!("{plugin}@{market}"),
+            });
         }
-        return ToolPackaging::Supported(Target {
-            marketplace_dir: clone.to_path_buf(),
-            marketplace: market.to_string(),
-            id: format!("{plugin}@{market}"),
-        });
+        // AC6-31: the repo's manifest installs the plugin from elsewhere (GitHub, a URL), which would
+        // bypass the pinned clone. Install from the plugin's folder in the clone instead.
+        let path = source.get("path").and_then(Value::as_str);
+        return match plugin_folder(tool, clone, &[path, subpath, None]) {
+            Some(folder) => wrap_plan(tool, folder, plugin),
+            None => Plan::Done(ToolPackaging::Unsupported(format!(
+                "the repo's {} manifest installs {plugin} from outside the repo",
+                tool.label
+            ))),
+        };
     }
-    let folder = match subpath {
-        Some(sub) => clone.join(sub),
-        None => clone.to_path_buf(),
-    };
-    let plugin_manifest = folder.join(tool.plugin);
-    if !plugin_manifest.is_file() {
-        return ToolPackaging::Unsupported(format!("the repo has no {} packaging", tool.label));
+    match plugin_folder(tool, clone, &[subpath]) {
+        Some(folder) => wrap_plan(tool, folder, plugin),
+        None => Plan::Done(ToolPackaging::Unsupported(format!(
+            "the repo has no {} packaging",
+            tool.label
+        ))),
     }
-    let plugin_name = match read_json(&plugin_manifest) {
-        Ok(v) => v
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or(plugin)
-            .to_string(),
-        Err(e) => return ToolPackaging::Invalid(e),
-    };
+}
+
+/// Writes (or, without `write`, only describes) colctl's one-plugin marketplace for `tool`, whose plugin
+/// entry points at `./<link>`, a symlink to `folder`.
+fn wrap(
+    write: bool,
+    tool: &Tool,
+    manifests: &Path,
+    name: &str,
+    folder: &Path,
+    plugin_name: &str,
+    link: &str,
+) -> ToolPackaging {
     let market = format!("colctl-{name}");
-    let mut body = json!({"name": market, "plugins": [(tool.entry)(&plugin_name)]});
+    let mut body = json!({"name": market, "plugins": [(tool.entry)(plugin_name, link)]});
     if tool.label == "Claude" {
         body["owner"] = json!({"name": "colctl"});
     }
@@ -141,19 +206,37 @@ fn one(
     } else {
         fsx::atomic_write(&path, text.as_bytes())
     };
-    let linked = match fs::read_link(manifests.join("plugin")) {
+    let linked = match fs::read_link(manifests.join(link)) {
         _ if !write => Ok(()),
         Ok(target) if target == folder => Ok(()),
-        _ => fsx::atomic_symlink(&folder, &manifests.join("plugin")),
+        _ => fsx::atomic_symlink(folder, &manifests.join(link)),
     };
     if let Err(e) = written.and(linked) {
         return ToolPackaging::Invalid(format!("writing {}: {e:#}", manifests.display()));
     }
     ToolPackaging::Supported(Target {
         marketplace_dir: manifests.to_path_buf(),
-        marketplace: market.clone(),
-        id: format!("{plugin_name}@{market}"),
+        marketplace: market,
+        id: format!("{plugin_name}@colctl-{name}"),
     })
+}
+
+fn finish(
+    write: bool,
+    tool: &Tool,
+    manifests: &Path,
+    name: &str,
+    plan: Plan,
+    link: &str,
+) -> ToolPackaging {
+    match plan {
+        Plan::Repo(target) => ToolPackaging::Supported(target),
+        Plan::Wrap {
+            folder,
+            plugin_name,
+        } => wrap(write, tool, manifests, name, &folder, &plugin_name, link),
+        Plan::Done(p) => p,
+    }
 }
 
 /// Inspects `clone` for source `name`'s plugin `plugin`, writing manifests into `manifests` if needed.
@@ -177,9 +260,17 @@ pub fn inspect_with(
     plugin: &str,
     subpath: Option<&str>,
 ) -> Packaging {
+    let claude = plan(&CLAUDE, clone, plugin, subpath);
+    let codex = plan(&CODEX, clone, plugin, subpath);
+    // Both tools share one wrapper folder; Codex gets its own link when its plugin lives elsewhere
+    // (EC6-21: e.g. plugins/x/claude and plugins/x/codex).
+    let codex_link = match (&claude, &codex) {
+        (Plan::Wrap { folder: a, .. }, Plan::Wrap { folder: b, .. }) if a != b => "plugin-codex",
+        _ => "plugin",
+    };
     Packaging {
-        claude: one(write, &CLAUDE, clone, manifests, name, plugin, subpath),
-        codex: one(write, &CODEX, clone, manifests, name, plugin, subpath),
+        claude: finish(write, &CLAUDE, manifests, name, claude, "plugin"),
+        codex: finish(write, &CODEX, manifests, name, codex, codex_link),
     }
 }
 
@@ -219,6 +310,98 @@ mod tests {
 
     fn read(path: &Path) -> Value {
         serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    /// A databricks-style repo: per-tool plugin folders, and marketplace manifests whose entries send
+    /// both tools to GitHub.
+    fn remote_manifests(f: &Fixture) {
+        write(
+            &f.clone.join(".claude-plugin/marketplace.json"),
+            &json!({"name": "dbx-skills", "plugins": [{"name": "dbx", "source": {"source": "git-subdir",
+                "url": "databricks/dbx", "path": "plugins/dbx/claude", "ref": "main"}}]}),
+        );
+        write(
+            &f.clone.join(".agents/plugins/marketplace.json"),
+            &json!({"name": "dbx-skills", "plugins": [{"name": "dbx", "source": {"source": "git-subdir",
+                "url": "https://github.com/databricks/dbx.git", "path": "plugins/dbx/codex", "ref": "main"}}]}),
+        );
+        write(
+            &f.clone
+                .join("plugins/dbx/claude/.claude-plugin/plugin.json"),
+            &json!({"name": "dbx"}),
+        );
+        write(
+            &f.clone.join("plugins/dbx/codex/.codex-plugin/plugin.json"),
+            &json!({"name": "dbx"}),
+        );
+    }
+
+    #[test]
+    fn ac6_31_a_manifest_pointing_outside_the_repo_is_wrapped() {
+        let f = fixture();
+        remote_manifests(&f);
+        let p = inspect(
+            &f.clone,
+            &f.manifests,
+            "dbx",
+            "dbx",
+            Some("plugins/dbx/claude"),
+        );
+        for tool in [&p.claude, &p.codex] {
+            let t = supported(tool);
+            assert_eq!(t.marketplace_dir, f.manifests);
+            assert_eq!(t.id, "dbx@colctl-dbx");
+        }
+        // Each tool's wrapper entry points at its own folder of the clone.
+        assert_eq!(
+            fs::read_link(f.manifests.join("plugin")).unwrap(),
+            f.clone.join("plugins/dbx/claude")
+        );
+        assert_eq!(
+            fs::read_link(f.manifests.join("plugin-codex")).unwrap(),
+            f.clone.join("plugins/dbx/codex")
+        );
+        assert_eq!(
+            read(&f.manifests.join(".agents/plugins/marketplace.json"))["plugins"][0]["source"]["url"],
+            "./plugin-codex"
+        );
+        assert_eq!(
+            read(&f.manifests.join(".claude-plugin/marketplace.json"))["plugins"][0]["source"],
+            "./plugin"
+        );
+        // A remote entry with no matching folder in the clone can't be installed from it.
+        let g = fixture();
+        write(
+            &g.clone.join(".claude-plugin/marketplace.json"),
+            &json!({"name": "m", "plugins": [{"name": "x", "source": {"source": "github", "repo": "o/elsewhere"}}]}),
+        );
+        assert!(matches!(
+            inspect(&g.clone, &g.manifests, "x", "x", None).claude,
+            ToolPackaging::Unsupported(reason) if reason.contains("from outside the repo")
+        ));
+    }
+
+    #[test]
+    fn ec6_21_decided_per_tool() {
+        let f = fixture();
+        remote_manifests(&f);
+        // Claude's manifest points inside the repo; Codex's still points at GitHub.
+        write(
+            &f.clone.join(".claude-plugin/marketplace.json"),
+            &json!({"name": "dbx-skills", "plugins": [{"name": "dbx", "source": "./plugins/dbx/claude"}]}),
+        );
+        let p = inspect(&f.clone, &f.manifests, "dbx", "dbx", None);
+        assert_eq!(supported(&p.claude).id, "dbx@dbx-skills");
+        assert_eq!(supported(&p.claude).marketplace_dir, f.clone);
+        assert_eq!(supported(&p.codex).id, "dbx@colctl-dbx");
+        assert_eq!(
+            fs::read_link(f.manifests.join("plugin")).unwrap(),
+            f.clone.join("plugins/dbx/codex"),
+            "one wrapped tool keeps the plain link name"
+        );
+        assert!(is_local(&json!({"source": "local", "path": "x"})));
+        assert!(!is_local(&json!("https://x/y")));
+        assert!(!is_local(&json!(3)));
     }
 
     #[test]
