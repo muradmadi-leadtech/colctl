@@ -52,8 +52,9 @@ fn ac_04_first_init_creates_the_source() {
     );
     assert_eq!(env.commits(), vec!["colctl: init"]);
     assert!(out.contains("created ~/.colctl"), "{out}");
+    // Cycle 6: status follows init, led by its verdict.
     assert!(
-        out.contains("claude (~/.claude)") && out.contains("in sync"),
+        out.contains("✓ The profile is in sync"),
         "status follows: {out}"
     );
 }
@@ -152,7 +153,8 @@ fn ec_02_no_harnesses_registered() {
     let env = Env::new();
     env.ok(&["init"]);
     let out = env.ok(&["status"]);
-    assert!(out.contains("no harnesses registered"), "{out}");
+    assert!(out.contains("No profiles registered"), "{out}");
+    assert!(out.contains("→ colctl init"), "{out}");
     let out = env.ok(&["sync"]);
     assert!(out.contains("in sync"), "{out}");
 }
@@ -183,25 +185,30 @@ fn ac_08_status_reports_every_kind_of_drift() {
     fs::remove_dir_all(env.home.join(KILO)).unwrap();
 
     let before = env.snapshot();
-    let (code, out, _) = env.code(&["status"]);
+    // Cycle 6: --all lists every item; the default view lists only what needs attention.
+    let (code, out, _) = env.code(&["status", "--all"]);
     assert_eq!(code, 1, "{out}");
     assert_eq!(env.snapshot(), before, "status writes nothing");
     assert!(!env.source.join(".state/lock").exists());
+    let words = Env::words(&out);
     for needle in [
-        "ok                   skill         ok",
-        "missing              skill         missing  → colctl sync",
-        "broken               skill         broken  → colctl sync",
-        "foreign              skill         foreign  → colctl adopt claude skills/foreign",
-        "edited               instructions  CLAUDE.md  → move your text into ~/.colctl/AGENTS.md",
-        "plugin-missing       plugin        sadr@sadr",
-        "marketplace-missing  marketplace   sadr",
-        "invalid              skill         no-skill-md  → no SKILL.md",
-        "uncommitted",
+        "✓ ok skill ok",
+        "! missing skill missing → colctl sync",
+        "! broken skill broken → colctl sync",
+        "! foreign skill foreign → colctl adopt claude skills/foreign",
+        "! edited instructions CLAUDE.md → move your text into ~/.colctl/AGENTS.md",
+        "! plugin-missing plugin sadr@sadr",
+        "! marketplace-missing marketplace sadr",
+        "! ~/.colctl skill no-skill-md invalid → no SKILL.md",
+        "uncommitted → colctl sync",
         "harness-missing → start that profile once",
-        "not in sync",
+        "things need attention",
     ] {
-        assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
+        assert!(words.contains(needle), "missing {needle:?} in:\n{out}");
     }
+    let (_, short, _) = env.code(&["status"]);
+    assert!(!Env::words(&short).contains("✓ ok skill ok"), "{short}");
+    assert!(Env::words(&short).contains("Needs attention"), "{short}");
 
     let v = env.status_json();
     assert_eq!(v["version"], 1);
@@ -226,10 +233,10 @@ fn ac_08_status_is_zero_when_in_sync() {
     env.source_skill("foo");
     env.ok(&["sync"]);
     let out = env.ok(&["status"]);
-    assert!(out.trim_end().ends_with("in sync"), "{out}");
+    assert!(out.starts_with("✓ All 2 profiles in sync"), "{out}");
     assert_eq!(env.status_json()["in_sync"], true);
     let out = env.ok(&["status", "--harness", "kilo-claude"]);
-    assert!(!out.contains("claude (~/.claude)"), "{out}");
+    assert!(!Env::words(&out).contains("✓ claude ~/.claude"), "{out}");
 }
 
 // ---------------------------------------------------------------- sync
@@ -886,7 +893,7 @@ fn ec_14_ec_31_foreign_links_are_refused() {
     symlink("/somewhere/CLAUDE.md", native.join("CLAUDE.md")).unwrap();
     let out = env.expect(1, &["status"]);
     assert!(
-        out.contains("remove or replace this link yourself"),
+        Env::words(&out).contains("remove or replace this link yourself"),
         "{out}"
     );
     // Changed in cycle 2 (AC2-25, AC2-28): adopt now takes over links into other folders, but a
@@ -1053,7 +1060,7 @@ fn ec_07_harness_path_that_is_a_file_is_invalid() {
     fs::write(env.home.join(KILO), "not a folder").unwrap();
     let out = env.expect(1, &["status"]);
     assert!(
-        out.contains("invalid → the path must be a real folder"),
+        Env::words(&out).contains("invalid → the path must be a real folder"),
         "{out}"
     );
 }

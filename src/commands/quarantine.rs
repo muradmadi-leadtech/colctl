@@ -590,17 +590,6 @@ pub(super) fn held_views(ctx: &Ctx, ws: &Workspace, git: Option<&Git>) -> Vec<Vi
         .collect()
 }
 
-/// The `status` line for a held candidate (AC4-29).
-pub(super) fn status_line(ctx: &Ctx, v: &View) -> String {
-    format!(
-        "  {:<20} {}  {}  → colctl review {}",
-        "pending-review",
-        escape(&v.key),
-        escape(&change_text(ctx, &v.candidate)),
-        escape(&v.name)
-    )
-}
-
 /// The `status --json` entry for a held candidate (AC4-29).
 pub(super) fn status_entry(v: &View) -> Value {
     let mut out = view_json(v, false);

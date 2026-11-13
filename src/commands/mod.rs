@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 
 mod discovery;
 mod quarantine;
+mod status_view;
 pub use discovery::{connectors, developers, marketplace_list, marketplace_refresh, search, show};
 pub use quarantine::{approve, refresh, reject, review, update};
 
@@ -369,55 +370,8 @@ fn status_json(
     })
 }
 
-fn print_status(
-    ctx: &Ctx,
-    ws: &Workspace,
-    planned: &[Planned],
-    uncommitted: &[String],
-    held: &[quarantine::View],
-) {
-    println!("source {}", ctx.tilde(&ctx.source));
-    for path in uncommitted {
-        println!("  {:<20} {path}  → colctl sync commits it", "uncommitted");
-    }
-    for i in &ws.source.invalid {
-        println!(
-            "  {:<20} {:<13} {}  → {}",
-            "invalid", i.kind, i.name, i.reason
-        );
-    }
-    for (item, origin) in &ws.origin_changed {
-        println!(
-            "  {:<20} {item}  → {} changed; colctl refresh {item}",
-            "origin-changed",
-            origin.display()
-        );
-    }
-    for v in held {
-        println!("{}", quarantine::status_line(ctx, v));
-    }
-    if planned.is_empty() {
-        println!("no harnesses registered; add one to {CONFIG_FILE}");
-    }
-    for p in planned {
-        println!("{}", harness_heading(ctx, p));
-        for item in &p.plan.items {
-            println!("{}", item_line(item));
-        }
-    }
-    let synced = if in_sync(ws, planned, uncommitted) {
-        "in sync"
-    } else {
-        "not in sync"
-    };
-    match held.len() {
-        0 => println!("{synced}"),
-        n => println!("{synced}; {n} held for review"),
-    }
-}
-
 /// `colctl status` (AC-08). Never writes anything.
-pub fn status(ctx: &Ctx, filter: Option<&str>, as_json: bool) -> Result<i32, CliError> {
+pub fn status(ctx: &Ctx, filter: Option<&str>, as_json: bool, all: bool) -> Result<i32, CliError> {
     let ws = load(ctx)?;
     let planned = plan_all(ctx, &ws, filter)?;
     let git = Git::find(&ctx.path_var).ok();
@@ -430,7 +384,8 @@ pub fn status(ctx: &Ctx, filter: Option<&str>, as_json: bool) -> Result<i32, Cli
         text.push('\n');
         print!("{text}");
     } else {
-        print_status(ctx, &ws, &planned, &dirty, &held);
+        ctx.out
+            .lines(status_view::render(ctx, &ws, &planned, &dirty, &held, all));
     }
     // Something waiting for review needs attention, like an origin that changed (AC4-29).
     Ok(if in_sync(&ws, &planned, &dirty) && held.is_empty() {
@@ -718,7 +673,7 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
         }
         commit(&git, ctx, "colctl: init")?;
     }
-    status(ctx, None, false)?;
+    status(ctx, None, false, false)?;
     Ok(0)
 }
 

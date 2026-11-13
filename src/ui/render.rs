@@ -92,11 +92,11 @@ impl Cell {
 }
 
 /// An aligned table (AC6-05): columns sized to their widest cell, two spaces apart, `indent` spaces in.
-/// Column `flex` (the description, usually) is cut so a row never exceeds the width; earlier columns are
-/// capped at a third of the width each. The last column is never padded.
+/// Column `flex` (the description, usually) is cut so a row never exceeds the width; other columns are
+/// capped at two fifths of the width each. The last column is never padded.
 pub fn table(caps: &Caps, indent: usize, rows: &[Vec<Cell>], flex: usize) -> Vec<String> {
     let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let cap = (caps.width / 3).max(8);
+    let cap = (caps.width * 2 / 5).max(8);
     let mut widths: Vec<usize> = (0..cols)
         .map(|c| {
             rows.iter()

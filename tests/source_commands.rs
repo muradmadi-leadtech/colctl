@@ -469,10 +469,10 @@ fn ac3_30_status_says_a_list_plugin_has_a_source() {
     let env = machine();
     let (_, v1) = env.github_repo("obra/superpowers", "superpowers", "superpowers-dev");
     listed_superpowers(&env, &v1);
-    let out = env.ok(&["status"]);
+    let out = env.ok(&["status", "--all"]);
     assert!(
-        // Cycle 4: list plugins are "unreviewed"; the source hint stays.
-        out.contains("unreviewed           plugin        superpowers@anthropic-plugin-directory  → updates come from anthropic-plugin-directory, not through colctl review; source available: https://github.com/obra/superpowers; colctl adopt claude plugin superpowers@anthropic-plugin-directory to hold them"),
+        // Cycle 4: list plugins are "unreviewed"; the source hint stays. Cycle 6: listed with --all.
+        Env::words(&out).contains("· unreviewed plugin superpowers@anthropic-plugin-directory → updates come from anthropic-plugin-directory, not through colctl review; source available: https://github.com/obra/superpowers; colctl adopt claude plugin superpowers@anthropic-plugin-directory to hold them"),
         "{out}"
     );
 }

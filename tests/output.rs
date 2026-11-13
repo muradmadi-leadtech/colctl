@@ -240,3 +240,125 @@ fn ec6_20_a_closed_pipe_still_ends_quietly() {
     assert!(!err.contains("panicked"), "{err}");
     assert!(matches!(out.status.code(), Some(0 | 141)), "{err}");
 }
+
+// ---------------------------------------------------------------- status (T2)
+
+/// Five profiles with ~100 items, all in sync, like the owner's machine.
+fn calm_machine() -> Env {
+    let env = Env::new();
+    env.native();
+    env.kilo();
+    env.codex();
+    env.kilo_codex();
+    env.agents_dir();
+    env.ok(&["init"]);
+    for i in 0..32 {
+        env.source_skill(&format!("skill-{i:02}"));
+    }
+    env.ok(&["sync"]);
+    env
+}
+
+fn non_blank(text: &str) -> usize {
+    text.lines().filter(|l| !l.trim().is_empty()).count()
+}
+
+#[test]
+fn ac6_08_all_in_sync_fits_in_eight_lines() {
+    let env = calm_machine();
+    let (code, out, _) = env.code(&["status"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.starts_with("✓ All 5 profiles in sync · 0 sources · nothing held for review"),
+        "{out}"
+    );
+    assert!(non_blank(&out) <= 8, "{out}");
+    assert!(
+        out.trim_end()
+            .ends_with("→ colctl status --all lists every item"),
+        "{out}"
+    );
+    let words = Env::words(&out);
+    assert!(words.contains("✓ claude ~/.claude 32 ok"), "{out}");
+    assert!(words.contains("✓ agents ~/.agents 32 ok"), "{out}");
+    let all = env.ok(&["status", "--all"]);
+    assert!(non_blank(&all) > 90, "{all}");
+}
+
+#[test]
+fn ac6_09_problems_only_each_with_its_fix() {
+    let env = calm_machine();
+    fs::remove_file(env.home.join(".claude/skills/skill-03")).unwrap();
+    fs::write(env.source.join("skills/skill-04/SKILL.md"), "edited").unwrap();
+    let (code, out, _) = env.code(&["status"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.starts_with("! 2 things need attention"), "{out}");
+    let words = Env::words(&out);
+    assert!(words.contains("Needs attention"), "{out}");
+    assert!(
+        words.contains("! claude skill skill-03 missing → colctl sync"),
+        "{out}"
+    );
+    assert!(
+        words.contains("! ~/.colctl file skills/skill-04/SKILL.md uncommitted → colctl sync"),
+        "{out}"
+    );
+    assert!(
+        words.contains("! claude ~/.claude 31 ok · 1 missing"),
+        "{out}"
+    );
+    // Nothing that's fine is listed one by one.
+    assert!(!words.contains("skill-05"), "{out}");
+}
+
+#[test]
+fn ac6_10_all_lists_every_item() {
+    let env = calm_machine();
+    let out = env.ok(&["status", "--all"]);
+    let words = Env::words(&out);
+    for p in ["claude", "kilo-claude", "codex", "kilo-codex", "agents"] {
+        assert!(
+            out.lines().any(|l| l.starts_with(p)),
+            "{p} heading in {out}"
+        );
+    }
+    assert!(words.contains("✓ ok skill skill-31"), "{out}");
+    assert!(!out.contains("status --all lists every item"), "{out}");
+}
+
+#[test]
+fn ac6_11_an_unusable_profile_says_so_with_its_fix() {
+    let env = calm_machine();
+    fs::remove_dir_all(env.home.join(".codex")).unwrap();
+    let (code, out, _) = env.code(&["status"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.starts_with("! 1 thing needs attention"), "{out}");
+    assert!(
+        Env::words(&out).contains("✗ codex ~/.codex harness-missing → start that profile once"),
+        "{out}"
+    );
+}
+
+#[test]
+fn ec6_10_ec6_11_empty_profiles_and_none_at_all() {
+    let env = Env::new();
+    env.native();
+    env.ok(&["init"]);
+    let out = env.ok(&["status", "--all"]);
+    assert!(Env::words(&out).contains("· 0 items"), "{out}");
+    let none = Env::new();
+    none.ok(&["init"]);
+    let out = none.ok(&["status"]);
+    assert!(out.starts_with("! No profiles registered"), "{out}");
+    assert!(out.contains("→ colctl init"), "{out}");
+}
+
+#[test]
+fn ec6_07_long_paths_are_cut_in_the_middle() {
+    let env = calm_machine();
+    let out = env.ok(&["status"]);
+    assert!(out.contains("~/Library/…/profiles/claude"), "{out}");
+    for l in out.lines() {
+        assert!(console::measure_text_width(l) <= 80, "{l}");
+    }
+}
