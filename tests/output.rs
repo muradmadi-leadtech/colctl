@@ -350,7 +350,10 @@ fn ec6_10_ec6_11_empty_profiles_and_none_at_all() {
 fn ec6_07_long_paths_are_cut_in_the_middle() {
     let env = calm_machine();
     let out = env.ok(&["status"]);
-    assert!(out.contains("~/Library/…/profiles/claude"), "{out}");
+    assert!(
+        out.contains("/…/kilo-proxy-headless/profiles/claude"),
+        "{out}"
+    );
     for l in out.lines() {
         assert!(console::measure_text_width(l) <= 80, "{l}");
     }
@@ -624,9 +627,9 @@ fn ac6_24_every_error_has_a_hint() {
 fn ac6_25_ac6_26_help_is_grouped_with_examples() {
     let env = Env::new();
     let out = env.ok(&["--help"]);
-    assert!(out.contains("Updates and review:"), "{out}");
+    assert!(out.contains("\nUpdates and review\n"), "{out}");
     assert!(
-        out.contains("Fetch new versions of source plugins and hold them for review"),
+        Env::words(&out).contains("Fetch new versions of source plugins and hold them for review"),
         "{out}"
     );
     let out = env.ok(&["update", "--help"]);
@@ -726,12 +729,21 @@ fn stacked_outcomes_start_on_the_profile_line() {
 
 // ---------------------------------------------------------------- revise (T9, T10)
 
-/// The text after a profile's path on its status line.
+/// A profile's status line, with the lines its contents wrapped onto.
 fn profile_line(out: &str, name: &str) -> String {
-    out.lines()
-        .map(Env::words)
-        .find(|l| l.split(' ').nth(1) == Some(name))
-        .unwrap_or_else(|| panic!("no {name} line in {out}"))
+    let lines: Vec<&str> = out.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| Env::words(l).split(' ').nth(1) == Some(name))
+        .unwrap_or_else(|| panic!("no {name} line in {out}"));
+    let more = lines[at + 1..]
+        .iter()
+        .take_while(|l| l.starts_with("      "))
+        .map(|l| Env::words(l));
+    std::iter::once(Env::words(lines[at]))
+        .chain(more)
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 #[test]
@@ -793,7 +805,11 @@ fn ac6_35_paths_are_shortened_alike_and_only_when_needed() {
             .into_iter()
             .filter(|p| p.contains('…'))
             .collect();
-        assert_eq!(kilo.len(), 2, "both kilo paths shortened at {columns}: {out}");
+        assert_eq!(
+            kilo.len(),
+            2,
+            "both kilo paths shortened at {columns}: {out}"
+        );
         let shape = |p: &str| {
             let (head, tail) = p.split_once('…').unwrap();
             (head.to_string(), tail.matches('/').count())
@@ -817,7 +833,10 @@ fn ac6_36_help_welcomes_someone_new() {
         let (code, out, err) = at_width(&env, &all, "80");
         assert_eq!(code, 0, "{args:?}: {out}{err}");
         let first = out.lines().next().unwrap();
-        assert!(first.starts_with("colctl keeps every AI coding profile"), "{out}");
+        assert!(
+            first.starts_with("colctl keeps every AI coding profile"),
+            "{out}"
+        );
         let words = Env::words(&out);
         for want in [
             "Start here",
