@@ -4,7 +4,8 @@
 //! `plugins/installed_plugins.json` and `plugins/known_marketplaces.json` the way Claude Code does,
 //! and appends one JSON line per call to `$FAKE_CLAUDE_LOG`. `FAKE_CLAUDE_FAIL=<text>` makes any
 //! call containing `<text>` exit 1; `FAKE_CLAUDE_MARKET_NAME` overrides the name a marketplace
-//! records itself under; `FAKE_CLAUDE_SLEEP=<secs>` delays every call.
+//! records itself under; `FAKE_CLAUDE_SLEEP=<secs>` delays every call; `FAKE_CLAUDE_SHA` is the
+//! commit recorded for every install, instead of the marketplace folder's.
 
 use serde_json::{Map, Value, json};
 use std::env;
@@ -40,6 +41,11 @@ fn install_entry(markets: &Value, market: &str) -> Value {
     let location = markets[market]["installLocation"]
         .as_str()
         .unwrap_or_default();
+    // A tool that installed from somewhere else than the folder (e.g. a manifest pointing at GitHub).
+    if let Ok(sha) = env::var("FAKE_CLAUDE_SHA") {
+        entry["gitCommitSha"] = json!(sha);
+        return entry;
+    }
     if markets[market]["source"]["source"] == "directory" {
         let out = std::process::Command::new("git")
             .args(["-C", location, "rev-parse", "HEAD"])
