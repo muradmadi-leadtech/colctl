@@ -1,0 +1,16 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+[1mtool[0m
+  [2mids[0m          tool@official
+  [2mcatalogs[0m     official (claude)
+  [2mdeveloper[0m    ann
+  [2mauthor[0m       Ann
+  [2mdescription[0m  A tool
+  [2mkeywords[0m     x
+  [2mrepo[0m         https://github.com/ann/tool
+  [2madd[0m          colctl add source tool@official
+--- stderr

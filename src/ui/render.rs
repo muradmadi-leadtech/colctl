@@ -40,6 +40,47 @@ pub fn cut_middle(path: &str, max: usize) -> String {
     cut(path, max)
 }
 
+/// Word-wraps prose to `max` columns; continuation lines start with `indent` spaces. A word longer than
+/// a line is cut with "…" so no line ever exceeds `max`.
+pub fn wrap(text: &str, max: usize, first_prefix: usize, indent: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    let mut used = first_prefix;
+    for word in text.split(' ') {
+        let w = width(word);
+        if !line.is_empty() && used + 1 + w > max {
+            lines.push(std::mem::take(&mut line));
+            used = indent;
+        }
+        let room = max
+            .saturating_sub(used + usize::from(!line.is_empty()))
+            .max(1);
+        let word = if w > room {
+            cut(word, room)
+        } else {
+            word.to_string()
+        };
+        if !line.is_empty() {
+            line.push(' ');
+            used += 1;
+        }
+        used += width(&word);
+        line.push_str(&word);
+    }
+    lines.push(line);
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(i, l)| {
+            if i == 0 {
+                l
+            } else {
+                format!("{}{l}", " ".repeat(indent))
+            }
+        })
+        .collect()
+}
+
 /// A verdict: the first line of a result (`✓ All 5 profiles in sync · 3 sources`).
 pub fn verdict(caps: &Caps, tone: Token, text: &str, facts: &[String]) -> String {
     let mut line = format!("{} {}", mark(tone, caps.color_out), text);
@@ -127,6 +168,19 @@ pub fn table(caps: &Caps, indent: usize, rows: &[Vec<Cell>], flex: usize) -> Vec
     }
     if flex < cols {
         widths[flex] = widths[flex].min(caps.width.saturating_sub(others(&widths)).max(4));
+    }
+    // Last resort for very narrow terminals: narrow the widest column until the row fits.
+    while others(&widths) + widths.get(flex).copied().unwrap_or(0) > caps.width {
+        let Some((c, w)) = widths
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| **w > 4)
+            .max_by_key(|(_, w)| **w)
+        else {
+            break;
+        };
+        let _ = w;
+        widths[c] -= 1;
     }
     rows.iter()
         .map(|row| {
@@ -248,6 +302,17 @@ mod tests {
     }
 
     #[test]
+    fn prose_wraps_with_a_hanging_indent() {
+        let lines = wrap("one two three four five six", 14, 4, 4);
+        // The first line's 4-column prefix counts toward the 14.
+        assert_eq!(lines, vec!["one two", "    three four", "    five six"]);
+        assert!(width(&lines[0]) + 4 <= 14);
+        assert!(lines[1..].iter().all(|l| width(l) <= 14));
+        let long = wrap("x averyveryverylongwordthatdoesnotfit", 20, 4, 4);
+        assert!(long.iter().all(|l| width(l) + 4 <= 24), "{long:?}");
+    }
+
+    #[test]
     fn ec6_07_long_names_and_paths() {
         assert_eq!(cut("abcdefghij", 5), "abcd…");
         assert_eq!(cut("abc", 5), "abc");
@@ -275,6 +340,21 @@ mod tests {
             0,
         );
         assert!(width(&lines[0]) <= 40);
+    }
+
+    #[test]
+    fn a_table_too_wide_for_any_layout_still_fits() {
+        let row = vec![
+            Cell::plain("a-very-long-marketplace-name"),
+            Cell::plain("claude"),
+            Cell::plain("~/somewhere/far/away"),
+            Cell::plain("1234"),
+            Cell::plain("claude, kilo-claude, codex"),
+            Cell::plain("✓ managed"),
+        ];
+        for l in table(&at(40), 0, &[row], 2) {
+            assert!(width(&l) <= 40, "{l:?}");
+        }
     }
 
     #[test]

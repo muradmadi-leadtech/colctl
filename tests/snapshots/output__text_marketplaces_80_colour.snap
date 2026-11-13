@@ -1,0 +1,11 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+[2mNAME[0m             [2mTOOL[0m    [2mSOURCE[0m          [2mPLUGINS[0m  [2mPROFILES[0m
+[1mofficial[0m         claude  [2mgithub:o/offi…[0m  1        claude
+[1msuperpowers-dev[0m  claude  [2m~/.colctl/plu…[0m  1        claude, kilo-claude  [32m✓ managed[0m
+[1msuperpowers-dev[0m  codex   [2m~/.colctl/plu…[0m  1        codex                [32m✓ managed[0m
+--- stderr

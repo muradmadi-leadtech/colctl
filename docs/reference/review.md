@@ -13,37 +13,50 @@ agents). Decide them with [`approve`](approve.md) or [`reject`](reject.md).
 
 ## Without a name
 
-One line per held version:
+A verdict, then one row per held version:
 
 ```
-sources/superpowers   8ca22db → 22f0b46   12 commits   3 flags
-skills/twg-jira       ~/.config/twg/skills/twg-jira   2 files   1 flag
+! 2 versions held for review
+
+  sources/superpowers  8ca22db → 22f0b46              12 commits  3 files flagged
+  skills/twg-jira      ~/.config/twg/skills/twg-jira  2 files     1 file flagged
+
+→ colctl review <name> shows one in full
 ```
 
-A version older than the pin shows `goes back n commits`. A held version that can't be read shows `error: …`.
+A version older than the pin shows `goes back n commits`. A held version that can't be read shows `✗ error: …`.
+In a terminal, `colctl review -i` picks one from a list.
 
 ## With a name
 
 ```
-superpowers  8ca22db → 22f0b46  (https://github.com/obra/superpowers)
+! superpowers  8ca22db → 22f0b46 · 12 commits · 3 files flagged
+  https://github.com/obra/superpowers
 
-commits (12)
-  22f0b46 Release 7.0.2
+Risk flags
+  hooks/hooks.json            hook: adds hooks
+  scripts/session-start.sh    executable · script: new executable file; new script
+  .claude-plugin/plugin.json  manifest: plugin manifest changed
+
+Commits (12)
+  22f0b46  Release 7.0.2
   …
 
-files (5)
+Files (5)
   A  hooks/hooks.json
   M  .claude-plugin/plugin.json
-  A  scripts/session-start.sh    (+x)
+  A  scripts/session-start.sh  (+x)
 
-flags (3)
-  hook          hooks/hooks.json                 adds hooks
-  manifest      .claude-plugin/plugin.json       plugin manifest changed
-  executable    scripts/session-start.sh         new executable file
-
-diff
+Diff
 <the unified diff>
+
+→ colctl approve superpowers   or   colctl reject superpowers
 ```
+
+**Risk flags come first**, one line per file with its kinds joined by ` · `, files ordered by their most serious kind
+(hook, mcp, lsp, executable, script, binary, symlink, allowed-tools, inline-shell, manifest). They're never cut: a
+reason that doesn't fit goes on the next line. In a terminal the diff is coloured (+ green, - red) and the whole view
+goes through the pager when it's taller than the screen.
 
 - **commits**: from the pin to the held commit. For a held version older than the pin, the heading is
   `goes back n commits (removed)` and lists what it takes out.

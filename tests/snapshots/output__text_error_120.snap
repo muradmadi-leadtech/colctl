@@ -1,0 +1,9 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 2
+--- stdout
+--- stderr
+✗ error: no source named "nope"
+  hint: colctl review --help

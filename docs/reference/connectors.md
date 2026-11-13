@@ -12,8 +12,9 @@ is `remote`, once each, with the profiles they're installed in. Terms and `--lim
 
 ```
 $ colctl connectors gmail
-gmail@openai-curated-remote  unknown  …  [installed: codex]
-1 of 1 connectors
+✓  gmail@openai-curated-remote  openai  openai-curated-remote
+
+1 of 1 connectors · ✓ installed · installed through codex
 ```
 
 Each result's `add` reads `installed by codex: codex plugin add <id>`: connectors are installed and signed into

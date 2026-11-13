@@ -1,0 +1,31 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+[33m![0m superpowers  [SHORT] → [SHORT][2m · 1 commit[0m[2m · no flags[0m
+  [2mfile://[ROOT]/upstreams/superpowers[0m
+
+[1mRisk flags[0m
+  [2m·[0m none
+
+[1mCommits (1)[0m
+  [2m[SHORT][0m  v2
+
+[1mFiles (1)[0m
+  M  README.md
+
+[1mDiff[0m
+diff --git a/README.md b/README.md
+index [SHORT]..[SHORT] 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+[31m-v1[0m
+\ No newline at end of file
+[32m+v2[0m
+\ No newline at end of file
+
+[2m→[0m [36mcolctl approve superpowers[0m   or   [36mcolctl reject superpowers[0m
+--- stderr

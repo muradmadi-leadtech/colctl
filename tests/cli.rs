@@ -794,7 +794,10 @@ fn ac_26_adopt_claude_md() {
     fs::write(&state, text).unwrap();
     fs::write(&kilo_md, "other rules").unwrap();
     let out = env.expect(1, &["adopt", "kilo-claude", "CLAUDE.md"]);
-    assert!(out.contains("already exists with different text"), "{out}");
+    assert!(
+        Env::words(&out).contains("already exists with different text"),
+        "{out}"
+    );
     assert_eq!(fs::read_to_string(&kilo_md).unwrap(), "other rules");
 }
 
@@ -855,7 +858,7 @@ fn ac_27_unknown_marketplace_origin_is_refused() {
     .unwrap();
     let out = env.expect(1, &["adopt", "kilo-claude", "plugin", "p@m"]);
     assert!(
-        out.contains("can't tell where marketplace \"m\" comes from"),
+        Env::words(&out).contains("can't tell where marketplace \"m\" comes from"),
         "{out}"
     );
 }
@@ -907,7 +910,7 @@ fn ec_14_ec_31_foreign_links_are_refused() {
     // dangling one like this is still refused.
     let out = env.expect(1, &["adopt", "claude", "skills/mine"]);
     assert!(
-        out.contains(
+        Env::words(&out).contains(
             "refused skills/mine in claude: it links to /somewhere/else, which doesn't exist"
         ),
         "{out}"

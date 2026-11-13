@@ -10,12 +10,14 @@ offline, writes nothing, takes no lock and runs neither `claude` nor `codex`.
 
 ```
 $ colctl search api security
-42crunch-api-security-testing@claude-plugins-official  42crunch-ai  Automate API security directly in Claude Code wi…
-security-guidance@anthropic-plugin-directory           anthropics   Security reminders while editing  [installed: claude]
-2 of 2 results
+   42crunch-api-security-testing@claude-plugins-official  42crunch-ai  Automate API security directly…
+✓  security-guidance@anthropic-plugin-directory           anthropics   Security reminders while editing
+
+2 of 2 results · ✓ installed · colctl show <id> for details
 ```
 
-Each line: the plugin's id, its developer, its description cut to the line, and where it's installed.
+Each line: `✓` when it's installed somewhere, the plugin's id, its developer, and its description cut to fit (ids
+are never cut before descriptions). Long lists are paged in a terminal.
 
 ## Matching
 

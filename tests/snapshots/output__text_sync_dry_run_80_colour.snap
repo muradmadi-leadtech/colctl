@@ -1,0 +1,12 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+[2m·[0m Would make 1 change in 1 profile
+
+  [2m·[0m  [1mclaude[0m       would link skill alpha
+  [2m [0m  [1mkilo-claude[0m  · nothing to change
+  [2m [0m  [1mcodex[0m        · nothing to change
+--- stderr

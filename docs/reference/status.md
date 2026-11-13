@@ -1,11 +1,36 @@
 # colctl status
 
 ```
-colctl status [--harness <name>] [--json]
+colctl status [--harness <name>] [--all] [--json]
 ```
 
 Reports every item in every registered harness, the source's uncommitted changes and invalid source items. It never
 writes anything and doesn't take the lock; `git` is optional (without it, uncommitted changes aren't listed).
+
+```
+$ colctl status
+✓ All 5 profiles in sync · 3 sources · nothing held for review
+
+  ✓  claude       ~/.claude                    17 ok
+  ✓  kilo-claude  ~/Library/…/profiles/claude  17 ok
+  ✓  codex        ~/.codex                     2 ok · 1 unsupported
+  ✓  kilo-codex   ~/Library/…/profiles/codex   2 ok · 1 unsupported
+  ✓  agents       ~/.agents                    14 ok
+
+→ colctl status --all lists every item
+```
+
+The first line is the verdict; then one line per profile with counts per state. When something needs you, the verdict
+says how many things (`! 3 things need attention`) and a **Needs attention** section lists exactly those, each with
+its fix:
+
+```
+Needs attention
+  !  claude  skill   alpha        missing            → colctl sync
+  !  held    source  superpowers  8ca22db → 22f0b46  → colctl review superpowers
+```
+
+`--all` adds every item of every profile. `-q` prints only the verdict. See [Output](output.md).
 
 Exit code: **0** when everything is in sync and the source is committed, **1** otherwise, **2** on errors (no source,
 invalid config, corrupt state, unknown `--harness`).
@@ -34,14 +59,9 @@ a file or a symlink).
 
 ## Held for review
 
-The source section lists every version held by `update` or `refresh`:
-
-```
-  pending-review       sources/superpowers  8ca22db → 22f0b46  → colctl review superpowers
-```
-
-While anything is held the exit code is 1 and the last line reads `in sync; <n> held for review` (or `not in sync; …`).
-Held versions don't affect whether the profiles are in sync, so `sync` isn't held back by them.
+Versions held by `update` or `refresh` are listed under **Needs attention** as `held`, with `colctl review <name>` as
+the fix. While anything is held the exit code is 1. Held versions don't affect whether the profiles are in sync, so
+`sync` isn't held back by them.
 
 ## `--json`
 

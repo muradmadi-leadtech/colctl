@@ -1,0 +1,11 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+✓  superpowers@superpowers-dev  unknown
+   tool@official                ann      A tool
+
+2 of 2 results · ✓ installed · colctl show <id> for details
+--- stderr

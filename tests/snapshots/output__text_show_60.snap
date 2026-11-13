@@ -1,0 +1,16 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+tool
+  ids          tool@official
+  catalogs     official (claude)
+  developer    ann
+  author       Ann
+  description  A tool
+  keywords     x
+  repo         https://github.com/ann/tool
+  add          colctl add source tool@official
+--- stderr

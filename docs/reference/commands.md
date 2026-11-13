@@ -19,7 +19,12 @@
 | `colctl review [<name>] [--json]` | [review](review.md) | never |
 | `colctl approve (<name>… \| --all) [--dry-run]` | [approve](approve.md) | yes |
 | `colctl reject (<name>… \| --all) [--dry-run]` | [reject](reject.md) | yes (state only) |
+| `colctl completions bash\|zsh\|fish` | [output](output.md#shell-completions) | never |
 | `colctl version`, `colctl --version` | — | never |
+
+Every command takes the global flags `--color`, `-q`, `-v`, `-y` (`--yes`) and `--no-pager`, and presents its results
+as described in [Output](output.md). Human-readable text may change between releases; scripts should use `--json` and
+exit codes.
 
 Every command that changes something:
 

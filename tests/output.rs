@@ -59,9 +59,8 @@ fn normalise(env: &Env, text: &str) -> String {
             .iter()
             .take_while(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
             .count();
-        let boundary = i == 0 || !chars[i - 1].is_ascii_alphanumeric();
-        if boundary && (run == 40 || run == 7) && chars[i..i + run].iter().any(char::is_ascii_digit)
-        {
+        let boundary = i == 0 || !chars[i - 1].is_ascii_hexdigit();
+        if boundary && (run == 40 || run == 7) {
             masked.push_str(if run == 40 { "[SHA]" } else { "[SHORT]" });
             i += run;
         } else {
@@ -646,4 +645,70 @@ fn ac6_27_completions() {
     let (code, _, err) = env.code(&["completions", "tcsh"]);
     assert_eq!(code, 2);
     assert!(err.starts_with("✗ error: "), "{err}");
+}
+
+// ---------------------------------------------------------------- snapshots (T7)
+
+/// Runs colctl with `COLUMNS` set, as a terminal of that width would.
+fn at_width(env: &Env, args: &[&str], columns: &str) -> (i32, String, String) {
+    let out = env
+        .cmd()
+        .env("COLUMNS", columns)
+        .args(args)
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// Every command's text output, as a person sees it (AC6-28): 60, 80 and 120 columns without colour,
+/// and 80 with colour. Run with INSTA_UPDATE=always to record after an intended change.
+#[test]
+fn ac6_28_snapshots_of_every_command() {
+    let env = fixture();
+    let views: &[(&str, &[&str])] = &[
+        ("status", &["status"]),
+        ("status_all", &["status", "--all"]),
+        ("sync_dry_run", &["sync", "--dry-run"]),
+        ("update_check", &["update", "--check"]),
+        ("review_list", &["review"]),
+        ("review_one", &["review", "superpowers"]),
+        ("search", &["search"]),
+        ("show", &["show", "tool@official"]),
+        ("developers", &["developers"]),
+        ("marketplaces", &["marketplace", "list"]),
+        ("rm_dry_run", &["rm", "skill", "alpha", "--dry-run"]),
+        ("error", &["review", "nope"]),
+    ];
+    for (name, args) in views {
+        for (suffix, columns, colour) in [
+            ("60", "60", "never"),
+            ("80", "80", "never"),
+            ("120", "120", "never"),
+            ("80_colour", "80", "always"),
+        ] {
+            let mut all: Vec<&str> = args.to_vec();
+            all.extend(["--color", colour]);
+            let (code, out, err) = at_width(&env, &all, columns);
+            let text = format!("exit {code}\n--- stdout\n{out}--- stderr\n{err}");
+            insta::assert_snapshot!(format!("text_{name}_{suffix}"), normalise(&env, &text));
+            if colour == "never" {
+                for line in out.lines() {
+                    let w = console::measure_text_width(line);
+                    let max: usize = columns.parse().unwrap();
+                    // Diffs and file paths in review are content, not layout.
+                    if *name != "review_one" {
+                        assert!(w <= max, "{name} at {columns}: {line:?} is {w}");
+                    }
+                }
+            }
+        }
+    }
+    // A sync that changes things, in a fresh machine.
+    let fresh = two_profiles_with_plugins();
+    let (_, out, _) = fresh.code(&["sync", "--color", "never"]);
+    insta::assert_snapshot!("text_sync_80", normalise(&fresh, &out));
 }

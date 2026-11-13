@@ -1,0 +1,12 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &text)"
+---
+exit 0
+--- stdout
+· Would make 1 change in 1 profile
+
+  ·  claude       would link skill alpha
+     kilo-claude  · nothing to change
+     codex        · nothing to change
+--- stderr
