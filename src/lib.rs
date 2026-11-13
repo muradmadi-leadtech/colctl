@@ -17,6 +17,7 @@ pub mod git;
 pub mod origin;
 pub mod packaging;
 pub mod plan;
+pub mod repackage;
 pub mod review;
 pub mod risk;
 pub mod runner;
