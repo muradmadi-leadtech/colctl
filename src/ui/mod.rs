@@ -1,6 +1,7 @@
 //! Every byte of human-readable output (cycle 6, docs/cli-output-design/components.md). Commands say
 //! what to show; this module decides how it looks and whether to ask. `--json` doesn't come here.
 
+pub mod progress;
 pub mod render;
 pub mod style;
 pub mod term;

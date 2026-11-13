@@ -30,6 +30,10 @@ impl Outcome {
 pub struct Applied {
     pub description: String,
     pub outcome: Outcome,
+    /// The action itself, so output can describe what happened (cycle 6).
+    pub action: Action,
+    /// How long it took.
+    pub took: std::time::Duration,
 }
 
 /// Runs one plugin action with the harness's tool; `program` is `None` when it isn't on `PATH`.
@@ -109,6 +113,18 @@ pub fn apply(
     actions: &[Action],
     state: &mut HarnessState,
 ) -> Vec<Applied> {
+    apply_observed(ctx, harness, actions, state, &mut |_, _| {})
+}
+
+/// [`apply`], telling `before` about each action (its index and the action) before it runs, so a
+/// live view can show what's happening (AC6-15).
+pub fn apply_observed(
+    ctx: &Ctx,
+    harness: &Harness,
+    actions: &[Action],
+    state: &mut HarnessState,
+    before: &mut dyn FnMut(usize, &Action),
+) -> Vec<Applied> {
     let tool = Tool::for_kind(harness.kind);
     let program = match tool {
         Some(t) if actions.iter().any(Action::needs_tool) => {
@@ -122,7 +138,9 @@ pub fn apply(
     };
     let mut failed_markets: BTreeSet<String> = BTreeSet::new();
     let mut results = Vec::new();
-    for action in actions {
+    for (index, action) in actions.iter().enumerate() {
+        before(index, action);
+        let started = std::time::Instant::now();
         let outcome = match action {
             Action::CleanupTemp(path) => file_outcome(fsx::remove_any(path)),
             Action::Link { link, target } => file_outcome(fsx::atomic_symlink(target, link)),
@@ -270,6 +288,8 @@ pub fn apply(
         results.push(Applied {
             description: action.describe(tool),
             outcome,
+            action: action.clone(),
+            took: started.elapsed(),
         });
     }
     results

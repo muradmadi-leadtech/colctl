@@ -3,7 +3,7 @@
 
 use super::{
     Copier, EXIT_DRIFT, Workspace, commit, commit_pending, hash_item, load, plugins_dir, real_copy,
-    run_sync, write_config,
+    write_config,
 };
 use crate::config;
 use crate::ctx::Ctx;
@@ -12,6 +12,7 @@ use crate::fsx;
 use crate::git::Git;
 use crate::review::{self, Direction, Review, escape, escape_body};
 use crate::state::{self, Candidate, HeldCommit, HeldCopy, Lock, State};
+use crate::ui::style::Token;
 use crate::vault::{self, CloneState, Vault};
 use serde_json::{Value, json};
 use std::fs;
@@ -796,16 +797,33 @@ pub fn approve(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<
     let ws = load(ctx)?;
     let keys = chosen(&ws, names, all, "approve")?;
     if keys.is_empty() {
-        println!("nothing held");
+        ctx.out.line(crate::ui::render::verdict(
+            &ctx.out.caps,
+            Token::Info,
+            "Nothing held for review",
+            &[],
+        ));
         return Ok(0);
     }
     if dry_run {
-        for key in &keys {
-            println!(
-                "would approve {key}: {}",
-                change_text(ctx, &ws.state.quarantine[key])
-            );
-        }
+        let said: Vec<(Token, String)> = keys
+            .iter()
+            .map(|key| {
+                (
+                    Token::Info,
+                    format!(
+                        "would approve {key}: {}",
+                        change_text(ctx, &ws.state.quarantine[key])
+                    ),
+                )
+            })
+            .collect();
+        let verdict = format!(
+            "Would approve {}",
+            super::plural(keys.len(), "held version")
+        );
+        ctx.out
+            .lines(super::item_lines(ctx, Token::Info, &verdict, &[], &said));
         return Ok(0);
     }
     let _lock = Lock::acquire(&ctx.source)?;
@@ -815,23 +833,43 @@ pub fn approve(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<
     let mut text = ws.config_text.clone();
     let mut refused = 0;
     let mut approved = Vec::new();
+    let mut said: Vec<(Token, String)> = Vec::new();
     for key in &keys {
         match approve_one(ctx, &ws, &git, &mut st, &mut text, key) {
             Ok(line) => {
-                println!("{line}");
+                said.push((Token::Ok, line));
                 approved.push(key.clone());
             }
             Err(why) => {
                 refused += 1;
-                println!("refused {key}: {why}");
+                said.push((Token::Attention, format!("refused {key}: {why}")));
             }
         }
     }
     state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))?;
+    let (tone, verdict) = match (approved.len(), refused) {
+        (0, r) => (
+            Token::Attention,
+            format!("Refused {}", super::plural(r, "held version")),
+        ),
+        (a, 0) => (
+            Token::Ok,
+            format!("Approved {}", super::plural(a, "held version")),
+        ),
+        (a, r) => (
+            Token::Attention,
+            format!(
+                "Approved {} · refused {r}",
+                super::plural(a, "held version")
+            ),
+        ),
+    };
+    let lead = super::item_lines(ctx, tone, &verdict, &[], &said);
     if approved.is_empty() {
+        ctx.out.lines(lead);
         return Ok(EXIT_DRIFT);
     }
-    let code = run_sync(ctx, &git, None)?;
+    let code = super::run_sync_led(ctx, &git, None, &lead)?;
     let vault = Vault {
         git: &git,
         dir: plugins_dir(ctx),
@@ -849,16 +887,30 @@ pub fn reject(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<i
     let ws = load(ctx)?;
     let keys = chosen(&ws, names, all, "reject")?;
     if keys.is_empty() {
-        println!("nothing held");
+        ctx.out.line(crate::ui::render::verdict(
+            &ctx.out.caps,
+            Token::Info,
+            "Nothing held for review",
+            &[],
+        ));
         return Ok(0);
     }
     if dry_run {
-        for key in &keys {
-            println!(
-                "would reject {key}: {}",
-                change_text(ctx, &ws.state.quarantine[key])
-            );
-        }
+        let said: Vec<(Token, String)> = keys
+            .iter()
+            .map(|key| {
+                (
+                    Token::Info,
+                    format!(
+                        "would reject {key}: {}",
+                        change_text(ctx, &ws.state.quarantine[key])
+                    ),
+                )
+            })
+            .collect();
+        let verdict = format!("Would reject {}", super::plural(keys.len(), "held version"));
+        ctx.out
+            .lines(super::item_lines(ctx, Token::Info, &verdict, &[], &said));
         return Ok(0);
     }
     let _lock = Lock::acquire(&ctx.source)?;
@@ -867,6 +919,7 @@ pub fn reject(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<i
         git: &git,
         dir: plugins_dir(ctx),
     };
+    let mut said: Vec<(Token, String)> = Vec::new();
     for key in &keys {
         let Some(candidate) = st.quarantine.remove(key) else {
             continue;
@@ -876,9 +929,18 @@ pub fn reject(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<i
             .or_default()
             .insert(candidate.version().to_string());
         drop_held(ctx, &vault, key);
-        println!("rejected {key}: {}", change_text(ctx, &candidate));
+        said.push((
+            Token::Ok,
+            format!("rejected {key}: {}", change_text(ctx, &candidate)),
+        ));
     }
     state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))?;
+    let verdict = format!(
+        "Rejected {} · they won't be offered again",
+        super::plural(said.len(), "held version")
+    );
+    ctx.out
+        .lines(super::item_lines(ctx, Token::Ok, &verdict, &[], &said));
     Ok(0)
 }
 
