@@ -14,6 +14,8 @@ pub const EXIT_LOCKED: i32 = 3;
 pub struct CliError {
     pub code: i32,
     pub message: String,
+    /// What to do about it (AC6-06); a generic one is used when `None`.
+    pub hint: Option<String>,
 }
 
 impl CliError {
@@ -22,6 +24,7 @@ impl CliError {
         Self {
             code: EXIT_USAGE,
             message: message.into(),
+            hint: None,
         }
     }
 
@@ -30,7 +33,14 @@ impl CliError {
         Self {
             code: EXIT_LOCKED,
             message: message.into(),
+            hint: Some("wait for the other colctl to finish; a lock left by a crashed run is reclaimed automatically".into()),
         }
+    }
+
+    /// The same error, with what to do about it.
+    pub fn hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
     }
 }
 
@@ -60,5 +70,10 @@ mod tests {
         let from: CliError = anyhow::anyhow!("inner").context("outer").into();
         assert_eq!(from.code, 2);
         assert_eq!(from.message, "outer: inner");
+        assert_eq!(
+            CliError::usage("x").hint("do y").hint.as_deref(),
+            Some("do y")
+        );
+        assert!(CliError::locked("x").hint.is_some());
     }
 }

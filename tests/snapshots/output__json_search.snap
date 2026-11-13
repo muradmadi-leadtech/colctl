@@ -1,0 +1,75 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &out)"
+---
+{
+  "matched": 2,
+  "results": [
+    {
+      "add": "already source plugin superpowers",
+      "author": null,
+      "catalogs": [
+        {
+          "name": "colctl",
+          "tool": "claude"
+        },
+        {
+          "name": "colctl",
+          "tool": "codex"
+        }
+      ],
+      "category": null,
+      "commit": "[SHA]",
+      "description": "",
+      "developer": "unknown",
+      "display_name": null,
+      "homepage": null,
+      "ids": [
+        "superpowers@superpowers-dev"
+      ],
+      "installed": [
+        "claude",
+        "codex",
+        "kilo-claude"
+      ],
+      "keywords": [],
+      "kind": "plugin",
+      "name": "superpowers",
+      "repo": "file://[ROOT]/upstreams/superpowers",
+      "source_plugin": "superpowers",
+      "subpath": null,
+      "version": null
+    },
+    {
+      "add": "colctl add source tool@official",
+      "author": "Ann",
+      "catalogs": [
+        {
+          "name": "official",
+          "tool": "claude"
+        }
+      ],
+      "category": null,
+      "commit": null,
+      "description": "A tool",
+      "developer": "ann",
+      "display_name": null,
+      "homepage": null,
+      "ids": [
+        "tool@official"
+      ],
+      "installed": [],
+      "keywords": [
+        "x"
+      ],
+      "kind": "plugin",
+      "name": "tool",
+      "repo": "https://github.com/ann/tool",
+      "source_plugin": null,
+      "subpath": null,
+      "version": null
+    }
+  ],
+  "version": 1,
+  "warnings": []
+}

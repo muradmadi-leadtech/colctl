@@ -1,0 +1,40 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &out)"
+---
+{
+  "candidates": [
+    {
+      "commits": [
+        {
+          "author": "t",
+          "date": "2026-11-13",
+          "rev": "[SHA]",
+          "subject": "v2"
+        }
+      ],
+      "diff": "diff --git a/README.md b/README.md\nindex [SHORT]..[SHORT] 100644\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-v1\n\\ No newline at end of file\n+v2\n\\ No newline at end of file\n",
+      "direction": "forward",
+      "error": null,
+      "files": [
+        {
+          "executable": false,
+          "old_path": null,
+          "path": "README.md",
+          "status": "modified",
+          "symlink": null
+        }
+      ],
+      "flags": [],
+      "from": "[SHA]",
+      "held_at": [TIME],
+      "key": "sources/superpowers",
+      "kind": "source",
+      "name": "superpowers",
+      "repo": "file://[ROOT]/upstreams/superpowers",
+      "to": "[SHA]",
+      "warning": null
+    }
+  ],
+  "version": 1
+}

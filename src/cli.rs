@@ -4,7 +4,7 @@ use crate::commands::{self, RmKind};
 use crate::config::PluginList;
 use crate::ctx::Ctx;
 use crate::error::{CliError, EXIT_USAGE};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -19,6 +19,46 @@ one copy of each skill and agent, one plugin list.\n\nSet COLCTL_HOME to keep th
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// When to use colour: auto (a terminal, unless NO_COLOR), always or never
+    #[arg(long, global = true, value_enum, default_value_t = ColorArg::Auto)]
+    color: ColorArg,
+    /// Only errors and the verdict line
+    #[arg(short, long, global = true, conflicts_with = "verbose")]
+    quiet: bool,
+    /// Also show each tool call and how long it took
+    #[arg(short, long, global = true)]
+    verbose: bool,
+    /// Answer yes to every confirmation
+    #[arg(short, long, global = true)]
+    yes: bool,
+    /// Never page long output
+    #[arg(long, global = true)]
+    no_pager: bool,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum ColorArg {
+    Auto,
+    Always,
+    Never,
+}
+
+impl Cli {
+    fn settings(&self, json: bool) -> crate::ui::term::Settings {
+        use crate::ui::term::ColorChoice;
+        crate::ui::term::Settings {
+            color: match self.color {
+                ColorArg::Auto => ColorChoice::Auto,
+                ColorArg::Always => ColorChoice::Always,
+                ColorArg::Never => ColorChoice::Never,
+            },
+            quiet: self.quiet,
+            verbose: self.verbose,
+            yes: self.yes,
+            no_pager: self.no_pager,
+            json,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -395,19 +435,76 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let cli = match Cli::try_parse_from(args) {
+    let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    let words: Vec<String> = args
+        .iter()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let json = words.iter().any(|w| w == "--json");
+    let command = words
+        .iter()
+        .find(|w| !w.starts_with('-'))
+        .cloned()
+        .unwrap_or_default();
+    let cli = match Cli::try_parse_from(&args) {
         Ok(cli) => cli,
-        Err(err) => {
-            let _ = err.print();
-            return if err.use_stderr() { EXIT_USAGE } else { 0 };
-        }
+        Err(err) => return parse_error(&err, &words),
     };
-    let result = Ctx::from_process().and_then(|ctx| dispatch(&ctx, cli.command));
+    let out = crate::ui::Out::new(&cli.settings(json));
+    let result = Ctx::from_process().and_then(|mut ctx| {
+        ctx.out = out;
+        dispatch(&ctx, cli.command)
+    });
     match result {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("colctl: {}", err.message);
+            let fallback = if command.is_empty() {
+                "colctl --help".to_string()
+            } else {
+                format!("colctl {command} --help")
+            };
+            out.error(&err, &fallback);
             err.code
         }
     }
+}
+
+/// Argument errors in colctl's error layout (AC6-06, EC6-18); help and version print as they are.
+fn parse_error(err: &clap::Error, words: &[String]) -> i32 {
+    use crate::ui::term::{ColorChoice, Settings};
+    let color = if words.iter().any(|w| w == "--color=never" || w == "never") {
+        ColorChoice::Never
+    } else {
+        ColorChoice::Auto
+    };
+    let out = crate::ui::Out::new(&Settings {
+        color,
+        ..Settings::default()
+    });
+    if !err.use_stderr() {
+        out.raw(&err.render().to_string());
+        return 0;
+    }
+    let text = err.render().to_string();
+    let mut what = String::new();
+    let mut hint = None;
+    for line in text.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix("error: ") {
+            what = rest.to_string();
+        } else if let Some(rest) = line.strip_prefix("tip: ") {
+            hint = Some(
+                rest.replace("a similar subcommand exists:", "did you mean")
+                    .replace('\'', ""),
+            );
+        }
+    }
+    let command = words.iter().find(|w| !w.starts_with('-'));
+    let fallback = match command {
+        Some(c) if Cli::command().find_subcommand(c).is_some() => format!("colctl {c} --help"),
+        _ => "colctl --help".to_string(),
+    };
+    let error = CliError::usage(what).hint(hint.unwrap_or(fallback));
+    out.error(&error, "colctl --help");
+    EXIT_USAGE
 }

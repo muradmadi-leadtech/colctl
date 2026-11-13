@@ -24,4 +24,5 @@ pub mod search;
 pub mod source;
 pub mod state;
 pub mod tool;
+pub mod ui;
 pub mod vault;

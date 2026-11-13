@@ -1,0 +1,39 @@
+---
+source: tests/output.rs
+expression: "normalise(&env, &out)"
+---
+{
+  "candidates": [
+    {
+      "commits": [
+        {
+          "author": "t",
+          "date": "2026-11-13",
+          "rev": "[SHA]",
+          "subject": "v2"
+        }
+      ],
+      "direction": "forward",
+      "error": null,
+      "files": [
+        {
+          "executable": false,
+          "old_path": null,
+          "path": "README.md",
+          "status": "modified",
+          "symlink": null
+        }
+      ],
+      "flags": [],
+      "from": "[SHA]",
+      "held_at": [TIME],
+      "key": "sources/superpowers",
+      "kind": "source",
+      "name": "superpowers",
+      "repo": "file://[ROOT]/upstreams/superpowers",
+      "to": "[SHA]",
+      "warning": null
+    }
+  ],
+  "version": 1
+}

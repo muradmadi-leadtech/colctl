@@ -24,6 +24,8 @@ pub struct Ctx {
     pub env_keys: Vec<String>,
     /// How long one `claude` or `codex` call may run.
     pub tool_timeout: Duration,
+    /// Where human-readable output goes, and what the terminal allows (cycle 6).
+    pub out: crate::ui::Out,
 }
 
 impl Ctx {
@@ -59,6 +61,7 @@ impl Ctx {
             path_var: get("PATH").unwrap_or_default(),
             env_keys: vars.iter().map(|(k, _)| k.clone()).collect(),
             tool_timeout,
+            out: crate::ui::Out::default(),
         })
     }
 
