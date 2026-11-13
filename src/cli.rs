@@ -8,10 +8,47 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+/// The top-level help (AC6-25): commands grouped by task. A test checks it lists every subcommand.
+const HELP: &str = "\
+{about}
+
+{usage-heading} {usage}
+
+Get started:
+  init          Create ~/.colctl and register the profiles on this machine
+  status        What's in sync, what isn't, and what to run
+  sync          Make every profile match ~/.colctl
+Manage:
+  add           Add a skill, agent, plugin or source plugin, then sync
+  rm            Remove one, everywhere
+  adopt         Move what a profile already has into ~/.colctl
+Updates and review:
+  update        Fetch new versions of source plugins and hold them for review
+  refresh       Hold changes from the folders taken-over skills came from
+  review        See what a held version changes, with risk flags
+  approve       Install held versions exactly as reviewed
+  reject        Drop held versions for good
+Discover:
+  search        Search every plugin catalog your profiles know
+  show          One plugin in full
+  developers    Who publishes what
+  marketplace   List or refresh marketplaces
+  connectors    Codex's app connectors
+Other:
+  completions   Shell completions (bash, zsh, fish)
+  version       Print the version
+  help          Help for a command
+
+Options:
+{options}
+Docs: https://github.com/muradmadi-leadtech/colctl/tree/main/docs
+";
+
 #[derive(Parser, Debug)]
 #[command(
     name = "colctl",
     version,
+    help_template = HELP,
     about = "Keep every AI coding harness in sync with one source of truth in ~/.colctl",
     long_about = "Keep every AI coding harness in sync with one source of truth in ~/.colctl: one AGENTS.md, \
 one copy of each skill and agent, one plugin list.\n\nSet COLCTL_HOME to keep the source somewhere else."
@@ -63,13 +100,17 @@ impl Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Create the source and register the harnesses found on this machine
+    /// Create ~/.colctl and register the profiles on this machine
+    #[command(after_help = "Examples:\n  colctl init\n  colctl init --dry-run")]
     Init {
         /// Print what would happen without changing anything
         #[arg(long)]
         dry_run: bool,
     },
-    /// Show what is in sync and what isn't; exits 1 when anything needs attention
+    /// What's in sync, what isn't, and what to run (exits 1 when something needs attention)
+    #[command(
+        after_help = "Examples:\n  colctl status\n  colctl status --all\n  colctl status --harness kilo-claude --json"
+    )]
     Status {
         /// Only this harness
         #[arg(long)]
@@ -81,7 +122,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Make every harness match the source
+    /// Make every profile match ~/.colctl
+    #[command(after_help = "Examples:\n  colctl sync\n  colctl sync --dry-run\n  colctl sync -v")]
     Sync {
         /// Only this harness
         #[arg(long)]
@@ -90,12 +132,18 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Add a skill, agent or plugin to the source, then sync
+    /// Add a skill, agent, plugin or source plugin, then sync
+    #[command(
+        after_help = "Examples:\n  colctl add skill ./my-skill\n  colctl add source superpowers@claude-plugins-official\n  colctl add plugin sadr@sadr --marketplace github:muradmadi/sadr"
+    )]
     Add {
         #[command(subcommand)]
         what: Add,
     },
-    /// Remove a skill, agent or plugin from the source and every harness
+    /// Remove a skill, agent, plugin or source plugin from ~/.colctl and every profile
+    #[command(
+        after_help = "Examples:\n  colctl rm skill old-skill\n  colctl rm source databricks --yes\n  colctl rm plugin x@openai-curated --codex"
+    )]
     Rm {
         kind: Kind,
         name: String,
@@ -106,7 +154,10 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Move what a harness already has into the source, then sync
+    /// Move what a profile already has into ~/.colctl, then sync
+    #[command(
+        after_help = "Examples:\n  colctl adopt\n  colctl adopt claude skills/foo\n  colctl adopt claude plugin superpowers@anthropic-plugin-directory"
+    )]
     Adopt {
         /// Only this harness
         harness: Option<String>,
@@ -116,7 +167,10 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Move source plugins' pins to newer upstream commits (the only command that looks upstream)
+    /// Fetch new versions of source plugins and hold them for review (nothing installs until you approve)
+    #[command(
+        after_help = "Examples:\n  colctl update --check\n  colctl update\n  colctl update superpowers --rev v7.0.2"
+    )]
     Update {
         /// Sources to update (default: all)
         names: Vec<String>,
@@ -130,7 +184,10 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Pull adopted skills and agents up to date with where they came from
+    /// Hold changes from the folders taken-over skills and agents came from, for review
+    #[command(
+        after_help = "Examples:\n  colctl refresh\n  colctl refresh skills/twg-jira\n  colctl refresh --dry-run"
+    )]
     Refresh {
         /// skills/<name> or agents/<name>.md; all with a recorded origin if omitted
         items: Vec<String>,
@@ -138,7 +195,10 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Search every plugin catalog your harnesses know (offline)
+    /// Search every plugin catalog your profiles know (offline)
+    #[command(
+        after_help = "Examples:\n  colctl search api security\n  colctl search --developer obra\n  colctl search --tool codex --limit 0 --json"
+    )]
     Search {
         /// Words that must all appear (name, keywords, description, developer)
         terms: Vec<String>,
@@ -161,7 +221,10 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Show one plugin from the catalogs in full
+    /// One plugin from the catalogs in full
+    #[command(
+        after_help = "Examples:\n  colctl show superpowers\n  colctl show 42crunch-api-security-testing@claude-plugins-official --json"
+    )]
     Show {
         /// A plugin id from search, or a name only one plugin has (in a terminal, omit it to pick)
         id: Option<String>,
@@ -169,7 +232,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// List developers and their plugin counts, or one developer's plugins
+    /// Who publishes what: developers and their plugin counts, or one developer's plugins
+    #[command(after_help = "Examples:\n  colctl developers\n  colctl developers obra")]
     Developers {
         /// A developer (a repo owner such as obra, or an author name)
         name: Option<String>,
@@ -177,12 +241,16 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// The marketplaces your profiles know, or ask the tools to update them
+    /// List the marketplaces your profiles know, or ask the tools to refresh them
+    #[command(
+        after_help = "Examples:\n  colctl marketplace list\n  colctl marketplace refresh --dry-run"
+    )]
     Marketplace {
         #[command(subcommand)]
         what: MarketplaceCmd,
     },
-    /// Search Codex's app connectors (Gmail, Slack…), which have no repo
+    /// Codex's app connectors (Gmail, Slack…), which have no repo
+    #[command(after_help = "Examples:\n  colctl connectors\n  colctl connectors gmail --json")]
     Connectors {
         /// Words that must all appear
         terms: Vec<String>,
@@ -193,7 +261,10 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Install held new versions exactly as reviewed, then sync
+    /// Install held versions exactly as reviewed, then sync
+    #[command(
+        after_help = "Examples:\n  colctl approve superpowers\n  colctl approve skills/twg-jira\n  colctl approve --all --yes"
+    )]
     Approve {
         /// Source names, skills/<name> or agents/<name>.md
         names: Vec<String>,
@@ -204,7 +275,8 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Drop held new versions and don't offer them again
+    /// Drop held versions for good; newer ones are still held
+    #[command(after_help = "Examples:\n  colctl reject superpowers\n  colctl reject --all")]
     Reject {
         /// Source names, skills/<name> or agents/<name>.md
         names: Vec<String>,
@@ -215,7 +287,10 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// List held new versions, or show one: commits, changed files, risk flags and the diff
+    /// See what a held version changes: risk flags, commits, files and the diff
+    #[command(
+        after_help = "Examples:\n  colctl review\n  colctl review superpowers\n  colctl review -i"
+    )]
     Review {
         /// A source name, skills/<name> or agents/<name>.md
         name: Option<String>,
@@ -226,7 +301,17 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print a shell completion script (bash, zsh, fish, elvish, powershell)
+    #[command(
+        after_help = "Examples:\n  colctl completions fish > ~/.config/fish/completions/colctl.fish\n  colctl completions zsh > ~/.zfunc/_colctl"
+    )]
+    Completions {
+        /// The shell
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// Print the version
+    #[command(after_help = "Examples:\n  colctl version\n  colctl --version")]
     Version,
 }
 
@@ -434,6 +519,12 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
             interactive,
             json,
         } => commands::review(ctx, name.as_deref(), interactive, json),
+        Command::Completions { shell } => {
+            let mut script = Vec::new();
+            clap_complete::generate(shell, &mut Cli::command(), "colctl", &mut script);
+            ctx.out.raw(&String::from_utf8_lossy(&script));
+            Ok(0)
+        }
         Command::Version => {
             ctx.out
                 .line(format!("colctl {}", env!("CARGO_PKG_VERSION")));
@@ -520,4 +611,45 @@ fn parse_error(err: &clap::Error, words: &[String]) -> i32 {
     let error = CliError::usage(what).hint(hint.unwrap_or(fallback));
     out.error(&error, "colctl --help");
     EXIT_USAGE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ac6_25_the_grouped_help_lists_every_command() {
+        for heading in [
+            "Get started:",
+            "Manage:",
+            "Updates and review:",
+            "Discover:",
+            "Other:",
+        ] {
+            assert!(HELP.contains(heading), "{heading}");
+        }
+        for sub in Cli::command().get_subcommands() {
+            let name = sub.get_name();
+            assert!(
+                HELP.lines()
+                    .any(|l| l.trim_start().starts_with(&format!("{name} "))),
+                "{name} is missing from the grouped help"
+            );
+        }
+    }
+
+    #[test]
+    fn ac6_26_every_command_has_examples() {
+        for sub in Cli::command().get_subcommands() {
+            let after = sub
+                .get_after_help()
+                .map(|h| h.to_string())
+                .unwrap_or_default();
+            assert!(
+                after.starts_with("Examples:\n  colctl "),
+                "{} has no examples",
+                sub.get_name()
+            );
+        }
+    }
 }

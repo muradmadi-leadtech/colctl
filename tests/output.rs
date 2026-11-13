@@ -618,3 +618,32 @@ fn ac6_24_every_error_has_a_hint() {
         assert!(err.starts_with("✗ error: "), "{args:?}: {err}");
     }
 }
+
+// ---------------------------------------------------------------- help (T6)
+
+#[test]
+fn ac6_25_ac6_26_help_is_grouped_with_examples() {
+    let env = Env::new();
+    let out = env.ok(&["--help"]);
+    assert!(out.contains("Updates and review:"), "{out}");
+    assert!(
+        out.contains("Fetch new versions of source plugins and hold them for review"),
+        "{out}"
+    );
+    let out = env.ok(&["update", "--help"]);
+    assert!(out.contains("Examples:\n  colctl update --check"), "{out}");
+}
+
+#[test]
+fn ac6_27_completions() {
+    let env = Env::new();
+    for shell in ["bash", "zsh", "fish"] {
+        let out = env.ok(&["completions", shell]);
+        for sub in ["status", "approve", "search", "completions"] {
+            assert!(out.contains(sub), "{shell}: {sub}");
+        }
+    }
+    let (code, _, err) = env.code(&["completions", "tcsh"]);
+    assert_eq!(code, 2);
+    assert!(err.starts_with("✗ error: "), "{err}");
+}
