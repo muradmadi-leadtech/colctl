@@ -67,6 +67,34 @@ fn run_tool(
     Outcome::Done
 }
 
+/// AC6-33: after installing or updating a source, the tool must report the pinned commit. A tool that
+/// installed something else (e.g. a repo manifest pointing at GitHub) fails the step instead of
+/// looking done and being "updated" again on every sync. Only Claude records commits, and a colctl
+/// wrapper marketplace's commit is ~/.colctl's, so those aren't checked.
+fn converged(
+    outcome: Outcome,
+    tool: Option<Tool>,
+    harness: &Harness,
+    id: &str,
+    marketplace: &str,
+    rev: &str,
+) -> Outcome {
+    if !outcome.is_done() || tool != Some(Tool::Claude) || marketplace.starts_with("colctl-") {
+        return outcome;
+    }
+    let installed = crate::adapter::read_plugins(&harness.path)
+        .ok()
+        .and_then(|p| p.revs.get(id).cloned());
+    match installed {
+        Some(at) if at != rev => Outcome::Failed(format!(
+            "{id} is still at {} after installing {}; the plugin comes from somewhere other than the clone",
+            crate::vault::short(&at),
+            crate::vault::short(rev)
+        )),
+        _ => outcome,
+    }
+}
+
 fn file_outcome(result: anyhow::Result<()>) -> Outcome {
     match result {
         Ok(()) => Outcome::Done,
@@ -219,7 +247,7 @@ pub fn apply(
                 } else if already {
                     Outcome::Done
                 } else {
-                    run(action)
+                    converged(run(action), tool, harness, id, marketplace, rev)
                 };
                 if outcome.is_done() {
                     state.sources.insert(
