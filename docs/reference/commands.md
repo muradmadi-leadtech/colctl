@@ -8,6 +8,7 @@
 | `colctl add skill\|agent\|plugin\|source …` | [add](add.md) | yes |
 | `colctl rm skill\|agent\|plugin <name> [--dry-run]` | [rm](rm.md) | yes |
 | `colctl adopt [<harness> [<item>]] [--dry-run]` | [adopt](adopt.md) | yes |
+| `colctl convert [--undo] <source> [--dry-run] [--json]` | [convert](convert.md) | holds a package; `--undo` uninstalls |
 | `colctl refresh [<item>…] [--dry-run]` | [refresh](refresh.md) | holds new versions |
 | `colctl update [<name>…] [--check] [--rev <commit-ish>] [--dry-run]` | [update](update.md) | holds new versions (not with `--check`) |
 | `colctl search [<term>…] [--tool] [--marketplace] [--developer] [--installed] [--limit] [--json]` | [search](search.md) | never |

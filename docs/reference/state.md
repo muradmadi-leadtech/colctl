@@ -66,7 +66,11 @@ commit here, so the next sync retries. When a source is removed, colctl uninstal
 }
 ```
 
-New versions held for review (2.0). The key is `sources/<name>`, `skills/<name>` or `agents/<name>.md`.
+New versions held for review (2.0). The key is `sources/<name>`, `skills/<name>` or `agents/<name>.md`, or
+`conversions/<name>` for a source's Codex package held by [convert](convert.md) (2.3):
+`{"kind": "conversion", "rev": "<commit>", "digest": "<sha256>", "held_at": …}`, with the package in
+`.state/quarantine/conversions/<name>/`. A converted source installed in a Codex profile is recorded at
+`<rev>+<first 12 of digest>`.
 
 - A source plugin: `from` is the pin when it was held, `to` the held commit. The clone keeps that commit under
   `refs/colctl/candidate` until it's approved or rejected, so `git gc` and upstream force-pushes can't lose it.

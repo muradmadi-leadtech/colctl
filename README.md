@@ -21,6 +21,9 @@ keeps a single copy of all of it in `~/.colctl` and points every profile at it, 
 - **Quarantine**: new versions are held, not installed. `colctl update` and `colctl refresh` hold a plugin's new
   commit or a skill's new content; `colctl review` shows what changed, with flags on hooks, MCP servers, scripts and
   tool permissions; `colctl approve` installs exactly what you reviewed, and `colctl reject` drops it.
+- **Convert**: a plugin whose repo only packages for Claude can be packaged for Codex too. `colctl convert <source>`
+  builds a Codex package from the pinned clone (skills and the hooks Codex runs, unchanged), holds it for review, and
+  approve installs it in every Codex profile; updates carry it along.
 - **Discovery**: `colctl search`, `show` and `developers` browse every plugin catalog Claude and Codex already keep
   (marketplaces, Anthropic's plugin directory), offline, merged across catalogs; `colctl add source <id>` installs a
   result from its own repo.
@@ -64,7 +67,8 @@ The docs follow [Diataxis](https://diataxis.fr):
   [Take over skills a tool installed](docs/how-to/take-over-skills-a-tool-installed.md) ·
   [Move a plugin to its source](docs/how-to/move-a-plugin-to-its-source.md) · [Update plugins](docs/how-to/update-plugins.md) ·
   [Review an update before it installs](docs/how-to/review-an-update.md) ·
-  [Find a plugin and add it from its source](docs/how-to/find-and-add-a-plugin.md)
+  [Find a plugin and add it from its source](docs/how-to/find-and-add-a-plugin.md) ·
+  [Use a Claude-only plugin in Codex](docs/how-to/use-a-claude-only-plugin-in-codex.md)
 - **Reference:** [commands](docs/reference/commands.md) · [`config.toml`](docs/reference/config.md) ·
   [exit codes](docs/reference/exit-codes.md) · [output](docs/reference/output.md) · [the `.state` folder](docs/reference/state.md)
 - **Explanation:** [Links, not copies](docs/explanation/links-not-copies.md) ·
@@ -72,7 +76,8 @@ The docs follow [Diataxis](https://diataxis.fr):
   [Codex and the shared skills folder](docs/explanation/codex-and-the-shared-skills-folder.md) ·
   [Plugins from source](docs/explanation/plugins-from-source.md) · [Quarantine](docs/explanation/quarantine.md) ·
   [Where the catalogs come from](docs/explanation/catalogs.md) ·
-  [How colctl talks to you](docs/explanation/how-colctl-talks.md)
+  [How colctl talks to you](docs/explanation/how-colctl-talks.md) ·
+  [Converting plugins](docs/explanation/converting-plugins.md)
 
 colctl is built in [FORGE](https://github.com/scottfeltham/forge-framework) cycles. Each cycle's intent (PRD,
 architecture, acceptance criteria) is in `docs/prd/`, `docs/tasks/` and `docs/<cycle>/`.

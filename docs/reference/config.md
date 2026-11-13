@@ -71,6 +71,7 @@ rev = "8ca22dba9a94f28898bbce59f2537ff4d87c747d"       # the pinned commit, all 
 plugin = "superpowers"                                # optional: its name in the repo's manifests (default: name)
 path = "plugins/superpowers"                          # optional: its folder inside the repo, if not the root
 replaces = ["superpowers@anthropic-plugin-directory"] # optional: ids uninstalled wherever they're installed
+convert = ["codex"]                                   # optional, written by colctl approve: see convert.md
 ```
 
 colctl clones each source into `~/.colctl/plugins/<name>` (git-ignored) at `rev`, and installs it in every claude and
