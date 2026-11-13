@@ -440,8 +440,9 @@ fn ec3_18_unknown_installed_commit_pins_the_head() {
         format!("[marketplaces.loc]\nsource_type = \"local\"\nsource = \"{}\"\n\n[plugins.\"superpowers@loc\"]\nenabled = true\n", local.display()),
     )
     .unwrap();
-    let out = env.ok(&["adopt", "codex", "plugin", "superpowers@loc"]);
-    assert!(out.contains("installed commit unknown; pinned to"), "{out}");
+    let (code, _, err) = env.code(&["adopt", "codex", "plugin", "superpowers@loc"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("installed commit unknown; pinned to"), "{err}");
     assert_eq!(sources(&env)[0]["rev"], head.as_str());
 }
 

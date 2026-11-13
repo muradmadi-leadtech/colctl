@@ -346,7 +346,7 @@ fn ac2_15_codex_missing_still_syncs_files() {
     codex_plugins(&env, "", "\"x@openai-curated\"");
     let out = env.expect(1, &["sync"]);
     assert!(
-        out.contains("codex plugin add x@openai-curated — skipped: codex not found"),
+        Env::words(&out).contains("install x failed: skipped: codex not found"),
         "{out}"
     );
     assert!(fs::read_link(env.home.join(".codex/AGENTS.md")).is_ok());
@@ -359,10 +359,10 @@ fn ac2_15_codex_failures_are_reported_in_full() {
     codex_plugins(&env, "", "\"x@openai-curated\", \"y@openai-curated\"");
     let out = env.expect(1, &["sync", "--harness", "kilo-codex"]);
     assert!(
-        out.contains("✗ codex plugin add x@openai-curated — codex plugin add x@openai-curated exited 1: fake codex failure for: plugin add x@openai-curated"),
+        Env::words(&out).contains("✗ install x failed: codex plugin add x@openai-curated exited 1: fake codex failure for: plugin add x@openai-curated"),
         "{out}"
     );
-    assert!(out.contains("✓ codex plugin add y@openai-curated"), "{out}");
+    assert!(Env::words(&out).contains("installed y"), "{out}");
     let state = fs::read_to_string(env.source.join(".state/state.json")).unwrap();
     assert!(!state.contains("x@openai-curated"), "{state}");
 }
@@ -382,7 +382,12 @@ fn ec2_14_marketplace_that_names_itself_differently() {
         ),
         "{out}"
     );
-    assert!(out.contains("codex plugin add superpowers@superpowers — skipped: marketplace \"superpowers\" wasn't added"), "{out}");
+    assert!(
+        Env::words(&out).contains(
+            "install superpowers failed: skipped: marketplace \"superpowers\" wasn't added"
+        ),
+        "{out}"
+    );
 }
 
 #[test]

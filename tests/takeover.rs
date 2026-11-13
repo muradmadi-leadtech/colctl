@@ -58,7 +58,9 @@ fn ac2_04_init_finds_codex_profiles_and_the_agents_folder() {
     env.agents_dir();
     let out = env.ok(&["init"]);
     assert!(
-        out.contains("registered harness kilo-codex") && out.contains("registered harness agents"),
+        out.contains("✓ Registered 2 new profiles")
+            && Env::words(&out).contains("kilo-codex ~/Library")
+            && Env::words(&out).contains("agents ~/.agents"),
         "{out}"
     );
     let config = env.config();

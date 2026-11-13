@@ -871,7 +871,10 @@ fn ac4_25_what_is_approved_is_what_was_reviewed() {
     fs::write(origin.join("SKILL.md"), "newer, unreviewed").unwrap();
     // The origin moved on after review, so sync reports it as origin-changed (exit 1).
     let out = env.expect(1, &["approve", "--all"]);
-    assert!(out.contains("origin-changed skills/twg-jira"), "{out}");
+    assert!(
+        Env::words(&out).contains("skills/twg-jira origin-changed"),
+        "{out}"
+    );
     assert_eq!(pin(&env), v2);
     assert_eq!(source_text(&env, "skills/twg-jira/SKILL.md"), "reviewed");
 }
@@ -914,14 +917,14 @@ fn ac4_26_several_at_once_all_and_dry_run() {
     env.ok(&["approve", "--all"]);
     assert_eq!(state(&env)["quarantine"], Value::Null);
     let out = env.ok(&["approve", "--all"]);
-    assert!(out.contains("nothing held"), "{out}");
+    assert!(out.contains("Nothing held for review"), "{out}");
 }
 
 #[test]
 fn ec4_01_ec4_02_ec4_03_approve_arguments() {
     let (env, _, _) = with_source();
     let out = env.ok(&["approve", "--all"]);
-    assert!(out.contains("nothing held"), "{out}");
+    assert!(out.contains("Nothing held for review"), "{out}");
     for (args, needle) in [
         (&["approve"][..], "or use --all"),
         (&["approve", "superpowers", "--all"], "not both"),
@@ -1157,7 +1160,7 @@ fn ac4_28_removing_an_item_drops_its_candidate() {
 fn ec4_01_ec4_02_ec4_03_reject_arguments_and_dry_run() {
     let (env, repo, _) = with_source();
     let out = env.ok(&["reject", "--all"]);
-    assert!(out.contains("nothing held"), "{out}");
+    assert!(out.contains("Nothing held for review"), "{out}");
     for (args, needle) in [
         (&["reject"][..], "or use --all"),
         (&["reject", "superpowers", "--all"], "not both"),

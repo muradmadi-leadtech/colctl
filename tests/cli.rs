@@ -51,7 +51,10 @@ fn ac_04_first_init_creates_the_source() {
             .contains(".state/")
     );
     assert_eq!(env.commits(), vec!["colctl: init"]);
-    assert!(out.contains("created ~/.colctl"), "{out}");
+    assert!(
+        out.contains("✓ Created ~/.colctl and registered 1 profile"),
+        "{out}"
+    );
     // Cycle 6: status follows init, led by its verdict.
     assert!(
         out.contains("✓ The profile is in sync"),
@@ -89,7 +92,11 @@ fn ac_06_running_init_again_only_adds() {
     env.write_config(&edited);
     env.kilo();
     let out = env.ok(&["init"]);
-    assert!(out.contains("registered harness kilo-claude"), "{out}");
+    assert!(
+        out.contains("✓ Registered 1 new profile")
+            && Env::words(&out).contains("kilo-claude ~/Library"),
+        "{out}"
+    );
     let config = env.config();
     assert!(config.starts_with(&edited), "{config}");
     assert!(config.contains("kilo-claude"));
@@ -97,7 +104,7 @@ fn ac_06_running_init_again_only_adds() {
     // Nothing new: nothing changes.
     env.ok(&["init"]);
     assert_eq!(env.commits().len(), 2);
-    assert!(env.ok(&["init", "--dry-run"]).contains("nothing to add"));
+    assert!(env.ok(&["init", "--dry-run"]).contains("Nothing to add"));
 }
 
 #[test]
@@ -109,7 +116,7 @@ fn ac_06_name_clash_gets_a_suffix() {
     env.kilo();
     let out = env.ok(&["init", "--dry-run"]);
     assert!(
-        out.contains("would register harness kilo-claude-2"),
+        out.contains("Would register") && out.contains("kilo-claude-2"),
         "{out}"
     );
 }
@@ -121,7 +128,7 @@ fn ac_07_init_dry_run_changes_nothing() {
     let before = env.snapshot();
     let out = env.ok(&["init", "--dry-run"]);
     assert!(
-        out.contains("would create ~/.colctl") && out.contains("would register harness claude"),
+        out.contains("Would create ~/.colctl") && Env::words(&out).contains("claude ~/.claude"),
         "{out}"
     );
     assert_eq!(env.snapshot(), before);
@@ -129,7 +136,7 @@ fn ac_07_init_dry_run_changes_nothing() {
     let bare = Env::new();
     assert!(
         bare.ok(&["init", "--dry-run"])
-            .contains("found no known harnesses")
+            .contains("no known profiles found")
     );
 }
 
@@ -483,7 +490,7 @@ fn ac_19_dry_run_never_changes_anything() {
     let before = env.snapshot();
     let sync = env.ok(&["sync", "--dry-run"]);
     assert!(
-        sync.contains("would link") && sync.contains("would claude plugin install sadr@sadr"),
+        sync.contains("would link") && sync.contains("would install sadr"),
         "{sync}"
     );
     env.ok(&["add", "skill", skill.to_str().unwrap(), "--dry-run"]);
@@ -504,7 +511,7 @@ fn ac_19_dry_run_never_changes_anything() {
 #[test]
 fn ac_19_dry_run_says_nothing_to_do() {
     let env = two_profiles();
-    assert!(env.ok(&["sync", "--dry-run"]).contains("nothing to do"));
+    assert!(env.ok(&["sync", "--dry-run"]).contains("Nothing to change"));
 }
 
 // ---------------------------------------------------------------- add / rm
@@ -990,10 +997,10 @@ fn ac_30_claude_failures_are_reported_in_full() {
     env.source_skill("foo");
     let out = env.expect(1, &["sync"]);
     assert!(
-        out.contains("✗ claude plugin install sadr@sadr — claude plugin install sadr@sadr exited 1: fake failure for: plugin install sadr@sadr"),
+        Env::words(&out).contains("✗ install sadr failed: claude plugin install sadr@sadr exited 1: fake failure for: plugin install sadr@sadr"),
         "{out}"
     );
-    assert!(out.contains("✓ claude plugin install superpowers@anthropic-plugin-directory"));
+    assert!(Env::words(&out).contains("installed superpowers"), "{out}");
     assert!(fs::read_link(env.home.join(KILO).join("skills/foo")).is_ok());
     let state = fs::read_to_string(env.source.join(".state/state.json")).unwrap();
     assert!(!state.contains("sadr@sadr"), "{state}");
@@ -1008,7 +1015,7 @@ fn ac_31_claude_missing_still_syncs_files() {
     add_marketplace_and_plugins(&env);
     let out = env.expect(1, &["sync"]);
     assert!(
-        out.contains("claude plugin install sadr@sadr — skipped: claude not found"),
+        Env::words(&out).contains("install sadr failed: skipped: claude not found"),
         "{out}"
     );
     assert!(fs::read_link(env.home.join(".claude/skills/foo")).is_ok());
@@ -1075,9 +1082,8 @@ fn ec_11_marketplace_name_mismatch() {
         "{out}"
     );
     assert!(
-        out.contains(
-            "claude plugin install sadr@sadr — skipped: marketplace \"sadr\" wasn't added"
-        ),
+        Env::words(&out)
+            .contains("install sadr failed: skipped: marketplace \"sadr\" wasn't added"),
         "{out}"
     );
 }
