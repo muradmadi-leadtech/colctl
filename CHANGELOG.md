@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.2.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.1.2...v2.2.0) (2026-11-13)
+
+
+### Features
+
+* ask only when it helps, and give every command the same look ([#74](https://github.com/muradmadi-leadtech/colctl/issues/74)) ([38114c5](https://github.com/muradmadi-leadtech/colctl/commit/38114c53ef237477569450e438f923f4a0668c5f))
+* grouped help with examples, and shell completions ([#75](https://github.com/muradmadi-leadtech/colctl/issues/75)) ([6499f12](https://github.com/muradmadi-leadtech/colctl/commit/6499f125f1b30ed7cf2e9f049f01263bab8dff30))
+* one output layer, global output flags, and errors that say what to do ([#68](https://github.com/muradmadi-leadtech/colctl/issues/68)) ([162b1a4](https://github.com/muradmadi-leadtech/colctl/commit/162b1a40d3f16c0b004b1eb3fd4f0058fab055c6))
+* running commands show live progress and say what they did ([#73](https://github.com/muradmadi-leadtech/colctl/issues/73)) ([2e393ef](https://github.com/muradmadi-leadtech/colctl/commit/2e393efdb85179e5bc8406d914f2939ad54779cb))
+* snapshot every command's output, fit any width, and document the output system ([#76](https://github.com/muradmadi-leadtech/colctl/issues/76)) ([a14f120](https://github.com/muradmadi-leadtech/colctl/commit/a14f1204d465b9ce556891f60b26a9fd0c6c60a5))
+* status leads with a verdict, shows only what needs attention, and lists everything with --all ([#72](https://github.com/muradmadi-leadtech/colctl/issues/72)) ([b660edb](https://github.com/muradmadi-leadtech/colctl/commit/b660edb68e4c265003b7910e6173767bbf2c1b9c))
+
+
+### Bug Fixes
+
+* keep short ids whole next to long ones, and start stacked outcomes on the profile line ([#77](https://github.com/muradmadi-leadtech/colctl/issues/77)) ([716cc66](https://github.com/muradmadi-leadtech/colctl/commit/716cc6619d1401425e238eb96d817dd33ba525ff))
+
 ## [2.1.2](https://github.com/muradmadi-leadtech/colctl/compare/v2.1.1...v2.1.2) (2026-11-13)
 
 
