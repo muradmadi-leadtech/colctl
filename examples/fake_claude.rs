@@ -71,10 +71,14 @@ fn main() {
             "secure_storage": env::var_os("CLAUDE_SECURESTORAGE_CONFIG_DIR").is_some(),
             "anthropic": anthropic,
         });
-        let mut text = fs::read_to_string(&log).unwrap_or_default();
-        text.push_str(&line.to_string());
-        text.push('\n');
-        fs::write(&log, text).unwrap();
+        // One append per call, so calls running in parallel don't overwrite each other.
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+            .unwrap();
+        file.write_all(format!("{line}\n").as_bytes()).unwrap();
     }
     if let Some(secs) = env::var("FAKE_CLAUDE_SLEEP")
         .ok()
@@ -125,6 +129,7 @@ fn main() {
             );
             write(&markets_path, &markets);
         }
+        ["plugin", "marketplace", "update"] => {}
         ["plugin", "marketplace", "update", name] => {
             if markets.get(*name).is_none() {
                 eprintln!("marketplace {name} not found");
