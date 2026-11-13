@@ -29,16 +29,16 @@ Find plugins across every catalog Claude and Codex already keep on this machine 
 
 ---
 
-<!-- FORGE_PHASE:Orchestrate:Active -->
+<!-- FORGE_PHASE:Orchestrate:Complete -->
 ## Phase 2: Orchestrate
 
 **Purpose**: Break the work into session-sized pieces.
 
 ### Required Outputs
-- [ ] Container architecture (C4 L2) designed
-- [ ] Component architecture (C4 L3) designed
-- [ ] Dependency map created
-- [ ] Tasks sized for single AI sessions
+- [x] Container architecture (C4 L2) designed
+- [x] Component architecture (C4 L3) designed
+- [x] Dependency map created
+- [x] Tasks sized for single AI sessions
 
 ### Tasks
 
@@ -47,7 +47,7 @@ Dependency map: T1, T2 independent; T1 → T3–T7; T2 → T3, T4; T3–T7 → T
 
 ---
 
-<!-- FORGE_PHASE:Refine:Pending -->
+<!-- FORGE_PHASE:Refine:Complete -->
 ## Phase 3: Refine
 
 **Purpose**: Define exactly what "done" looks like.
@@ -68,7 +68,7 @@ Dependency map: T1, T2 independent; T1 → T3–T7; T2 → T3, T4; T3–T7 → T
 
 ---
 
-<!-- FORGE_PHASE:Generate:Pending -->
+<!-- FORGE_PHASE:Generate:Active -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.
@@ -79,7 +79,7 @@ Dependency map: T1, T2 independent; T1 → T3–T7; T2 → T3, T4; T3–T7 → T
 - [ ] REFACTOR: Improve while green
 - [ ] Code review: Linter and type checks pass
 - [ ] Code review: TDD compliance verified
-- [ ] Code review: Acceptance criteria alignment checked
+- [x] Code review: Acceptance criteria alignment checked
 
 ### Implementation Notes
 
