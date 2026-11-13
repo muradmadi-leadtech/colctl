@@ -1,6 +1,6 @@
 [package]
 name = "colctl"
-version = "2.1.0"
+version = "2.1.2"
 edition = "2024"
 description = "Keep every AI coding harness on your machine in sync with one source of truth"
 repository = "https://github.com/muradmadi-leadtech/colctl"

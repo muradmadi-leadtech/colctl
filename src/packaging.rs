@@ -65,7 +65,9 @@ const CODEX: Tool = Tool {
     entry: |name, link| {
         json!({
             "name": name,
-            "source": {"source": "url", "url": format!("./{link}")},
+            // Codex clones a `url` source with git, so a folder of the clone (not a repo root) needs
+            // a `local` source, as Codex's own marketplaces use for plugins in folders.
+            "source": {"source": "local", "path": format!("./{link}")},
             "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
         })
     },
@@ -362,8 +364,8 @@ mod tests {
             f.clone.join("plugins/dbx/codex")
         );
         assert_eq!(
-            read(&f.manifests.join(".agents/plugins/marketplace.json"))["plugins"][0]["source"]["url"],
-            "./plugin-codex"
+            read(&f.manifests.join(".agents/plugins/marketplace.json"))["plugins"][0]["source"],
+            json!({"source": "local", "path": "./plugin-codex"})
         );
         assert_eq!(
             read(&f.manifests.join(".claude-plugin/marketplace.json"))["plugins"][0]["source"],
@@ -463,7 +465,7 @@ mod tests {
         let codex = read(&f.manifests.join(".agents/plugins/marketplace.json"));
         assert_eq!(
             codex["plugins"][0]["source"],
-            json!({"source": "url", "url": "./plugin"})
+            json!({"source": "local", "path": "./plugin"})
         );
         // Running again changes nothing.
         let again = inspect(&f.clone, &f.manifests, "sp", "tool", None);

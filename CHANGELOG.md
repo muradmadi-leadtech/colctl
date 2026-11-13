@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.1.2](https://github.com/muradmadi-leadtech/colctl/compare/v2.1.1...v2.1.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* give Codex wrapper marketplaces a local folder source ([#69](https://github.com/muradmadi-leadtech/colctl/issues/69)) ([d41493d](https://github.com/muradmadi-leadtech/colctl/commit/d41493da617fd8b420ffa1a66e3f91620dbc0759))
+
+## [2.1.1](https://github.com/muradmadi-leadtech/colctl/compare/v2.1.0...v2.1.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* install source plugins from the pinned clone even when the repo's manifest points elsewhere ([#66](https://github.com/muradmadi-leadtech/colctl/issues/66)) ([1a9a76e](https://github.com/muradmadi-leadtech/colctl/commit/1a9a76ed56362626b4338d41985cd26ddf7972c2))
+
 ## [2.1.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.0.0...v2.1.0) (2026-11-13)
 
 
