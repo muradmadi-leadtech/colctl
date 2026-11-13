@@ -28,6 +28,8 @@ pub struct Facts {
     pub stderr_tty: bool,
     /// The terminal's columns, when it reports them.
     pub columns: Option<usize>,
+    /// The terminal's rows, when it reports them.
+    pub rows: Option<usize>,
     pub no_color: Option<String>,
     pub clicolor_force: Option<String>,
     pub term: Option<String>,
@@ -48,6 +50,7 @@ impl Facts {
                 .size_checked()
                 .or_else(|| console::Term::stderr().size_checked())
                 .map(|(_, c)| usize::from(c)),
+            rows: out.size_checked().map(|(r, _)| usize::from(r)),
             no_color: var("NO_COLOR"),
             clicolor_force: var("CLICOLOR_FORCE"),
             term: var("TERM"),
@@ -72,6 +75,8 @@ pub struct Caps {
     pub quiet: bool,
     pub verbose: bool,
     pub yes: bool,
+    /// The terminal's height (for paging), 24 when unknown.
+    pub height: usize,
 }
 
 pub const MIN_WIDTH: usize = 40;
@@ -110,6 +115,7 @@ impl Caps {
             quiet: s.quiet,
             verbose: s.verbose,
             yes: s.yes,
+            height: f.rows.unwrap_or(24).max(5),
         }
     }
 

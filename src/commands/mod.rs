@@ -358,7 +358,7 @@ pub fn status(ctx: &Ctx, filter: Option<&str>, as_json: bool, all: bool) -> Resu
             serde_json::to_string_pretty(&status_json(ctx, &ws, &planned, &dirty, &held))
                 .map_err(|e| CliError::usage(e.to_string()))?;
         text.push('\n');
-        print!("{text}");
+        ctx.out.raw(&text);
     } else {
         ctx.out
             .lines(status_view::render(ctx, &ws, &planned, &dirty, &held, all));
@@ -723,6 +723,22 @@ fn item_lines(
     lines
 }
 
+/// Asks before a destructive step (AC6-18, EC6-14); prints "Nothing changed" when the answer is no.
+fn confirmed(ctx: &Ctx, question: &str) -> bool {
+    match ctx.out.confirm(question) {
+        crate::ui::ask::Answer::Yes => true,
+        _ => {
+            ctx.out.line(render::verdict(
+                &ctx.out.caps,
+                Token::Info,
+                "Nothing changed",
+                &[],
+            ));
+            false
+        }
+    }
+}
+
 /// The one-line verdict a command leads with (AC6-17).
 fn lead(ctx: &Ctx, text: &str, facts: &[String]) -> Vec<String> {
     vec![render::verdict(&ctx.out.caps, Token::Ok, text, facts)]
@@ -974,6 +990,22 @@ pub fn rm(
     }
     if dry_or_write(ctx, dry_run, &format!("remove {label} {name}")) {
         return Ok(0);
+    }
+    // AC6-18: removing from every profile is worth a question, in a terminal.
+    let profiles = ws
+        .config
+        .harnesses
+        .iter()
+        .filter(|h| h.path.is_dir())
+        .count();
+    if !confirmed(
+        ctx,
+        &format!(
+            "Remove {label} {name} from {}?",
+            plural(profiles, "profile")
+        ),
+    ) {
+        return Ok(EXIT_DRIFT);
     }
     let _lock = Lock::acquire(&ctx.source)?;
     commit_pending(&git, ctx)?;
