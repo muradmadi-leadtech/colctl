@@ -41,6 +41,11 @@ Cycle 3's smoke on copies of real profiles found plugins installed in both user 
 
 CI only runs on pull requests, so a RED commit pushed before the PR exists never shows as failing. Push RED, open the PR, wait for check to fail, then push GREEN (pushing GREEN early cancels the RED run).
 
+### Smoke-test against real catalogs
+*Added: 2026-11-13*
+
+Fixture data that agrees with itself hides mismatches real data has (directory slugs vs plugin names). Run discovery-style features on a copy of the owner's real data before release.
+
 ## Anti-Patterns
 
 <!-- Approaches to avoid -->
@@ -69,6 +74,11 @@ A python str.replace aimed at code cargo fmt had already reflowed silently did n
 *Added: 2026-11-12*
 
 Docs-only pushes still run typos and link checks; the cycle 4 plan PR failed on a crate name. Run just check before every push, docs included.
+
+### Read-modify-write logs in test fakes
+*Added: 2026-11-13*
+
+Fakes that append to a log by rewriting it lose lines when colctl calls them in parallel; append in one write.
 
 ## Decisions
 
