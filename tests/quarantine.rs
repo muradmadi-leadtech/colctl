@@ -1206,23 +1206,22 @@ fn ac4_29_held_candidates_show_in_status() {
     let origin = adopted_skill(&env, "twg-jira", "v1");
     fs::write(origin.join("SKILL.md"), "v2").unwrap();
     env.ok(&["refresh"]);
+    // Cycle 6: held versions are listed under "Needs attention".
     let out = env.expect(1, &["status"]);
+    let words = Env::words(&out);
     assert!(
-        out.contains(&format!(
-            "  pending-review       sources/superpowers  {} → {}  → colctl review superpowers",
+        words.contains(&format!(
+            "! held source superpowers {} → {} → colctl review superpowers",
             &v1[..7],
             &v2[..7]
         )),
         "{out}"
     );
     assert!(
-        out.contains("  pending-review       skills/twg-jira  ~/.config/twg/skills/twg-jira  → colctl review skills/twg-jira"),
+        words.contains("! held skill skills/twg-jira ~/.config/twg/skills/twg-jira → colctl review skills/twg-jira"),
         "{out}"
     );
-    assert!(
-        out.trim_end().ends_with("in sync; 2 held for review"),
-        "{out}"
-    );
+    assert!(out.starts_with("! 2 things need attention"), "{out}");
     let (code, json, _) = env.code(&["status", "--json"]);
     assert_eq!(code, 1);
     let v: Value = serde_json::from_str(&json).unwrap();
@@ -1259,7 +1258,7 @@ fn ac4_29_status_lists_candidates_without_git() {
     let out = cmd.args(["status"]).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains("pending-review       sources/superpowers"),
+        Env::words(&text).contains("! held source superpowers"),
         "{text}"
     );
 }
@@ -1277,9 +1276,10 @@ fn ac4_30_list_plugins_are_unreviewed() {
         1,
     ));
     env.ok(&["sync"]);
-    let out = env.ok(&["status"]);
+    // Cycle 6: informational states are listed with --all.
+    let out = env.ok(&["status", "--all"]);
     assert!(
-        out.contains("unreviewed           plugin        tool@some-market  → updates come from some-market, not through colctl review"),
+        Env::words(&out).contains("· unreviewed plugin tool@some-market → updates come from some-market, not through colctl review"),
         "{out}"
     );
     assert!(!out.contains("to hold them"), "{out}");

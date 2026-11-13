@@ -376,6 +376,12 @@ impl Env {
         self.expect(0, args)
     }
 
+    /// Output with every run of whitespace (newlines too) collapsed to one space, so tests check
+    /// content rather than column padding (cycle 6 aligns columns to their content).
+    pub fn words(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
     pub fn status_json(&self) -> Value {
         let (_, out, err) = self.code(&["status", "--json"]);
         serde_json::from_str(&out).unwrap_or_else(|e| panic!("{e}: {out}\n{err}"))

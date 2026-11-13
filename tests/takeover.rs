@@ -235,7 +235,10 @@ fn ac2_24_links_into_other_folders_are_visible() {
     let origin = twg_skill(&env, "twg-jira", "jira");
     let out = env.expect(1, &["status"]);
     assert!(
-        out.contains(&format!("linked-elsewhere     skill         twg-jira  → links to {}; colctl adopt agents skills/twg-jira", origin.display())),
+        Env::words(&out).contains(&format!(
+            "twg-jira linked-elsewhere → links to {}; colctl adopt agents skills/twg-jira",
+            origin.display()
+        )),
         "{out}"
     );
     env.expect(1, &["sync"]);

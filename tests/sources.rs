@@ -166,9 +166,9 @@ fn ac3_09_unsupported_tools_are_visible_but_not_drift() {
     env.add_source_entry("clonly", &url, &v1, "");
     env.ok(&["sync"]);
     assert!(env.codex_log().is_empty(), "no codex calls");
-    let out = env.ok(&["status"]);
+    let out = env.ok(&["status", "--all"]);
     assert!(
-        out.contains("unsupported") && out.contains("the repo has no Codex packaging"),
+        out.contains("unsupported") && Env::words(&out).contains("the repo has no Codex packaging"),
         "{out}"
     );
     assert_eq!(
@@ -314,7 +314,7 @@ fn ac3_23_plugins_from_an_aggregator_are_flagged() {
     .unwrap();
     let out = env.expect(1, &["status"]);
     assert!(
-        out.contains("from-aggregator") && out.contains("source: https://github.com/obra/superpowers; colctl adopt claude plugin superpowers@anthropic-plugin-directory"),
+        out.contains("from-aggregator") && Env::words(&out).contains("source: https://github.com/obra/superpowers; colctl adopt claude plugin superpowers@anthropic-plugin-directory"),
         "{out}"
     );
 }
