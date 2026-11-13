@@ -7,6 +7,7 @@ passes locally before every push.
 
 | # | Task | Needs | Produces |
 |---|---|---|---|
+| T0 | **Sources install from the pinned clone** (found during Refine): a wrapper marketplace when the repo's manifest points elsewhere; move existing installs; sync reports a source that doesn't converge. Ships first, as its own patch release (v2.1.1), because it lets unreviewed code past quarantine | — | Correct installs |
 | T1 | **Foundation**: `ui::term`, `ui::style`, `ui::render`, `ui::errors`, `Out`; global flags; a JSON golden test recorded from 2.1 that must stay byte-identical; a guard that no command prints directly (allow-list shrinking to zero by T6) | — | The output layer |
 | T2 | **`status`**: verdict, per-profile summary, problems only with fixes, `--all`; source section (uncommitted, held, origin changes) in the same style | T1 | Calm status |
 | T3 | **Running commands**: `apply` emits step events; `ui::progress`; outcome summaries for `sync`, `add`, `rm`, `adopt`, `approve`, `init` ("installed superpowers in 4 profiles"), tool calls under `-v`; fixes the "needs attention … in sync" contradiction | T1 | Live, readable runs |
@@ -35,3 +36,4 @@ T2–T5 all build on T1 and touch different commands, so they can go in any orde
 | T5 | AC6-21 – 24 | — |
 | T6 | AC6-25 – 27 | — |
 | T7 | AC6-28 – 30 | — |
+| T0 | AC6-31 – 33 | EC6-21, 22 |

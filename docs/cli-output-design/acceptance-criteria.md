@@ -223,3 +223,34 @@ Then docs/reference/output.md describes the tokens, components, flags, interacti
 Then every AC6/EC6 ID has a test named after it, and earlier suites keep their test counts with none ignored (text
   assertions updated and listed in the cycle review)
 ```
+
+## Found during Refine: sources must install from the pinned clone (T0)
+
+The owner's `colctl add source databricks@claude-plugins-official` never converged: databricks' own
+`.claude-plugin/marketplace.json` gives the plugin a `git-subdir` source on GitHub at `main`, so Claude installed `main`
+(`95beba3`) instead of the pin (`c196426`) and every sync "updated" it again. Codex did the same, unseen. This also
+let unreviewed code past quarantine.
+
+**AC6-31 A source installs from its clone, whatever the repo's manifest says**
+```gherkin
+Given a source whose repo's marketplace manifest gives the plugin a non-local source (github, url, git, git-subdir)
+When it's synced
+Then colctl uses its own wrapper marketplace (colctl-<name>) pointing at the plugin's folder in the clone, for Claude and
+  for Codex, so the installed commit is the pin
+And a repo whose manifest points inside itself ("./…") keeps using the repo's own marketplace, as before
+```
+
+**AC6-32 Existing installs move to the clone**
+```gherkin
+Given a profile where colctl installed such a source from the repo's own marketplace (as 2.1 did)
+When I run colctl sync
+Then the old id is uninstalled and its marketplace removed (only what colctl recorded), the wrapper's id is installed at the
+  pin, and the next status is in sync
+```
+
+**AC6-33 Sync converges or says why**
+```gherkin
+Given a source that's still at another commit than its pin right after its update ran
+Then sync reports it as failed ("still at <commit> after updating; …") with a hint, instead of reporting success, and
+  the exit code is 1
+```

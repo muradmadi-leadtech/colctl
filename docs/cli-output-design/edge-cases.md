@@ -43,3 +43,10 @@ IDs are `EC6-NN`; each needs a test whose name contains `ec6_NN`.
 | EC6-18 | Unknown command, or a typo of one | Error layout; the parser's suggestion becomes `hint: did you mean …`; exit 2 |
 | EC6-19 | An error while progress is drawn | Progress is cleared before the error prints; no half-drawn lines |
 | EC6-20 | A broken pipe while printing (`… \| head`) | Still exits quietly with 141 (EC5-24) |
+
+## Sources (T0)
+
+| ID | Case | Expected |
+|---|---|---|
+| EC6-21 | A repo whose Claude manifest points inside the repo but whose Codex manifest points to GitHub (or the reverse) | Decided per tool: the wrapper only where the repo's own manifest points elsewhere |
+| EC6-22 | The wrapper's id is already installed by hand from another marketplace | Treated like any foreign install of that id: left alone, reported |
