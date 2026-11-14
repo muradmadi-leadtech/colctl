@@ -115,6 +115,9 @@ pub fn update(
             let last = said[from..].last();
             let ok = last.is_none_or(|(t, _)| *t != Token::Failed);
             let summary = last.map_or("up to date", |(_, text)| text.as_str());
+            // The watcher shows the name already.
+            let prefix = format!("{name}: ");
+            let summary = summary.strip_prefix(&prefix).unwrap_or(summary);
             ctx.out.done(&name, summary, ok);
         }
     };

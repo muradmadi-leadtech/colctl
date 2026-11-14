@@ -200,6 +200,15 @@ mod runs {
             "{:?}",
             events(&rec)
         );
+        // The watcher shows the source's name; the summary doesn't repeat it.
+        for e in events(&rec) {
+            if let Event::Done {
+                profile, summary, ..
+            } = e
+            {
+                assert!(!summary.starts_with(&format!("{profile}:")), "{summary}");
+            }
+        }
         // What was held before the stop stays held.
         let snap = status::snapshot(&ctx(&env), None).unwrap();
         assert_eq!(snap.held.len(), 1, "{report:?}");
