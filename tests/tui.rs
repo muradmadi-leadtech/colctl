@@ -644,6 +644,12 @@ fn mask(text: &str) -> String {
         let end = chars
             .get(i + run)
             .is_none_or(|c| !c.is_ascii_alphanumeric());
+        // A commit id cut short ("cc2…").
+        if boundary && (1..7).contains(&run) && chars.get(i + run) == Some(&'…') {
+            out.push_str("[CUT]");
+            i += run;
+            continue;
+        }
         if boundary
             && end
             && (run == 7 || run == 40)

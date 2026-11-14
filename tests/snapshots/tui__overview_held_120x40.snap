@@ -12,8 +12,8 @@ expression: mask(&screen(&m))
    ✓ codex        ~/.codex                     1 plugin
 
  Needs you
- › ! claude  skill   alpha        missing                                                 → colctl sync
-   ! held    source  superpowers  [SHORT] → [SHORT]                                       → colctl review superpowers
+ › ! claude  skill   alpha        missing            → colctl sync
+   ! held    source  superpowers  [SHORT] → [SHORT]  → colctl review superpowers
 
 
 

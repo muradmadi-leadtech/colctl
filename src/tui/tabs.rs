@@ -1,4 +1,3 @@
-#![allow(unreachable_code, unused_variables, dead_code)]
 //! What each tab shows and does (design spec § Screens). Every fact comes from `core`, every action
 //! is a `core::run::Job` the CLI also runs.
 
@@ -15,8 +14,7 @@ use ratatui::text::{Line, Span};
 
 /// The current tab's body.
 pub fn body(m: &Model, t: Theme) -> Body {
-    #[allow(unreachable_code)]
-    match (m.tab, return Body::default()).0 {
+    match m.tab {
         Tab::Overview => overview(m, t),
         Tab::Profiles => profiles(m, t),
         tab => Body {
@@ -36,11 +34,6 @@ pub fn needs_you(m: &Model) -> bool {
 
 /// A tab's own actions.
 pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
-    if m.quit {
-        return Vec::new();
-    }
-    #[allow(unreachable_code)]
-    return Vec::new();
     match (m.tab, action) {
         (Tab::Overview, Action::Sync) => ask_sync(m, None),
         (Tab::Overview, Action::Open) => match focused_fix(m) {
@@ -321,7 +314,8 @@ fn attention_rows(t: Theme, rows: &[Attention], cols: usize) -> Vec<Line<'static
         .min(cols / 2);
     let what_room = cols
         .saturating_sub(2 + place_w + 2 + kind_w + 2 + name_w + 2 + 2 + fix_w)
-        .max(8);
+        .max(8)
+        .min(rows.iter().map(|a| width(&escape(&a.what))).max().unwrap_or(0));
     rows.iter()
         .map(|a| {
             let what = cut(&escape(&a.what), what_room);
