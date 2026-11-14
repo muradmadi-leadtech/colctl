@@ -11,7 +11,37 @@ _Cycle 8 · Evaluate · 2026-11-14_
 | **Released** | [v2.4.0](https://github.com/muradmadi-leadtech/colctl/releases/tag/v2.4.0) |
 | **PRs** | #96 focus · #97 orchestrate · #98 refine · #99 T1 · #100 T2 · #101 T3 · #102 T4 · #104 T5 · #105 T6 · #106 T7 · #107 T8 · #108 T9 · #109 T10 · #110 T11 · #111, #112 smoke fixes · #103 release. Before the cycle: #94 (a snapshot held the test day's date), #95 (cycle 7 closed) |
 | **Production impact** | None on this machine. Real profiles were only read; the smoke test ran on copies with credentials and sessions removed |
-| **Disposition** | _Yours to decide_ |
+| **Disposition** | Revise (owner, 2026-11-14), fixed in 2.5.0 (#114, #116, #117, #118). Now _yours to decide_ again |
+
+## Revise (owner, 2026-11-14), fixed in 2.5.0
+
+| What you hit | Cause | Fix |
+|---|---|---|
+| qdrant-skills failed in both Claude profiles, and sync from the TUI failed again every time | Claude caches plugins by version. qdrant's new commit still says 1.0.0, so `claude plugin update` kept the old commit (I checked this with the real claude on a copy) | When Claude stays on the old commit, colctl reinstalls the plugin and checks again (#114). The fake claude now behaves like the real one, and 11 earlier tests failed before the fix |
+| You couldn't tell why it failed | The TUI only showed the toast | A failed run opens a **Result** overlay with the CLI's full report: which profiles, why, and the fix (#117) |
+| ←/→ don't switch tabs | Not bound | ←/→ switch tabs (#117) |
+| No menu on Overview | — | A menu above the profiles: sync, check for updates, review held versions (with the count), find a plugin, look through every item (#117) |
+| One arrow press in Discover jumped to the bottom | A trackpad flick sends hundreds of wheel events, and each one moved the selection a row | Scroll bursts are combined into at most 3 rows a frame. The wheel scrolls the view, and the selection only moves to stay visible (#117) |
+| A review was a 19k-line diff | — | **CLI first:** `colctl review` opens with a recommendation, and `--json` gains a `recommendation` field. New malware-pattern flags: download-and-run, decode-and-run, reverse shell, credential reads, wiping a home or root folder, crypto mining. With no pattern found, the answer is approve. The TUI opens on a summary, and `d` shows the full review (#116, #118) |
+| "loading" for some work, commands for others | — | The status line always shows a spinner and the command it's running (#117) |
+
+Also changed: Discover searches as you type (Ctrl-C quits there, so `q` can be typed), and `a` adds from a plugin's detail. Results are ranked once per query, not on every frame.
+
+**Smoke test** on a fresh copy of your machine as it is now (qdrant-skills outdated in both Claude profiles), using the
+real `claude` and `codex`:
+- From the Overview menu, ⏎ then `y`: `✓ Synced 5 profiles · 2 changes` in 4 s. `colctl status` then says `✓ All 5
+  profiles in sync`.
+- With your real 51-commit qdrant change held, ⏎ shows `✓ Recommendation: approve. No malware patterns. 9 files run
+  code, as plugins do.` and `d` opens the full review in 0.8 s.
+- → → → reaches Review.
+- A 200-event trackpad flick in Discover moves the selection 3 rows.
+- Typing `qdr` finds qdrant.
+- Ctrl-C exits 0.
+
+**Earlier tests changed:** `ac3_11` (sources) now expects the reinstall calls, because its fixture never bumps the
+version. The JSON and text goldens for `review` gained only the recommendation.
+
+**Still open from the first review:** `status` and `review` take about 14 s while two large updates are held.
 
 ## Your setup, in the TUI (a copy, real `claude`, `codex`, `git`)
 
@@ -139,7 +169,11 @@ pty smoke test covered.
 
 ## Reviewer checklist
 
-- [ ] `mise use -g github:muradmadi-leadtech/colctl@2.4.0`, then `colctl --version` says 2.4.0
+- [ ] `mise use -g github:muradmadi-leadtech/colctl@2.5.0`, then `colctl --version` says 2.5.0
+- [ ] Overview: the menu is above the profiles. ⏎ on **Sync every profile**, then `y`, fixes qdrant-skills in claude and kilo-claude
+- [ ] ←/→ switch tabs. A trackpad flick in Discover scrolls a few rows
+- [ ] Discover: type `qdrant` straight away, then ⏎, then `a`, and say `n`
+- [ ] Review: ⏎ on a held version shows the recommendation, and `d` shows everything
 - [ ] `colctl` in your terminal opens on Overview with the same verdict as `colctl status`; `colctl | cat` prints the
   help instead
 - [ ] Tab through the five tabs (or click them); `?` lists the keys; `q` quits and your terminal is as it was
