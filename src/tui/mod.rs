@@ -78,7 +78,7 @@ fn run_loop(ctx: &Ctx, opts: Options) -> std::io::Result<()> {
     let (tx, rx) = std::sync::mpsc::channel();
     let mut worker = worker::Worker::new(ctx.clone(), tx);
     let started = Instant::now();
-    let width = |m: &Model| usize::from(m.width.saturating_sub(4)).max(40);
+    let width = |m: &Model| view::detail_width(m).max(36);
     for cmd in model.start() {
         worker.spawn(cmd, width(&model));
     }

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! What each tab shows and does (design spec § Screens). Every fact comes from `core`, every action
 //! is a `core::run::Job` the CLI also runs.
 
@@ -66,6 +67,64 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
                     scroll: 0,
                     held: None,
                 });
+            }
+            Vec::new()
+        }
+        (Tab::Review, Action::Open) if m.quit => match focused_held(m) {
+            Some(h) => vec![Cmd::Load(Load::Review(h.name.clone()))],
+            None => Vec::new(),
+        },
+        (Tab::Review, Action::Approve | Action::Reject) if m.quit => match held_target(m) {
+            Some(name) => ask_decision(m, &name, action == Action::Approve),
+            None => Vec::new(),
+        },
+        (Tab::Review, Action::ApproveAll) if m.quit => {
+            let names: Vec<String> = m
+                .held
+                .ready()
+                .map(|h| h.iter().map(|h| h.name.clone()).collect())
+                .unwrap_or_default();
+            if names.is_empty() {
+                return Vec::new();
+            }
+            let body = vec![
+                "Install every held version exactly as reviewed:".to_string(),
+                String::new(),
+                names.join(", "),
+            ];
+            app::ask(m, "Approve all", body, Job::Approve(Vec::new()))
+        }
+        (Tab::Review, Action::Update) if m.quit => app::ask(
+            m,
+            "Check for updates",
+            vec![
+                "Fetch every source plugin and hold what's new for review.".into(),
+                "Esc stops after the source it's on.".into(),
+            ],
+            Job::Update(Vec::new()),
+        ),
+        (_, Action::NextFile | Action::PrevFile) if m.quit => {
+            if let Some(Overlay::Detail { lines, scroll, .. }) = &mut m.overlay {
+                let is_file = |l: &String| l.trim_start().starts_with("diff --git ");
+                let to = if action == Action::NextFile {
+                    lines
+                        .iter()
+                        .enumerate()
+                        .skip(*scroll + 1)
+                        .find(|(_, l)| is_file(l))
+                        .map(|(i, _)| i)
+                } else {
+                    lines
+                        .iter()
+                        .enumerate()
+                        .take(*scroll)
+                        .rev()
+                        .find(|(_, l)| is_file(l))
+                        .map(|(i, _)| i)
+                };
+                if let Some(to) = to {
+                    *scroll = to;
+                }
             }
             Vec::new()
         }
@@ -240,6 +299,13 @@ fn run_fix(m: &mut Model, fix: &str) -> Vec<Cmd> {
         ["colctl", "review", name] => {
             m.tab = Tab::Review;
             m.tab_since = m.now;
+            if let Some(i) = m
+                .held
+                .ready()
+                .and_then(|h| h.iter().position(|h| h.name == *name))
+            {
+                m.cursors[3].selected = i;
+            }
             vec![Cmd::Load(Load::Review((*name).to_string()))]
         }
         ["colctl", "sync"] => ask_sync(m, None),
@@ -693,4 +759,143 @@ fn item_detail(m: &Model, a: &ItemAcross) -> (String, Vec<String>) {
         lines.push(format!("· Not in {}", missing.join(", ")));
     }
     (title, lines)
+}
+
+// ── Review (AC8-18 – 21) ────────────────────────────────────────────────────────────────────
+
+fn focused_held(m: &Model) -> Option<&crate::core::quarantine::HeldSummary> {
+    m.held.ready()?.get(m.cursor().selected)
+}
+
+/// The held version `a` and `x` act on: the open detail's, else the focused row's.
+fn held_target(m: &Model) -> Option<String> {
+    match &m.overlay {
+        Some(Overlay::Detail {
+            held: Some(name), ..
+        }) => Some(name.clone()),
+        Some(_) => None,
+        None => focused_held(m).map(|h| h.name.clone()),
+    }
+}
+
+fn ask_decision(m: &mut Model, name: &str, approve: bool) -> Vec<Cmd> {
+    let change = m
+        .held
+        .ready()
+        .and_then(|h| h.iter().find(|h| h.name == name))
+        .map(|h| h.change.clone())
+        .unwrap_or_default();
+    let (title, body, job) = if approve {
+        (
+            format!("Approve {name}"),
+            vec![
+                format!("Install {name} {change} exactly as reviewed,"),
+                "in every profile that has it.".into(),
+            ],
+            Job::Approve(vec![name.to_string()]),
+        )
+    } else {
+        (
+            format!("Reject {name}"),
+            vec![
+                format!("Drop {name} {change} for good."),
+                "colctl update won't hold this version again.".into(),
+            ],
+            Job::Reject(vec![name.to_string()]),
+        )
+    };
+    m.overlay = None;
+    app::ask(m, title, body, job)
+}
+
+fn review(m: &Model, t: Theme) -> Body {
+    let cols = usize::from(m.width.saturating_sub(4));
+    let held = match &m.held {
+        Data::Ready(h) => h,
+        Data::Loading => {
+            return Body {
+                header: vec![Line::styled("Loading…", t.style(Token::Muted))],
+                ..Body::default()
+            };
+        }
+        Data::Failed(e) => {
+            return Body {
+                header: error_lines(t, e),
+                ..Body::default()
+            };
+        }
+    };
+    let empty = Some(Line::from(vec![
+        Span::raw("Nothing held for review. "),
+        Span::styled("u", t.style(Token::Accent)),
+        Span::raw(" checks for updates"),
+    ]));
+    if held.is_empty() {
+        return Body {
+            header: vec![Line::styled(
+                "✓ Nothing held for review",
+                t.style(Token::Ok),
+            )],
+            rows: Vec::new(),
+            empty,
+        };
+    }
+    let n = held.len();
+    let header = vec![
+        Line::styled(format!("! {n} held for review",), t.style(Token::Attention)),
+        Line::default(),
+    ];
+    let name_w = held
+        .iter()
+        .map(|h| width(&escape(&h.name)))
+        .max()
+        .unwrap_or(0)
+        .min(28);
+    let kind_w = held.iter().map(|h| width(&h.kind)).max().unwrap_or(0);
+    let size_w = held.iter().map(|h| width(&h.size)).max().unwrap_or(0);
+    let change_room = cols
+        .saturating_sub(2 + name_w + 2 + kind_w + 2 + 2 + size_w + 2 + 10)
+        .max(10);
+    let change_w = held
+        .iter()
+        .map(|h| width(&escape(&h.change)))
+        .max()
+        .unwrap_or(0)
+        .min(change_room);
+    let rows = held
+        .iter()
+        .map(|h| {
+            let mut spans = vec![
+                Span::styled(
+                    pad(&cut(&escape(&h.name), name_w), name_w),
+                    t.style(Token::Name),
+                ),
+                Span::raw("  "),
+                Span::styled(pad(&h.kind, kind_w), t.style(Token::Muted)),
+                Span::raw("  "),
+                Span::raw(pad(&cut(&escape(&h.change), change_w), change_w)),
+                Span::raw("  "),
+                Span::styled(pad(&h.size, size_w), t.style(Token::Muted)),
+            ];
+            if let Some(e) = &h.error {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    cut(&format!("✗ {}", escape(e)), cols / 3),
+                    t.style(Token::Failed),
+                ));
+            } else if h.flags > 0 {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    format!("! {} flag{}", h.flags, if h.flags == 1 { "" } else { "s" }),
+                    t.style(Token::Attention),
+                ));
+            }
+            Line::from(spans)
+        })
+        .collect();
+    Body {
+        header,
+        rows,
+        empty,
+    }
 }

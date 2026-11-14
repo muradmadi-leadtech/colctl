@@ -1,0 +1,28 @@
+---
+source: tests/tui.rs
+expression: "mask(&{\n    let mut small = opened(&env, 80, 24); ch(&mut small, '4'); screen(&small)\n})"
+---
+ Overview !  Profiles  Items  Review !1  Discover                  colctl [VERSION]
+────────────────────────────────────────────────────────────────────────────────
+ ! 1 held for review
+
+ › superpowers  source  [SHORT] → [SHORT]  1 commit
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ a approve · x reject · u check updates · ⏎ open · r reload · ? keys · q quit

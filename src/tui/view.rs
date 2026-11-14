@@ -11,7 +11,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph};
 
 /// The spinner's frames, 80 ms each.
 pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -169,6 +169,16 @@ fn overlay_rect(m: &Model, wanted_height: u16) -> Rect {
     let x = (m.width - w) / 2;
     let y = body.y.saturating_sub(1) + (body.height + 2).saturating_sub(h) / 2;
     Rect::new(x, y, w, h)
+}
+
+/// The text width inside a detail overlay: what `review` and `show` are captured at.
+pub fn detail_width(m: &Model) -> usize {
+    usize::from(
+        (m.width * 4 / 5)
+            .clamp(40, 100)
+            .min(m.width)
+            .saturating_sub(4),
+    )
 }
 
 /// True when (x, y) is inside the open overlay.
@@ -485,6 +495,7 @@ fn overlay(m: &Model, f: &mut Frame, o: &Overlay) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
+        .padding(Padding::horizontal(1))
         .border_style(t.style(Token::Muted))
         .title(Line::from(Span::styled(
             format!(" {title} "),
