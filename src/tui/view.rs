@@ -96,10 +96,25 @@ pub fn tab_at(m: &Model, x: u16, y: u16) -> Option<Tab> {
         .flatten()
 }
 
+/// True when a key does something where you are: approving and rejecting only in a review, file
+/// jumps only in a detail with a diff.
+fn offered(m: &Model, b: &keys::Binding) -> bool {
+    match (&m.overlay, b.action) {
+        (Some(Overlay::Detail { held, .. }), Action::Approve | Action::Reject) => held.is_some(),
+        (Some(Overlay::Detail { lines, .. }), Action::NextFile | Action::PrevFile) => {
+            lines.iter().any(|l| l.starts_with("diff --git "))
+        }
+        _ => true,
+    }
+}
+
 /// The key bar's entries and where they sit.
 fn key_spans(m: &Model) -> Vec<(Action, String, u16, u16)> {
     let r = regions(m);
-    let all = keys::bar(&m.scopes());
+    let all: Vec<&keys::Binding> = keys::bar(&m.scopes())
+        .into_iter()
+        .filter(|b| offered(m, b))
+        .collect();
     let mut out = Vec::new();
     let mut x = r.keys.x;
     let max = r.keys.x + r.keys.width;
@@ -183,7 +198,7 @@ pub fn row_at(m: &Model, x: u16, y: u16) -> Option<usize> {
 fn overlay_rect(m: &Model, wanted_height: u16) -> Rect {
     let body = regions(m).body;
     let w = (m.width * 4 / 5).clamp(40, 100).min(m.width);
-    let h = wanted_height.min(body.height + 2).max(5);
+    let h = wanted_height.min(body.height + 2).max(3);
     let x = (m.width - w) / 2;
     let y = body.y.saturating_sub(1) + (body.height + 2).saturating_sub(h) / 2;
     Rect::new(x, y, w, h)
@@ -212,8 +227,8 @@ fn overlay_height(m: &Model) -> u16 {
             let room = regions(m).body.height;
             (if n + 2 > room { n.div_ceil(2) } else { n }) + 2
         }
-        Some(Overlay::Confirm { body, .. }) => body.len() as u16 + 4,
-        Some(Overlay::ConfirmQuit) => 5,
+        Some(Overlay::Confirm { body, .. }) => body.len() as u16 + 2,
+        Some(Overlay::ConfirmQuit) => 3,
         Some(Overlay::Detail { lines, .. }) => lines.len() as u16 + 2,
         Some(Overlay::Error { cause, hint, .. }) => {
             3 + u16::from(cause.is_some()) + u16::from(hint.is_some()) + 1
@@ -261,10 +276,20 @@ fn status_lines(m: &Model) -> Vec<Line<'static>> {
             })
             .collect();
     }
-    match &m.toast {
-        Some(toast) => vec![styled_verdict(t, &toast.text)],
-        None => vec![Line::default()],
+    let mut line = match &m.toast {
+        Some(toast) => styled_verdict(t, &toast.text),
+        None => Line::default(),
+    };
+    if m.pending > 0 {
+        if !line.spans.is_empty() {
+            line.spans.push(Span::raw("   "));
+        }
+        line.spans
+            .push(Span::styled(spinner(m), t.style(Token::Accent)));
+        line.spans
+            .push(Span::styled(" loading…", t.style(Token::Muted)));
     }
+    vec![line]
 }
 
 fn spinner(m: &Model) -> String {
@@ -491,10 +516,7 @@ fn overlay(m: &Model, f: &mut Frame, o: &Overlay) {
             };
             let keys: Vec<String> = keys::bar(&m.scopes())
                 .iter()
-                .filter(|b| b.scope == keys::Scope::Detail)
-                .filter(|b| {
-                    m.tab == Tab::Review || !matches!(b.action, Action::Approve | Action::Reject)
-                })
+                .filter(|b| b.scope == keys::Scope::Detail && offered(m, b))
                 .map(|b| format!("{} {}", b.key, b.label))
                 .collect();
             (title.clone(), shown, format!("{}{pos}", keys.join(" · ")))
