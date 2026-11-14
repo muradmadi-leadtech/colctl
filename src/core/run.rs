@@ -21,12 +21,33 @@ pub struct Report {
 }
 
 impl Report {
-    /// The verdict line.
-    pub fn verdict(&self) -> &str {
-        self.lines
+    /// What the run came to: every verdict line (a line that starts with a state symbol), worst
+    /// first, joined. A command that leads with its own verdict and ends with sync's (approve, add)
+    /// has two; a failure in the second must never hide behind a ✓ in the first.
+    pub fn verdict(&self) -> String {
+        let rank = |l: &str| match l.chars().next() {
+            Some('✗') => 0,
+            Some('!') => 1,
+            Some('✓') => 2,
+            _ => 3,
+        };
+        let mut verdicts: Vec<&str> = self
+            .lines
             .iter()
-            .find(|l| !l.trim().is_empty())
-            .map_or("", String::as_str)
+            .map(String::as_str)
+            .filter(|l| rank(l) < 3 || l.starts_with('·'))
+            .collect();
+        if verdicts.is_empty() {
+            return self
+                .lines
+                .iter()
+                .find(|l| !l.trim().is_empty())
+                .cloned()
+                .unwrap_or_default();
+        }
+        verdicts.sort_by_key(|l| rank(l));
+        verdicts.dedup();
+        verdicts.join(" · ")
     }
 }
 

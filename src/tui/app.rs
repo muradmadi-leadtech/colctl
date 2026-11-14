@@ -521,8 +521,9 @@ fn job_event(m: &mut Model, e: JobEvent) -> Vec<Cmd> {
             m.job = None;
             match result {
                 Ok(report) => {
-                    let text = report.verdict().to_string();
-                    m.toast(text, false);
+                    // A run that didn't succeed stays until a key is pressed.
+                    let text = report.verdict();
+                    m.toast(text, report.exit != 0);
                 }
                 Err(e) => m.error(&e),
             }
