@@ -1,4 +1,3 @@
-#![allow(unused_imports, unused_variables)]
 //! What's held for review (AC8-04): the list the TUI's Review tab shows, and one held version in
 //! full, exactly as `colctl review` shows them.
 
@@ -28,13 +27,35 @@ pub struct HeldSummary {
 
 /// Every held version, in `colctl review`'s order.
 pub fn held(ctx: &Ctx) -> Result<Vec<HeldSummary>, CliError> {
-    let _ = ctx;
-    Err(CliError::usage("not built yet"))
+    let git = Git::for_ctx(ctx)?;
+    let ws = commands::load(ctx)?;
+    let snap_held = |v: &q::View| super::status::held_of(ctx, v);
+    Ok(q::held_views(ctx, &ws, Some(&git))
+        .iter()
+        .map(|v| {
+            let h = snap_held(v);
+            HeldSummary {
+                name: h.name,
+                kind: h.kind,
+                change: h.change,
+                size: v
+                    .review
+                    .as_ref()
+                    .map(|r| q::size_text(v, r))
+                    .unwrap_or_default(),
+                flags: v.review.as_ref().map_or(0, |r| r.flags.len()),
+                error: v.error.clone(),
+            }
+        })
+        .collect())
 }
 
 /// `colctl review <name>` as plain lines at `width`: the verdict, commits, files, risk flags and the
 /// diff.
 pub fn review(ctx: &Ctx, name: &str, width: usize) -> Result<Vec<String>, CliError> {
-    let _ = ctx;
-    Err(CliError::usage("not built yet"))
+    let (out, sink) = Out::capture(width, Box::new(Quiet));
+    let mut ctx = ctx.clone();
+    ctx.out = out;
+    commands::review(&ctx, Some(name), false, false)?;
+    Ok(sink.lines())
 }

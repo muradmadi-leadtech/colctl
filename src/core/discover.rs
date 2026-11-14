@@ -1,4 +1,3 @@
-#![allow(unused_imports, unused_variables)]
 //! The plugin catalogs (AC8-04): what `colctl search` searches and `colctl show` shows, read from
 //! the files the tools keep on disk (no network).
 
@@ -22,14 +21,22 @@ pub struct Catalog {
 
 /// Reads every catalog.
 pub fn catalog(ctx: &Ctx) -> Result<Catalog, CliError> {
-    let _ = ctx;
-    Err(CliError::usage("not built yet"))
+    let ws = commands::load(ctx)?;
+    let c = catalog::build(&ws.config, &ctx.source);
+    Ok(Catalog {
+        plugins: search::merge(&c.entries),
+        catalogs: c.marketplaces.len(),
+        warnings: c.warnings,
+    })
 }
 
 /// `colctl show <id>` as plain lines at `width`.
 pub fn show(ctx: &Ctx, id: &str, width: usize) -> Result<Vec<String>, CliError> {
-    let _ = ctx;
-    Err(CliError::usage("not built yet"))
+    let (out, sink) = Out::capture(width, Box::new(Quiet));
+    let mut ctx = ctx.clone();
+    ctx.out = out;
+    commands::show(&ctx, Some(id), false)?;
+    Ok(sink.lines())
 }
 
 /// The command that adds `plugin`, as words after `colctl`, or why there's none (the reason
