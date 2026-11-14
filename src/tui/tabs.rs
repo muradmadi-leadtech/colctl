@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! What each tab shows and does (design spec § Screens). Every fact comes from `core`, every action
 //! is a `core::run::Job` the CLI also runs.
 
@@ -20,7 +19,7 @@ pub fn body(m: &Model, t: Theme) -> Body {
         Tab::Profiles => profiles(m, t),
         Tab::Items => items(m, t),
         Tab::Review => review(m, t),
-        Tab::Discover => Body::default(),
+        Tab::Discover => discover(m, t),
     }
 }
 
@@ -100,11 +99,11 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             ],
             Job::Update(Vec::new()),
         ),
-        (Tab::Discover, Action::Open) if m.quit => match focused_plugin(m) {
+        (Tab::Discover, Action::Open) => match focused_plugin(m) {
             Some(p) => vec![Cmd::Load(Load::Show(p.ids[0].clone()))],
             None => Vec::new(),
         },
-        (Tab::Discover, Action::Add) if m.quit => match focused_plugin(m) {
+        (Tab::Discover, Action::Add) if m.overlay.is_none() => match focused_plugin(m) {
             Some(p) => match crate::core::discover::add_words(&p) {
                 Ok(words) => {
                     let body = vec![

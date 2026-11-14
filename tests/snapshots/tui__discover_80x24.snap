@@ -1,0 +1,28 @@
+---
+source: tests/tui.rs
+expression: "mask(&{\n    let mut small = opened(&env, 80, 24); ch(&mut small, '5'); screen(&small)\n})"
+---
+ Overview  Profiles  Items  Review  Discover                       colctl [VERSION]
+────────────────────────────────────────────────────────────────────────────────
+ › / to search
+ 3 of 3 plugins · 1 catalog
+
+ › local    o    A local one
+   tool     ann  A tool
+   toolbox  bo   Many tools
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ⏎ details · a add · / search · r reload · ? keys · q quit
