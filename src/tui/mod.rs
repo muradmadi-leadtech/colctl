@@ -73,9 +73,6 @@ pub fn run(ctx: &Ctx, opts: Options) -> i32 {
 /// Combines a burst of wheel or trackpad events into one scroll of at most 3 rows either way, so a
 /// flick never races through a list (AC8-34, EC8-27). Everything else passes through in order.
 pub fn coalesce(msgs: Vec<Msg>) -> Vec<Msg> {
-    if !msgs.is_empty() {
-        return msgs;
-    }
     let mut out: Vec<Msg> = Vec::new();
     for msg in msgs {
         let step = match &msg {

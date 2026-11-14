@@ -132,7 +132,9 @@ pub const KEYMAP: &[Binding] = &[
     b("←→", K::Null, S::Tab(Tab::Discover), A::NextTab, "tabs", true),
     b("ctrl-c", K::Null, S::Tab(Tab::Discover), A::Quit, "quit", true),
     // Everywhere.
+    b("→", K::Right, S::Global, A::NextTab, "next tab", false),
     b("tab", K::Tab, S::Global, A::NextTab, "next tab", false),
+    b("←", K::Left, S::Global, A::PrevTab, "previous tab", false),
     b("⇧tab", K::BackTab, S::Global, A::PrevTab, "previous tab", false),
     b(
         "1",

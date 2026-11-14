@@ -573,7 +573,7 @@ fn job_event(m: &mut Model, e: JobEvent) -> Vec<Cmd> {
                     // says why (AC8-39).
                     let text = report.verdict();
                     m.toast(text, report.exit != 0);
-                    if report.exit != 0 && m.quit {
+                    if report.exit != 0 {
                         let mut lines = report.lines.clone();
                         lines.extend(report.errors.iter().cloned());
                         m.overlay = Some(Overlay::Detail {
@@ -637,7 +637,7 @@ fn key(m: &mut Model, ev: KeyEvent) -> Vec<Cmd> {
         m.toast = None;
     }
     if m.overlay.is_none()
-        && m.filter().focused
+        && (m.filter().focused || m.tab == Tab::Discover)
         && let Some(cmds) = input_key(m, ev)
     {
         return cmds;
@@ -657,7 +657,7 @@ fn input_key(m: &mut Model, ev: KeyEvent) -> Option<Vec<Cmd>> {
     {
         return None;
     }
-    let discover = m.tab == Tab::Discover && m.quit;
+    let discover = m.tab == Tab::Discover;
     match ev.code {
         // In Discover, `?` is still help; every other character searches (AC8-35).
         KeyCode::Char('?') if discover && !m.filter().focused => None,
@@ -780,9 +780,6 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
 /// Moves the selection off rows that can't be selected (headings, profile lines), in `dir`, or
 /// back the other way at an end.
 pub fn settle(m: &mut Model, dir: isize) {
-    if !m.quit {
-        return;
-    }
     let skip = super::view::skipped(m);
     let len = m.list_len();
     if skip.is_empty() || len == 0 {
@@ -808,9 +805,6 @@ pub fn settle(m: &mut Model, dir: isize) {
 
 /// Scrolls the view by `rows` (AC8-34): the selection moves only to stay on screen.
 fn scroll(m: &mut Model, by: i32) -> Vec<Cmd> {
-    if !m.quit {
-        return act(m, if by > 0 { Action::Down } else { Action::Up });
-    }
     let by = by.clamp(-3, 3) as isize;
     if let Some(Overlay::Detail { lines, scroll, .. }) = &mut m.overlay {
         let max = lines.len().saturating_sub(1);

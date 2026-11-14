@@ -461,7 +461,6 @@ fn overview(m: &Model, t: Theme) -> Body {
     };
     let header = vec![verdict(t, s), Line::default()];
     let mut rows: Vec<Line<'static>> = Vec::new();
-    let menu = |_m: &Model| -> Vec<(MenuItem, String, &'static str)> { Vec::new() };
     let mut skip = Vec::new();
     let label_w = menu(m).iter().map(|(_, l, _)| width(l)).max().unwrap_or(0) + 4;
     for (_, label, key) in menu(m) {
