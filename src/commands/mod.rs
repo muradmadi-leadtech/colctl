@@ -19,9 +19,9 @@ use crate::ui::style::Token;
 use crate::vault::{self, CloneState, Vault};
 use std::collections::BTreeMap;
 
-mod convert;
+pub(crate) mod convert;
 mod discovery;
-mod quarantine;
+pub(crate) mod quarantine;
 mod run_view;
 mod status_view;
 pub use convert::convert;
@@ -55,18 +55,18 @@ pub const KNOWN_HARNESSES: &[(&str, &str, Kind)] = &[
 ];
 
 /// Everything read from the source at one moment.
-struct Workspace {
-    config: Config,
-    config_text: String,
-    state: State,
-    source: Source,
-    origin_changed: Vec<(String, PathBuf)>,
+pub(crate) struct Workspace {
+    pub(crate) config: Config,
+    pub(crate) config_text: String,
+    pub(crate) state: State,
+    pub(crate) source: Source,
+    pub(crate) origin_changed: Vec<(String, PathBuf)>,
     /// Source plugins prepared for planning, and each clone's state.
-    sources: Vec<SourceInput>,
-    clones: Vec<(String, &'static str)>,
+    pub(crate) sources: Vec<SourceInput>,
+    pub(crate) clones: Vec<(String, &'static str)>,
 }
 
-fn load(ctx: &Ctx) -> Result<Workspace, CliError> {
+pub(crate) fn load(ctx: &Ctx) -> Result<Workspace, CliError> {
     let (config, config_text) = config::load(&ctx.source, &ctx.home)?;
     let state = state::load(&ctx.source)?;
     let origin_changed = origin_changes(ctx, &state);
@@ -281,9 +281,9 @@ fn stop_converting(ctx: &Ctx, git: &Git, name: &str) -> Result<(), CliError> {
     Ok(())
 }
 
-struct Planned {
-    harness: Harness,
-    plan: HarnessPlan,
+pub(crate) struct Planned {
+    pub(crate) harness: Harness,
+    pub(crate) plan: HarnessPlan,
 }
 
 fn check_harness(config: &Config, filter: Option<&str>) -> Result<(), CliError> {
@@ -303,7 +303,11 @@ fn check_harness(config: &Config, filter: Option<&str>) -> Result<(), CliError> 
     }
 }
 
-fn plan_all(ctx: &Ctx, ws: &Workspace, filter: Option<&str>) -> Result<Vec<Planned>, CliError> {
+pub(crate) fn plan_all(
+    ctx: &Ctx,
+    ws: &Workspace,
+    filter: Option<&str>,
+) -> Result<Vec<Planned>, CliError> {
     check_harness(&ws.config, filter)?;
     let display = ctx.source_display();
     let generated = adapter::generated_claude_md(&display);
@@ -351,7 +355,7 @@ fn codex_agents(
         .collect()
 }
 
-fn root_str(root: Root) -> &'static str {
+pub(crate) fn root_str(root: Root) -> &'static str {
     match root {
         Root::Ok => "ok",
         Root::Missing => "harness-missing",
@@ -359,7 +363,7 @@ fn root_str(root: Root) -> &'static str {
     }
 }
 
-fn root_hint(root: Root) -> &'static str {
+pub(crate) fn root_hint(root: Root) -> &'static str {
     match root {
         Root::Ok => "",
         Root::Missing => "start that profile once so it creates its folder",
@@ -367,7 +371,7 @@ fn root_hint(root: Root) -> &'static str {
     }
 }
 
-fn in_sync(ws: &Workspace, planned: &[Planned], uncommitted: &[String]) -> bool {
+pub(crate) fn in_sync(ws: &Workspace, planned: &[Planned], uncommitted: &[String]) -> bool {
     uncommitted.is_empty()
         && ws.source.invalid.is_empty()
         && ws.origin_changed.is_empty()
@@ -395,7 +399,7 @@ fn origin_changes(ctx: &Ctx, state: &State) -> Vec<(String, PathBuf)> {
         .collect()
 }
 
-fn uncommitted(ctx: &Ctx, git: Option<&Git>) -> Vec<String> {
+pub(crate) fn uncommitted(ctx: &Ctx, git: Option<&Git>) -> Vec<String> {
     match git {
         Some(git) if Git::is_repo(&ctx.source) => git.dirty_paths(&ctx.source).unwrap_or_default(),
         _ => Vec::new(),
@@ -458,27 +462,24 @@ fn status_json(
 
 /// `colctl status` (AC-08). Never writes anything.
 pub fn status(ctx: &Ctx, filter: Option<&str>, as_json: bool, all: bool) -> Result<i32, CliError> {
-    let ws = load(ctx)?;
-    let planned = plan_all(ctx, &ws, filter)?;
-    let git = Git::find(&ctx.path_var).ok();
-    let dirty = uncommitted(ctx, git.as_ref());
-    let held = quarantine::held_views(ctx, &ws, git.as_ref());
+    let snap = crate::core::status::snapshot(ctx, filter)?;
     if as_json {
-        let mut text =
-            serde_json::to_string_pretty(&status_json(ctx, &ws, &planned, &dirty, &held))
-                .map_err(|e| CliError::usage(e.to_string()))?;
+        let i = &snap.inner;
+        let mut text = serde_json::to_string_pretty(&status_json(
+            ctx,
+            &i.ws,
+            &i.planned,
+            &i.uncommitted,
+            &i.held,
+        ))
+        .map_err(|e| CliError::usage(e.to_string()))?;
         text.push('\n');
         ctx.out.raw(&text);
     } else {
-        ctx.out
-            .lines(status_view::render(ctx, &ws, &planned, &dirty, &held, all));
+        ctx.out.lines(status_view::render(ctx, &snap, all));
     }
     // Something waiting for review needs attention, like an origin that changed (AC4-29).
-    Ok(if in_sync(&ws, &planned, &dirty) && held.is_empty() {
-        0
-    } else {
-        EXIT_DRIFT
-    })
+    Ok(snap.exit)
 }
 
 fn cleanup_source_temps(ctx: &Ctx) {
@@ -796,7 +797,7 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
 }
 
 /// `<n> <word>s`, singular for one.
-pub(super) fn plural(n: usize, word: &str) -> String {
+pub(crate) fn plural(n: usize, word: &str) -> String {
     format!("{n} {word}{}", if n == 1 { "" } else { "s" })
 }
 

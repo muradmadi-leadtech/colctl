@@ -10,6 +10,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod convert;
+pub mod core;
 pub mod ctx;
 pub mod error;
 pub mod fsx;

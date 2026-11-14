@@ -2,142 +2,55 @@
 //! what it has, then only what needs attention, each with its fix. `--all` lists every item.
 
 use super::quarantine::View;
-use super::{Planned, Workspace, root_hint};
-use crate::adapter::Root;
-use crate::config::Kind;
+use super::{Planned, Workspace};
+use crate::core::status::{Attention, Profile, Snapshot, Tone};
 use crate::ctx::Ctx;
-use crate::plan::{ItemKind, ItemState};
 use crate::review::escape;
 use crate::ui::render::{self, Cell};
 use crate::ui::style::{Token, paint};
 
-/// How a state reads in status.
-fn tone(state: ItemState) -> Token {
-    match state {
-        ItemState::Ok => Token::Ok,
-        ItemState::Unsupported | ItemState::Unreviewed => Token::Info,
-        _ => Token::Attention,
+/// A core tone as an output token.
+pub(super) fn token(t: Tone) -> Token {
+    match t {
+        Tone::Ok => Token::Ok,
+        Tone::Attention => Token::Attention,
+        Tone::Failed => Token::Failed,
+        Tone::Info => Token::Info,
     }
 }
 
-/// What a profile has, by kind, then its problems (AC6-34): `32 skills · 1 plugin · CLAUDE.md · 1
-/// missing`. A Codex profile reads skills from `~/.agents`, which is said when that's registered.
-fn contents(p: &Planned, agents: Option<&str>) -> Vec<Cell> {
-    let items = &p.plan.items;
-    let present = |kinds: &[ItemKind]| {
-        items
-            .iter()
-            .filter(|i| kinds.contains(&i.kind) && i.state != ItemState::Unsupported)
-            .count()
-    };
-    let mut parts = Vec::new();
-    for (kinds, word) in [
-        (&[ItemKind::Skill][..], "skill"),
-        (&[ItemKind::Agent][..], "agent"),
-        (&[ItemKind::Plugin, ItemKind::Source][..], "plugin"),
-    ] {
-        let n = present(kinds);
-        if n > 0 {
-            parts.push(Cell::plain(super::plural(n, word)));
-        }
+/// A profile's contents as cells: plain counts, dim notes, coloured problems; an unusable profile
+/// says why and what to do.
+fn cells(p: &Profile) -> Vec<Cell> {
+    if let Some((state, hint)) = &p.problem {
+        return vec![
+            Cell::plain(state.clone()),
+            Cell::styled(format!("→ {hint}"), Token::Command),
+        ];
     }
-    if let Some(i) = items
+    p.contents
         .iter()
-        .find(|i| i.kind == ItemKind::Instructions && i.state != ItemState::Unsupported)
-    {
-        parts.push(Cell::plain(i.name.clone()));
-    }
-    if p.harness.kind == Kind::Codex
-        && let Some(agents) = agents
-    {
-        parts.push(Cell::styled(format!("skills via {agents}"), Token::Dim));
-    }
-    let order = [
-        ItemState::Missing,
-        ItemState::Broken,
-        ItemState::Orphaned,
-        ItemState::Foreign,
-        ItemState::ForeignLink,
-        ItemState::Edited,
-        ItemState::Invalid,
-        ItemState::PluginMissing,
-        ItemState::MarketplaceMissing,
-        ItemState::Outdated,
-        ItemState::FromAggregator,
-        ItemState::Unsupported,
-        ItemState::Unreviewed,
-    ];
-    for state in order {
-        let n = items.iter().filter(|i| i.state == state).count();
-        if n == 0 {
-            continue;
-        }
-        let words = match state {
-            ItemState::Unsupported
-                if items
-                    .iter()
-                    .all(|i| i.state != state || i.kind == ItemKind::Source) =>
-            {
-                "not packaged"
-            }
-            s => s.as_str(),
-        };
-        let token = tone(state);
-        parts.push(Cell::styled(
-            format!("{n} {words}"),
-            if token == Token::Info {
-                Token::Dim
-            } else {
-                token
-            },
-        ));
-    }
-    if parts.is_empty() {
-        parts.push(Cell::styled("nothing yet", Token::Dim));
-    }
-    parts
+        .map(|(text, tone)| match tone {
+            None => Cell::plain(text.clone()),
+            Some(Tone::Info) => Cell::styled(text.clone(), Token::Dim),
+            Some(t) => Cell::styled(text.clone(), token(*t)),
+        })
+        .collect()
 }
 
 /// One line per profile (AC6-34, AC6-35): mark, name, path, then what it has. Paths are cut alike
 /// when the column needs it, and what it has wraps under itself rather than being cut.
-fn profile_lines(ctx: &Ctx, planned: &[Planned]) -> Vec<String> {
+fn profile_lines(ctx: &Ctx, profiles: &[Profile]) -> Vec<String> {
     let caps = &ctx.out.caps;
-    let agents = planned
-        .iter()
-        .find(|p| p.harness.kind == Kind::Agents)
-        .map(|p| ctx.tilde(&p.harness.path));
-    let rows: Vec<(Token, &str, String, Vec<Cell>)> = planned
+    let rows: Vec<(Token, &str, String, Vec<Cell>)> = profiles
         .iter()
         .map(|p| {
-            let path = ctx.tilde(&p.harness.path);
-            if p.plan.root == Root::Ok {
-                let mark = if p
-                    .plan
-                    .items
-                    .iter()
-                    .any(|i| tone(i.state) == Token::Attention)
-                {
-                    Token::Attention
-                } else {
-                    Token::Ok
-                };
-                (
-                    mark,
-                    p.harness.name.as_str(),
-                    path,
-                    contents(p, agents.as_deref()),
-                )
-            } else {
-                (
-                    Token::Failed,
-                    p.harness.name.as_str(),
-                    path,
-                    vec![
-                        Cell::plain(super::root_str(p.plan.root)),
-                        Cell::styled(format!("→ {}", root_hint(p.plan.root)), Token::Command),
-                    ],
-                )
-            }
+            (
+                token(p.mark),
+                p.name.as_str(),
+                p.display_path.clone(),
+                cells(p),
+            )
         })
         .collect();
     let joined = |parts: &[Cell]| -> usize {
@@ -215,25 +128,16 @@ fn pad(text: &str, to: usize) -> String {
     )
 }
 
-/// One row of the "Needs attention" table.
-pub(super) struct Attention {
-    place: String,
-    kind: String,
-    name: String,
-    what: String,
-    fix: String,
-}
-
 pub(super) fn row(a: &Attention) -> (Vec<Cell>, String, Token) {
     (
         vec![
             Cell::styled(Token::Attention.symbol(), Token::Attention),
-            Cell::styled(a.place.clone(), Token::Name),
+            Cell::styled(escape(&a.place), Token::Name),
             Cell::plain(a.kind.clone()),
-            Cell::plain(a.name.clone()),
-            Cell::plain(a.what.clone()),
+            Cell::plain(escape(&a.name)),
+            Cell::plain(escape(&a.what)),
         ],
-        a.fix.clone(),
+        escape(&a.fix),
         Token::Command,
     )
 }
@@ -280,8 +184,7 @@ pub(super) fn rows_with_fixes(
     out
 }
 
-/// Everything that needs the person, each with its fix: problem items in usable profiles, uncommitted
-/// files, invalid source items, changed origins and held versions.
+/// Everything that needs the person, each with its fix (see [`crate::core::status::attention`]).
 pub(super) fn attention_rows(
     ctx: &Ctx,
     ws: &Workspace,
@@ -289,177 +192,62 @@ pub(super) fn attention_rows(
     uncommitted: &[String],
     held: &[View],
 ) -> Vec<Attention> {
-    let mut attention: Vec<Attention> = Vec::new();
-    let source = ctx.tilde(&ctx.source);
-    for p in planned {
-        if p.plan.root != Root::Ok {
-            continue;
-        }
-        for i in p
-            .plan
-            .items
-            .iter()
-            .filter(|i| tone(i.state) == Token::Attention)
-        {
-            attention.push(Attention {
-                place: p.harness.name.clone(),
-                kind: i.kind.as_str().to_string(),
-                name: escape(&i.name),
-                what: i.state.as_str().to_string(),
-                fix: i.hint.clone().map(|h| escape(&h)).unwrap_or_default(),
-            });
-        }
-    }
-    for path in uncommitted {
-        attention.push(Attention {
-            place: source.clone(),
-            kind: "file".into(),
-            name: escape(path),
-            what: "uncommitted".into(),
-            fix: "colctl sync".into(),
-        });
-    }
-    for i in &ws.source.invalid {
-        attention.push(Attention {
-            place: source.clone(),
-            kind: i.kind.to_string(),
-            name: escape(&i.name),
-            what: "invalid".into(),
-            fix: escape(&i.reason),
-        });
-    }
-    for (item, _) in &ws.origin_changed {
-        attention.push(Attention {
-            place: source.clone(),
-            kind: item
-                .split('/')
-                .next()
-                .unwrap_or("item")
-                .trim_end_matches('s')
-                .into(),
-            name: escape(item),
-            what: "origin-changed".into(),
-            fix: format!("colctl refresh {}", escape(item)),
-        });
-    }
-    for v in held {
-        let change = match &v.candidate {
-            crate::state::Candidate::Source(c) => format!(
-                "{} → {}",
-                crate::vault::short(&c.from),
-                crate::vault::short(&c.to)
-            ),
-            crate::state::Candidate::Skill(c) | crate::state::Candidate::Agent(c) => {
-                escape(&ctx.tilde(&c.origin))
-            }
-            crate::state::Candidate::Conversion(c) => {
-                format!("Codex package from {}", crate::vault::short(&c.rev))
-            }
-        };
-        attention.push(Attention {
-            place: "held".into(),
-            kind: v.candidate.kind().into(),
-            name: escape(&v.name),
-            what: change,
-            fix: format!("colctl review {}", escape(&v.name)),
-        });
-    }
-    attention
+    crate::core::status::attention(ctx, ws, planned, uncommitted, held)
 }
 
 /// The text of `colctl status` (AC6-08 – 11, EC6-10, EC6-11).
-pub(super) fn render(
-    ctx: &Ctx,
-    ws: &Workspace,
-    planned: &[Planned],
-    uncommitted: &[String],
-    held: &[View],
-    all: bool,
-) -> Vec<String> {
+pub(super) fn render(ctx: &Ctx, snap: &Snapshot, all: bool) -> Vec<String> {
     let caps = &ctx.out.caps;
-    if planned.is_empty() {
+    let v = &snap.verdict;
+    if snap.profiles.is_empty() {
         return vec![
-            render::verdict(caps, Token::Attention, "No profiles registered", &[]),
+            render::verdict(caps, token(v.tone), &v.text, &v.facts),
             String::new(),
             render::hint(caps, "colctl init"),
         ];
     }
-    let attention = attention_rows(ctx, ws, planned, uncommitted, held);
-    let unusable = planned.iter().filter(|p| p.plan.root != Root::Ok).count();
-    let problems = attention.len() + unusable;
-
-    let mut lines = Vec::new();
-    if problems == 0 {
-        let held_fact = "nothing held for review".to_string();
-        let sources = ws.config.sources.len();
-        let sources_fact = format!("{sources} source{}", if sources == 1 { "" } else { "s" });
-        let n = planned.len();
-        let what = if n == 1 {
-            "The profile is in sync".to_string()
-        } else {
-            format!("All {n} profiles in sync")
-        };
-        lines.push(render::verdict(
-            caps,
-            Token::Ok,
-            &what,
-            &[sources_fact, held_fact],
-        ));
-    } else {
-        let word = if problems == 1 {
-            "thing needs"
-        } else {
-            "things need"
-        };
-        lines.push(render::verdict(
-            caps,
-            Token::Attention,
-            &format!("{problems} {word} attention"),
-            &[],
-        ));
-    }
+    let mut lines = vec![render::verdict(caps, token(v.tone), &v.text, &v.facts)];
     if caps.quiet {
         return lines;
     }
 
     // One line per profile.
     lines.push(String::new());
-    lines.extend(profile_lines(ctx, planned));
+    lines.extend(profile_lines(ctx, &snap.profiles));
 
-    if !attention.is_empty() {
+    if !snap.attention.is_empty() {
         lines.push(String::new());
         lines.push(render::heading(caps, "Needs attention"));
-        let rows: Vec<(Vec<Cell>, String, Token)> = attention.iter().map(row).collect();
+        let rows: Vec<(Vec<Cell>, String, Token)> = snap.attention.iter().map(row).collect();
         lines.extend(rows_with_fixes(caps, &rows, 3));
     }
 
     if all {
-        for p in planned.iter().filter(|p| p.plan.root == Root::Ok) {
+        for p in snap.profiles.iter().filter(|p| p.usable) {
             lines.push(String::new());
             let room = caps
                 .width
-                .saturating_sub(render::width(&p.harness.name) + 2)
+                .saturating_sub(render::width(&p.name) + 2)
                 .max(16);
             lines.push(format!(
                 "{}  {}",
-                render::heading(caps, &p.harness.name),
-                render::footer(caps, &render::cut_middle(&ctx.tilde(&p.harness.path), room))
+                render::heading(caps, &p.name),
+                render::footer(caps, &render::cut_middle(&p.display_path, room))
             ));
-            if p.plan.items.is_empty() {
+            if p.items.is_empty() {
                 lines.push(format!("  {} 0 items", Token::Info.symbol()));
                 continue;
             }
             let rows: Vec<(Vec<Cell>, String, Token)> = p
-                .plan
                 .items
                 .iter()
                 .map(|i| {
-                    let t = tone(i.state);
+                    let t = token(i.tone);
                     (
                         vec![
                             Cell::styled(t.symbol(), t),
-                            Cell::plain(i.state.as_str()),
-                            Cell::plain(i.kind.as_str()),
+                            Cell::plain(i.state.clone()),
+                            Cell::plain(i.kind.clone()),
                             Cell::plain(escape(&i.name)),
                         ],
                         i.hint.as_ref().map(|h| escape(h)).unwrap_or_default(),

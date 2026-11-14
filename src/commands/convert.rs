@@ -41,7 +41,7 @@ fn hook_text(h: &repackage::KeptHook) -> String {
 }
 
 /// What a converted source's held commit means for Codex (AC7-15, AC7-16).
-pub(super) enum ConversionChange {
+pub(crate) enum ConversionChange {
     /// The commit packages for Codex itself; the conversion will stop.
     Native,
     /// The package that commit gives, and what changes against the installed one.
