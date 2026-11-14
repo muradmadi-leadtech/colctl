@@ -195,11 +195,17 @@ fn ac3_11_a_moved_pin_updates_every_harness() {
     let claude_new: Vec<String> = env.log_args()[claude_before..].to_vec();
     assert_eq!(
         claude_new,
+        // The plugin's version didn't change, so Claude keeps the old commit on update and colctl
+        // reinstalls it (AC8-40).
         vec![
             "plugin marketplace update superpowers-dev",
             "plugin update superpowers@superpowers-dev",
+            "plugin uninstall superpowers@superpowers-dev",
+            "plugin install superpowers@superpowers-dev",
             "plugin marketplace update superpowers-dev",
             "plugin update superpowers@superpowers-dev",
+            "plugin uninstall superpowers@superpowers-dev",
+            "plugin install superpowers@superpowers-dev",
         ]
     );
     assert_eq!(
