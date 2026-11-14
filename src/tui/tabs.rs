@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! What each tab shows and does (design spec § Screens). Every fact comes from `core`, every action
 //! is a `core::run::Job` the CLI also runs.
 
@@ -19,6 +18,7 @@ pub fn body(m: &Model, t: Theme) -> Body {
         Tab::Overview => overview(m, t),
         Tab::Profiles => profiles(m, t),
         Tab::Items => items(m, t),
+        Tab::Review => review(m, t),
         tab => Body {
             header: vec![Line::styled(tab.title().to_string(), t.style(Token::Name))],
             rows: Vec::new(),
@@ -70,15 +70,15 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             }
             Vec::new()
         }
-        (Tab::Review, Action::Open) if m.quit => match focused_held(m) {
+        (Tab::Review, Action::Open) => match focused_held(m) {
             Some(h) => vec![Cmd::Load(Load::Review(h.name.clone()))],
             None => Vec::new(),
         },
-        (Tab::Review, Action::Approve | Action::Reject) if m.quit => match held_target(m) {
+        (Tab::Review, Action::Approve | Action::Reject) => match held_target(m) {
             Some(name) => ask_decision(m, &name, action == Action::Approve),
             None => Vec::new(),
         },
-        (Tab::Review, Action::ApproveAll) if m.quit => {
+        (Tab::Review, Action::ApproveAll) => {
             let names: Vec<String> = m
                 .held
                 .ready()
@@ -94,7 +94,7 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             ];
             app::ask(m, "Approve all", body, Job::Approve(Vec::new()))
         }
-        (Tab::Review, Action::Update) if m.quit => app::ask(
+        (Tab::Review, Action::Update) => app::ask(
             m,
             "Check for updates",
             vec![
@@ -103,7 +103,7 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             ],
             Job::Update(Vec::new()),
         ),
-        (_, Action::NextFile | Action::PrevFile) if m.quit => {
+        (_, Action::NextFile | Action::PrevFile) => {
             if let Some(Overlay::Detail { lines, scroll, .. }) = &mut m.overlay {
                 let is_file = |l: &String| l.trim_start().starts_with("diff --git ");
                 let to = if action == Action::NextFile {
