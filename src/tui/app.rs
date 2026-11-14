@@ -257,6 +257,8 @@ pub struct Model {
     pub dirty: bool,
     /// When the last left click was (for double clicks).
     pub last_click: Option<u64>,
+    /// How many times the snapshot has loaded (motion marks a reload).
+    pub loads: usize,
 }
 
 /// The smallest screen the TUI draws on (AC8-11).
@@ -286,6 +288,7 @@ impl Model {
             tab_since: 0,
             dirty: true,
             last_click: None,
+            loads: 0,
         }
     }
 
@@ -395,7 +398,7 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Cmd> {
                 m.toast = None;
                 m.dirty = true;
             }
-            if m.job.is_some() || super::motion::active(m) {
+            if m.job.is_some() {
                 m.dirty = true;
             }
             Vec::new()
@@ -426,6 +429,7 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Cmd> {
 fn loaded(m: &mut Model, l: Loaded) -> Vec<Cmd> {
     match l {
         Loaded::Snapshot(r) => {
+            m.loads += 1;
             m.snapshot = match *r {
                 Ok(s) => Data::Ready(s),
                 Err(e) => Data::Failed(e),

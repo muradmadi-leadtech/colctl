@@ -143,8 +143,26 @@ pub fn key_at(m: &Model, x: u16, y: u16) -> Option<Action> {
         .flatten()
 }
 
+/// The body: everything between the rule and the status line.
+pub fn body_area(m: &Model) -> Rect {
+    regions(m).body
+}
+
+/// The status line(s).
+pub fn status_area(m: &Model) -> Rect {
+    regions(m).status
+}
+
+/// The open overlay's rectangle (empty when none is open).
+pub fn overlay_area(m: &Model) -> Rect {
+    if m.overlay.is_none() {
+        return Rect::default();
+    }
+    overlay_rect(m, overlay_height(m))
+}
+
 /// Where the current tab's list starts and how many rows it shows.
-fn list_area(m: &Model) -> Rect {
+pub fn list_area(m: &Model) -> Rect {
     let r = regions(m).body;
     let header = tabs::body(m, theme(m)).header.len() as u16;
     let top = r.y + header.min(r.height);

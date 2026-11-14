@@ -82,6 +82,7 @@ fn run_loop(ctx: &Ctx, opts: Options) -> std::io::Result<()> {
     for cmd in model.start() {
         worker.spawn(cmd, width(&model));
     }
+    let mut fx = motion::Fx::new(&model);
     loop {
         let mut cmds: Vec<Cmd> = Vec::new();
         while let Ok(msg) = rx.try_recv() {
@@ -89,8 +90,12 @@ fn run_loop(ctx: &Ctx, opts: Options) -> std::io::Result<()> {
         }
         let now = started.elapsed().as_millis() as u64;
         cmds.extend(app::update(&mut model, Msg::Tick(now)));
-        if model.dirty {
-            term.draw(|f| view::draw(&model, f))?;
+        if model.dirty || fx.running() {
+            fx.observe(&model);
+            term.draw(|f| {
+                view::draw(&model, f);
+                fx.apply(now, f.buffer_mut());
+            })?;
             model.dirty = false;
         }
         for cmd in cmds.drain(..) {
@@ -100,7 +105,7 @@ fn run_loop(ctx: &Ctx, opts: Options) -> std::io::Result<()> {
             return Ok(());
         }
         // Fast while something moves or runs; otherwise wake rarely (idle, AC8-24).
-        let busy = model.job.is_some() || motion::active(&model);
+        let busy = model.job.is_some() || fx.running();
         let wait = Duration::from_millis(if busy { 33 } else { 250 });
         if event::poll(wait)? {
             let msg = match event::read()? {
@@ -111,6 +116,17 @@ fn run_loop(ctx: &Ctx, opts: Options) -> std::io::Result<()> {
                 _ => None,
             };
             if let Some(msg) = msg {
+                // A key or click finishes any effect at once (AC8-24).
+                if matches!(
+                    msg,
+                    Msg::Key(_)
+                        | Msg::Mouse(event::MouseEvent {
+                            kind: event::MouseEventKind::Down(_),
+                            ..
+                        })
+                ) {
+                    fx.finish();
+                }
                 for cmd in app::update(&mut model, msg) {
                     worker.spawn(cmd, width(&model));
                 }
