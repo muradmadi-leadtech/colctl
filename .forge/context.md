@@ -57,5 +57,5 @@ The TUI only displays logic the CLI already has.
 | 4 | quarantine | Done, v2.0.0. New versions wait for approval |
 | 5 | discovery | Done, v2.1.0. Search, show, developers, marketplaces, connectors, `add source <id>` |
 | 6 | CLI output design | Done, v2.2.1. One output system: verdicts, live progress, prompts, a welcome help, completions, snapshots; sources install from their pinned clone |
-| 7 | convert | Repackage plugins, skills, agents and hooks for a tool their repo doesn't package (e.g. a Claude-only plugin into Codex) |
+| 7 | convert | Done, v2.3.0. Repackage plugins, skills, agents and hooks for a tool their repo doesn't package (e.g. a Claude-only plugin into Codex) |
 | 8 | TUI | `colctl` with no arguments in a terminal opens a full-screen UI (piped, it stays the welcome help) over everything above. Claude Code-level polish: ratatui + tachyonfx transitions, nucleo fuzzy search, a design spec (tokens, keymap, components, motion) before code, snapshot tests per screen; followed by a refinement pass |
