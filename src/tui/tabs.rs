@@ -34,10 +34,21 @@ pub fn needs_you(m: &Model) -> bool {
 pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
     match (m.tab, action) {
         (Tab::Overview, Action::Sync) => ask_sync(m, None),
-        (Tab::Overview, Action::Open) => match focused_fix(m) {
-            Some(fix) => run_fix(m, &fix),
-            None => Vec::new(),
-        },
+        (Tab::Overview, Action::Update) => ask_update(m),
+        (Tab::Overview, Action::Open) => {
+            let entry = overview_entries(m)
+                .into_iter()
+                .nth(m.cursor().selected)
+                .flatten();
+            match entry {
+                Some(Entry::Menu(item)) => run_menu(m, item),
+                Some(Entry::Fix(i)) => match focused_fix(m, i) {
+                    Some(fix) => run_fix(m, &fix),
+                    None => Vec::new(),
+                },
+                None => Vec::new(),
+            }
+        }
         (Tab::Profiles, Action::Sync) => match focused_profile(m) {
             Some(p) => ask_sync(m, Some(p.name.clone())),
             None => Vec::new(),
@@ -117,7 +128,7 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             Some(p) => vec![Cmd::Load(Load::Show(p.ids[0].clone()))],
             None => Vec::new(),
         },
-        (Tab::Discover, Action::Add) if m.overlay.is_none() => match focused_plugin(m) {
+        (Tab::Discover, Action::Approve | Action::Add) => match focused_plugin(m) {
             Some(p) => match crate::core::discover::add_words(&p) {
                 Ok(words) => {
                     let body = vec![
@@ -360,6 +371,86 @@ fn run_fix(m: &mut Model, fix: &str) -> Vec<Cmd> {
 
 // ── Overview (AC8-13, AC8-14) ───────────────────────────────────────────────────────────────
 
+/// The actions Overview offers above everything else (AC8-33).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuItem {
+    Sync,
+    Update,
+    Review,
+    Find,
+    Items,
+}
+
+fn menu(m: &Model) -> Vec<(MenuItem, String, &'static str)> {
+    let held = m.held_count();
+    let review = match held {
+        0 => "Review held versions (none now)".to_string(),
+        1 => "Review 1 held version".to_string(),
+        n => format!("Review {n} held versions"),
+    };
+    vec![
+        (MenuItem::Sync, "Sync every profile".into(), "s"),
+        (MenuItem::Update, "Check for updates".into(), "u"),
+        (MenuItem::Review, review, "4"),
+        (MenuItem::Find, "Find a plugin".into(), "5"),
+        (MenuItem::Items, "Look through every item".into(), "3"),
+    ]
+}
+
+/// What an Overview row is.
+enum Entry {
+    Menu(MenuItem),
+    Fix(usize),
+}
+
+/// Overview's rows: the menu, then the profiles to read, then what needs you.
+fn overview_entries(m: &Model) -> Vec<Option<Entry>> {
+    let mut out: Vec<Option<Entry>> = menu(m)
+        .into_iter()
+        .map(|(i, ..)| Some(Entry::Menu(i)))
+        .collect();
+    if let Some(s) = m.snapshot.ready() {
+        if !s.profiles.is_empty() {
+            out.push(None);
+            out.push(None);
+            out.extend(s.profiles.iter().map(|_| None));
+        }
+        if !s.attention.is_empty() {
+            out.push(None);
+            out.push(None);
+            out.extend((0..s.attention.len()).map(|i| Some(Entry::Fix(i))));
+        }
+    }
+    out
+}
+
+fn run_menu(m: &mut Model, item: MenuItem) -> Vec<Cmd> {
+    let go = |m: &mut Model, tab: Tab| {
+        m.tab = tab;
+        m.tab_since = m.now;
+        Vec::new()
+    };
+    match item {
+        MenuItem::Sync => ask_sync(m, None),
+        MenuItem::Update => ask_update(m),
+        MenuItem::Review => go(m, Tab::Review),
+        MenuItem::Find => go(m, Tab::Discover),
+        MenuItem::Items => go(m, Tab::Items),
+    }
+}
+
+fn ask_update(m: &mut Model) -> Vec<Cmd> {
+    app::ask(
+        m,
+        "Check for updates",
+        vec![
+            "Fetch every source plugin and hold what's new for review.".into(),
+            "Esc stops after the source it's on.".into(),
+        ],
+        Job::Update(Vec::new()),
+    )
+}
+
 fn overview(m: &Model, t: Theme) -> Body {
     let cols = usize::from(m.width.saturating_sub(4));
     let Some(s) = m.snapshot.ready() else {
@@ -368,39 +459,48 @@ fn overview(m: &Model, t: Theme) -> Body {
             ..Body::default()
         };
     };
-    let mut header = vec![verdict(t, s)];
-    if s.profiles.is_empty() {
-        header.push(Line::default());
-        header.push(Line::from(vec![
-            Span::raw("Quit and run "),
-            Span::styled("colctl init", t.style(Token::Accent)),
-            Span::raw(" to find your profiles."),
+    let header = vec![verdict(t, s), Line::default()];
+    let mut rows: Vec<Line<'static>> = Vec::new();
+    let mut skip = Vec::new();
+    let label_w = menu(m).iter().map(|(_, l, _)| width(l)).max().unwrap_or(0) + 4;
+    for (_, label, key) in menu(m) {
+        rows.push(Line::from(vec![
+            Span::styled(pad(&label, label_w), t.style(Token::Name)),
+            Span::styled(key.to_string(), t.style(Token::Accent)),
         ]));
-        return Body {
-            header,
-            ..Body::default()
-        };
     }
-    header.push(Line::default());
-    header.push(Line::styled("Profiles", t.style(Token::Name)));
-    let all: Vec<&Profile> = s.profiles.iter().collect();
-    for l in profile_lines(t, &all, cols.saturating_sub(2)) {
-        let mut spans = vec![Span::raw("  ")];
-        spans.extend(l.spans);
-        header.push(Line::from(spans));
+    let mut readonly = |rows: &mut Vec<Line<'static>>, line: Line<'static>| {
+        skip.push(rows.len());
+        rows.push(line);
+    };
+    if s.profiles.is_empty() {
+        readonly(&mut rows, Line::default());
+        readonly(
+            &mut rows,
+            Line::from(vec![
+                Span::raw("No profiles yet. Quit and run "),
+                Span::styled("colctl init", t.style(Token::Accent)),
+                Span::raw(" to find them."),
+            ]),
+        );
+    } else {
+        readonly(&mut rows, Line::default());
+        readonly(&mut rows, Line::styled("Profiles", t.style(Token::Muted)));
+        let all: Vec<&Profile> = s.profiles.iter().collect();
+        for l in profile_lines(t, &all, cols.saturating_sub(2)) {
+            readonly(&mut rows, l);
+        }
     }
-    if s.attention.is_empty() {
-        return Body {
-            header,
-            ..Body::default()
-        };
+    if !s.attention.is_empty() {
+        readonly(&mut rows, Line::default());
+        readonly(&mut rows, Line::styled("Needs you", t.style(Token::Muted)));
+        rows.extend(attention_rows(t, &s.attention, cols.saturating_sub(2)));
     }
-    header.push(Line::default());
-    header.push(Line::styled("Needs you", t.style(Token::Name)));
     Body {
         header,
-        rows: attention_rows(t, &s.attention, cols.saturating_sub(2)),
+        rows,
         empty: None,
+        skip,
     }
 }
 
@@ -462,9 +562,9 @@ fn attention_rows(t: Theme, rows: &[Attention], cols: usize) -> Vec<Line<'static
         .collect()
 }
 
-fn focused_fix(m: &Model) -> Option<String> {
+fn focused_fix(m: &Model, i: usize) -> Option<String> {
     let s = m.snapshot.ready()?;
-    let a = s.attention.get(m.cursor().selected)?;
+    let a = s.attention.get(i)?;
     (!a.fix.is_empty() && a.fix.starts_with("colctl ")).then(|| a.fix.clone())
 }
 
@@ -533,6 +633,7 @@ fn profiles(m: &Model, t: Theme) -> Body {
         header,
         rows,
         empty,
+        skip: Vec::new(),
     }
 }
 
@@ -753,6 +854,7 @@ fn items(m: &Model, t: Theme) -> Body {
         header,
         rows,
         empty,
+        skip: Vec::new(),
     }
 }
 
@@ -871,6 +973,7 @@ fn review(m: &Model, t: Theme) -> Body {
             )],
             rows: Vec::new(),
             empty,
+            skip: Vec::new(),
         };
     }
     let n = held.len();
@@ -930,16 +1033,25 @@ fn review(m: &Model, t: Theme) -> Body {
         header,
         rows,
         empty,
+        skip: Vec::new(),
     }
 }
 
 // ── Discover (AC8-22, AC8-23) ───────────────────────────────────────────────────────────────
 
 /// The plugins matching the search line, ranked as `colctl search` ranks them, and how many in all.
-pub fn results(m: &Model) -> (Vec<crate::search::Plugin>, usize) {
+pub fn results(m: &Model) -> (std::rc::Rc<Vec<crate::search::Plugin>>, usize) {
     let Some(c) = m.catalog.ready() else {
-        return (Vec::new(), 0);
+        return (std::rc::Rc::new(Vec::new()), 0);
     };
+    let query = m.filters[4].text.clone();
+    if let Some(hit) = m.discover_cache.borrow().as_ref()
+        && hit.query == query
+        && hit.catalog == m.catalog_loads
+    {
+        let n = hit.results.len();
+        return (hit.results.clone(), n);
+    }
     let q = crate::search::Query {
         terms: m.filters[4]
             .text
@@ -949,11 +1061,18 @@ pub fn results(m: &Model) -> (Vec<crate::search::Plugin>, usize) {
         limit: 0,
         ..crate::search::Query::default()
     };
-    crate::core::discover::rank(&c.plugins, &q)
+    let (hits, n) = crate::core::discover::rank(&c.plugins, &q);
+    let results = std::rc::Rc::new(hits);
+    *m.discover_cache.borrow_mut() = Some(app::DiscoverCache {
+        query,
+        catalog: m.catalog_loads,
+        results: results.clone(),
+    });
+    (results, n)
 }
 
 fn focused_plugin(m: &Model) -> Option<crate::search::Plugin> {
-    results(m).0.into_iter().nth(m.cursor().selected)
+    results(m).0.get(m.cursor().selected).cloned()
 }
 
 fn discover(m: &Model, t: Theme) -> Body {
@@ -1061,6 +1180,7 @@ fn discover(m: &Model, t: Theme) -> Body {
         header,
         rows,
         empty,
+        skip: Vec::new(),
     }
 }
 

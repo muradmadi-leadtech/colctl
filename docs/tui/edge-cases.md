@@ -30,3 +30,4 @@
 | EC8-26 | Boundary | Search query with only spaces | Treated as empty: every plugin listed |
 | EC8-28 | Failure | Reinstalling a Claude plugin fails half way (uninstalled, install fails) | The step fails with the install's error; the next sync installs it again |
 | EC8-29 | Boundary | A held version with no files that run code and no patterns | "Recommendation: approve. Nothing in it runs code." |
+| EC8-27 | Timing | A trackpad flick sends 200 scroll events at once | At most 3 rows per frame; it never races to the end |
