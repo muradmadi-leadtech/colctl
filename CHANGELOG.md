@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.5.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.4.0...v2.5.0) (2026-11-14)
+
+
+### Features
+
+* **review:** lead with a recommendation, and flag malware patterns ([#116](https://github.com/muradmadi-leadtech/colctl/issues/116)) ([5496ed7](https://github.com/muradmadi-leadtech/colctl/commit/5496ed79c05bd497ac3b554ff8575b9be2418466))
+* **tui:** arrows, an overview menu, a calmer wheel, search as you type, and runs that say why ([#117](https://github.com/muradmadi-leadtech/colctl/issues/117)) ([770bdc6](https://github.com/muradmadi-leadtech/colctl/commit/770bdc61f23c18cc84b19778e2285fd5cf41026c))
+
+
+### Bug Fixes
+
+* **sync:** update a source in Claude when its version didn't change ([#114](https://github.com/muradmadi-leadtech/colctl/issues/114)) ([058179e](https://github.com/muradmadi-leadtech/colctl/commit/058179e64e4899c9bb4221d9266e4d3a9e51de32))
+* **tui:** one line per flagged file in a review summary ([#118](https://github.com/muradmadi-leadtech/colctl/issues/118)) ([4fe508e](https://github.com/muradmadi-leadtech/colctl/commit/4fe508e2c666b6925d9f88fc6c11c68a985f5370))
+
 ## [2.4.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.3.0...v2.4.0) (2026-11-14)
 
 
