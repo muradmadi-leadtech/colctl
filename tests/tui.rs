@@ -1249,3 +1249,145 @@ fn ec8_04_no_catalogs() {
     let s = screen(&m);
     assert!(s.contains("! No catalogs found"), "{s}");
 }
+
+// ── Motion (AC8-24, AC8-12) ─────────────────────────────────────────────────────────────────
+
+use colctl::tui::motion::{self, Fx};
+
+fn moving(color: bool) -> Model {
+    Model::new(
+        Options {
+            color,
+            motion: true,
+        },
+        80,
+        24,
+    )
+}
+
+/// Draws a frame with `fx` applied at `now`.
+fn frame(m: &Model, fx: &mut Fx, now: u64) -> Terminal<TestBackend> {
+    let mut t = Terminal::new(TestBackend::new(m.width, m.height)).unwrap();
+    t.draw(|f| {
+        view::draw(m, f);
+        fx.apply(now, f.buffer_mut());
+    })
+    .unwrap();
+    t
+}
+
+#[test]
+fn ac8_24_a_tab_switch_moves_then_stops() {
+    let mut m = moving(true);
+    let mut fx = Fx::new(&m);
+    fx.observe(&m);
+    assert!(fx.is_empty(), "the first frame just appears");
+    ch(&mut m, '2');
+    fx.observe(&m);
+    assert_eq!(fx.len(), 1);
+    frame(&m, &mut fx, 1000);
+    assert!(fx.running(), "a new effect starts at its first frame");
+    frame(&m, &mut fx, 1000 + u64::from(motion::TAB_MS) / 2);
+    assert!(fx.running());
+    let end = frame(&m, &mut fx, 1000 + u64::from(motion::TAB_MS) + 20);
+    assert!(!fx.running(), "idle once it ends");
+    // The last frame is the plain frame.
+    assert_eq!(view::text(end.backend().buffer()), screen(&m));
+}
+
+#[test]
+fn ac8_24_overlays_finished_rows_and_reloads_move() {
+    let mut m = moving(true);
+    let mut fx = Fx::new(&m);
+    fx.observe(&m);
+    ch(&mut m, '?');
+    fx.observe(&m);
+    assert_eq!(fx.len(), 1, "overlay");
+    fx.finish();
+    press(&mut m, KeyCode::Esc);
+    fx.observe(&m);
+    assert!(fx.is_empty(), "closing just closes");
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    ch(&mut m, 'y');
+    fx.observe(&m);
+    fx.finish();
+    update(
+        &mut m,
+        Msg::Job(JobEvent::Done {
+            profile: "claude".into(),
+            summary: "1 change".into(),
+            ok: true,
+        }),
+    );
+    fx.observe(&m);
+    assert_eq!(fx.len(), 1, "a finished row");
+    fx.finish();
+    update(
+        &mut m,
+        Msg::Loaded(app::Loaded::Snapshot(Box::new(Err(CliError::usage("x"))))),
+    );
+    fx.observe(&m);
+    assert_eq!(fx.len(), 1, "a reload");
+}
+
+#[test]
+fn ac8_12_reduced_motion_moves_nothing() {
+    let mut m = model(80, 24);
+    let mut fx = Fx::new(&m);
+    fx.observe(&m);
+    ch(&mut m, '2');
+    ch(&mut m, '?');
+    fx.observe(&m);
+    assert!(fx.is_empty());
+    assert!(!fx.running());
+}
+
+#[test]
+fn ac8_12_motion_without_colour_adds_no_colour() {
+    let mut m = moving(false);
+    let mut fx = Fx::new(&m);
+    fx.observe(&m);
+    ch(&mut m, '3');
+    fx.observe(&m);
+    ch(&mut m, '?');
+    fx.observe(&m);
+    assert_eq!(fx.len(), 2);
+    for t in (0..=300).step_by(30) {
+        let term = frame(&m, &mut fx, 5000 + t);
+        assert!(
+            term.backend()
+                .buffer()
+                .content()
+                .iter()
+                .all(|c| c.fg == Color::Reset && c.bg == Color::Reset),
+            "colour at {t} ms"
+        );
+    }
+    assert!(!fx.running());
+}
+
+#[test]
+fn ac8_24_a_key_finishes_effects() {
+    let mut m = moving(true);
+    let mut fx = Fx::new(&m);
+    fx.observe(&m);
+    ch(&mut m, '4');
+    fx.observe(&m);
+    assert!(fx.running());
+    fx.finish();
+    assert!(!fx.running());
+    // Too small: nothing moves.
+    let mut m = Model::new(
+        Options {
+            color: true,
+            motion: true,
+        },
+        50,
+        10,
+    );
+    let mut fx = Fx::new(&m);
+    fx.observe(&m);
+    ch(&mut m, '2');
+    fx.observe(&m);
+    assert!(fx.is_empty());
+}
