@@ -763,10 +763,29 @@ where
         Ok(cli) => cli,
         Err(err) => return parse_error(&err, &words, &early),
     };
-    let out = crate::ui::Out::new(&cli.settings(json));
+    let settings = cli.settings(json);
+    let out = crate::ui::Out::new(&settings);
     let subcommand = match cli.command {
-        // EC6-23: `colctl` alone is a welcome, not an error, and touches nothing.
+        // EC6-23: `colctl` alone is a welcome, not an error, and touches nothing; in an
+        // interactive terminal it opens the TUI (AC8-06).
         None => {
+            let reduced = std::env::var("COLCTL_REDUCED_MOTION").ok();
+            if let Some(opts) = crate::tui::launch(
+                &settings,
+                &crate::ui::term::Facts::detect(),
+                reduced.as_deref(),
+            ) {
+                return match Ctx::from_process() {
+                    Ok(mut ctx) => {
+                        ctx.out = out.clone();
+                        crate::tui::run(&ctx, opts)
+                    }
+                    Err(err) => {
+                        out.error(&err, "colctl --help");
+                        err.code
+                    }
+                };
+            }
             out.raw(&welcome(&out.caps));
             return 0;
         }
