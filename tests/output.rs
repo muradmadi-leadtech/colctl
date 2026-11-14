@@ -69,11 +69,15 @@ fn normalise(env: &Env, text: &str) -> String {
         }
     }
     out = masked;
-    // held_at: Unix seconds.
+    // held_at: Unix seconds; date: the day the fixture's commits were made.
     let mut lines = Vec::new();
     for line in out.lines() {
         if line.trim_start().starts_with("\"held_at\"") {
             lines.push("      \"held_at\": [TIME],".to_string());
+        } else if line.trim_start().starts_with("\"date\"") {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            let comma = if line.ends_with(',') { "," } else { "" };
+            lines.push(format!("{indent}\"date\": [DATE]{comma}"));
         } else {
             lines.push(line.to_string());
         }

@@ -8,7 +8,7 @@ expression: "normalise(&env, &out)"
       "commits": [
         {
           "author": "t",
-          "date": "2026-11-13",
+          "date": [DATE],
           "rev": "[SHA]",
           "subject": "v2"
         }
