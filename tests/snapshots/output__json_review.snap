@@ -30,6 +30,11 @@ expression: "normalise(&env, &out)"
       "key": "sources/superpowers",
       "kind": "source",
       "name": "superpowers",
+      "recommendation": {
+        "approve": true,
+        "reason": "No malware patterns, and nothing in it runs code.",
+        "suspicious": []
+      },
       "repo": "file://[ROOT]/upstreams/superpowers",
       "to": "[SHA]",
       "warning": null

@@ -66,9 +66,23 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             }
             Vec::new()
         }
-        (Tab::Review, Action::Open) => match focused_held(m) {
-            Some(h) => vec![Cmd::Load(Load::Review(h.name.clone()))],
-            None => Vec::new(),
+        (Tab::Review, Action::Open) => {
+            if let Some(h) = focused_held(m) {
+                let (name, lines) = (h.name.clone(), held_summary(h));
+                m.overlay = Some(Overlay::Detail {
+                    title: name.clone(),
+                    lines,
+                    scroll: 0,
+                    held: Some(name),
+                });
+            }
+            Vec::new()
+        }
+        (_, Action::FullReview) => match &m.overlay {
+            Some(Overlay::Detail {
+                held: Some(name), ..
+            }) => vec![Cmd::Load(Load::Review(name.clone()))],
+            _ => Vec::new(),
         },
         (Tab::Review, Action::Approve | Action::Reject) => match held_target(m) {
             Some(name) => ask_decision(m, &name, action == Action::Approve),
@@ -1048,4 +1062,58 @@ fn discover(m: &Model, t: Theme) -> Body {
         rows,
         empty,
     }
+}
+
+/// A held version at a glance (AC8-36): what changed, the recommendation, anything suspicious, and
+/// what runs code. `d` opens the full review.
+pub fn held_summary(h: &crate::core::quarantine::HeldSummary) -> Vec<String> {
+    let mut out = vec![format!(
+        "{}  {} · {} · {} file{}",
+        escape(&h.name),
+        escape(&h.change),
+        h.size,
+        h.files,
+        if h.files == 1 { "" } else { "s" }
+    )];
+    out.push(String::new());
+    if let Some(e) = &h.error {
+        out.push(format!("✗ Can't be approved: {}", escape(e)));
+        return out;
+    }
+    match &h.recommendation {
+        Some(r) if r.approve => {
+            out.push("✓ Recommendation: approve".into());
+            out.push(format!("  {}", r.reason));
+        }
+        Some(r) => {
+            out.push("! Look before approving".into());
+            out.push(format!("  {}", escape(&r.reason)));
+            out.push(String::new());
+            out.push("Suspicious".into());
+            for f in &r.suspicious {
+                out.push(format!("  {}", escape(&f.path)));
+                out.push(format!("      {}", escape(&f.reason)));
+            }
+        }
+        None => out.push("· No review available".into()),
+    }
+    let code: Vec<&crate::risk::Flag> = h
+        .flag_list
+        .iter()
+        .filter(|f| f.kind != crate::risk::FlagKind::Suspicious)
+        .collect();
+    if !code.is_empty() {
+        out.push(String::new());
+        out.push(format!("Flagged ({})", code.len()));
+        for f in code.iter().take(8) {
+            out.push(format!("  {}  {}", escape(&f.path), escape(&f.reason)));
+        }
+        if code.len() > 8 {
+            out.push(format!(
+                "  … and {} more (d shows them all)",
+                code.len() - 8
+            ));
+        }
+    }
+    out
 }

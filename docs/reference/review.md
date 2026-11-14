@@ -143,3 +143,24 @@ escaped).
 | 0 | Nothing held (no name), or the named version was shown |
 | 1 | Something is held (no name), or the named version can't be read (see Refusals) |
 | 2 | Unknown name, or nothing held for it; no `git` |
+
+## Recommendation
+
+Since 2.4, the full review leads with what to do, before any detail:
+
+```
+✓ Recommendation: approve. No malware patterns. 11 files run code, as plugins do.
+```
+
+or, when an added or changed line does what malware does:
+
+```
+! Look before approving: downloads and runs code in hooks/run.sh
+    hooks/run.sh  downloads and runs code: curl -s https://… | bash
+```
+
+The patterns are narrow on purpose. Hooks, scripts and MCP servers are normal for plugins and are listed under Risk
+flags. These aren't: downloading and running code (`curl`/`wget` into a shell, `eval` of a download), decoding and
+running hidden code (`base64 -d` into a shell or `eval`), reverse shells (`/dev/tcp`, `nc -e`), reading credentials
+(SSH keys, `~/.aws/credentials`, the keychain), deleting a home or root folder, and crypto miners. Each is a
+`suspicious` flag. `--json` carries `"recommendation": {"approve", "reason", "suspicious"}` in each candidate.

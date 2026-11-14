@@ -26,7 +26,7 @@ Ctrl-C, after an error, or after a bug.
 | **Overview** | `colctl status`'s verdict, one line per profile with what it has, and **Needs you**: each problem with its fix | `s` sync every profile; ⏎ runs the focused fix (a review opens it; sync and update ask first; anything else says which command to run) |
 | **Profiles** | Every profile with its path and what it has | ⏎ lists a profile's items, like `status --harness <name> --all`; `s` syncs only that profile; `/` filters |
 | **Items** | Every instructions file, skill, agent, plugin and source plugin once, with its state in each profile (numbered columns; the legend is above) | ⏎ shows each profile's state, where the item lives there, and its fix; `/` filters |
-| **Review** | What's held for review, as `colctl review` lists it; the count is on the tab | ⏎ shows what `colctl review <name>` prints; `a` approve, `x` reject, `A` approve all, `u` check for updates |
+| **Review** | What's held for review, as `colctl review` lists it; the count is on the tab | ⏎ shows a held version at a glance: what changed, the recommendation, anything suspicious, what runs code; `d` shows everything `colctl review <name>` prints, diff included; `a` approve, `x` reject, `A` approve all, `u` check for updates |
 | **Discover** | Every plugin every catalog knows, ranked as `colctl search` ranks them | `/` searches as you type; ⏎ shows what `colctl show <id>` prints; `a` adds it as its add command says |
 
 The tab bar marks the current tab. `Overview !` means something needs you, and `Review !2` means two versions are
@@ -48,7 +48,8 @@ held.
 | a | Review, Discover | approve, add |
 | x | Review | reject |
 | A | Review | approve every held version |
-| ] [ | a review | next, previous file in the diff |
+| d | a held version | the full review, diff included |
+| ] [ | a full review | next, previous file in the diff |
 | y n | a confirmation | yes, no (⏎ alone does nothing) |
 | ? | everywhere | every key for where you are |
 | q, Ctrl-C | everywhere | quit; while a write runs, it asks first and waits for it to finish |
