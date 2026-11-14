@@ -583,6 +583,27 @@ fn list(codex: bool) -> PluginList {
     }
 }
 
+/// Runs `colctl <words>` in `ctx` (its output and all), as the CLI would after parsing: the core
+/// API's way to run exactly what a command line says (cycle 8). Argument errors are usage errors.
+pub(crate) fn dispatch_words(ctx: &Ctx, words: &[String]) -> Result<i32, CliError> {
+    let argv = std::iter::once("colctl".to_string()).chain(words.iter().cloned());
+    let cli = Cli::try_parse_from(argv).map_err(|e| {
+        CliError::usage(
+            e.render()
+                .to_string()
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim_start_matches("error: ")
+                .to_string(),
+        )
+    })?;
+    match cli.command {
+        Some(Command::Help { .. }) | None => Err(CliError::usage("name a command to run")),
+        Some(c) => dispatch(ctx, c),
+    }
+}
+
 fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
     match command {
         Command::Init { dry_run } => commands::init(ctx, dry_run),

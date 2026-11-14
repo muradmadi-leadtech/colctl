@@ -134,7 +134,7 @@ pub fn snapshot(ctx: &Ctx, filter: Option<&str>) -> Result<Snapshot, CliError> {
     let unusable = profiles.iter().filter(|p| !p.usable).count();
     let sources = ws.config.sources.len();
     let verdict = verdict(profiles.len(), attention.len() + unusable, sources);
-    let held = held_views.iter().map(|v| held(ctx, v)).collect();
+    let held = held_views.iter().map(|v| held_of(ctx, v)).collect();
     Ok(Snapshot {
         verdict,
         profiles,
@@ -375,7 +375,7 @@ pub(crate) fn attention(
         });
     }
     for v in held {
-        let h = self::held(ctx, v);
+        let h = held_of(ctx, v);
         out.push(Attention {
             place: "held".into(),
             kind: h.kind,
@@ -387,7 +387,8 @@ pub(crate) fn attention(
     out
 }
 
-fn held(ctx: &Ctx, v: &View) -> Held {
+/// A held version's name, kind and change.
+pub(crate) fn held_of(ctx: &Ctx, v: &View) -> Held {
     let change = match &v.candidate {
         Candidate::Source(c) => format!("{} → {}", vault::short(&c.from), vault::short(&c.to)),
         Candidate::Skill(c) | Candidate::Agent(c) => ctx.tilde(&c.origin),
