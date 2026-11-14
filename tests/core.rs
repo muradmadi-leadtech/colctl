@@ -461,3 +461,36 @@ fn ac8_03_the_cli_prints_what_the_core_reports() {
     let ours: Vec<String> = report.lines.iter().map(|l| mask(l, &a)).collect();
     assert_eq!(ours, cli);
 }
+
+#[test]
+fn ac8_15_a_run_with_two_verdicts_reports_both_worst_first() {
+    use colctl::core::run::Report;
+    let r = Report {
+        exit: 1,
+        lines: vec![
+            "✓ Approved 1 held version".into(),
+            String::new(),
+            "  ✗  claude       1 step failed".into(),
+            "      ✗ update qdrant failed: …".into(),
+            String::new(),
+            "✗ Synced 3 of 5 profiles · 2 failed".into(),
+        ],
+        errors: Vec::new(),
+    };
+    assert_eq!(
+        r.verdict(),
+        "✗ Synced 3 of 5 profiles · 2 failed · ✓ Approved 1 held version"
+    );
+    let one = Report {
+        exit: 0,
+        lines: vec!["✓ All 5 profiles in sync".into(), "  ✓ claude".into()],
+        errors: Vec::new(),
+    };
+    assert_eq!(one.verdict(), "✓ All 5 profiles in sync");
+    let none = Report {
+        exit: 0,
+        lines: vec!["plain".into()],
+        errors: Vec::new(),
+    };
+    assert_eq!(none.verdict(), "plain");
+}
