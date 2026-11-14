@@ -145,7 +145,7 @@ spinner becomes a static `…` beside `n/total`. Tests run with motion off.
 ```
  Overview !  Profiles  Items  Review !2  Discover                   colctl 2.4.0
 ────────────────────────────────────────────────────────────────────────────────
- ! 2 held fo╭ superpowers · v4.1.0 → v4.2.0 ─────────────────────────────╮
+ ! 2 held   ╭ superpowers · v4.1.0 → v4.2.0 ─────────────────────────────╮
             │ 3 commits · 7 files · 1 flag                               │
  › superpowe│                                                            │
    qdrant-sk│ ! New hook: PreToolUse on Bash runs hooks/guard.sh         │
