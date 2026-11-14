@@ -259,6 +259,8 @@ pub struct Model {
     pub last_click: Option<u64>,
     /// How many times the snapshot has loaded (motion marks a reload).
     pub loads: usize,
+    /// Loads asked for and not back yet.
+    pub pending: usize,
 }
 
 /// The smallest screen the TUI draws on (AC8-11).
@@ -289,11 +291,13 @@ impl Model {
             dirty: true,
             last_click: None,
             loads: 0,
+            pending: 0,
         }
     }
 
     /// What to load when the app opens: local state first; the catalog after (AC8-08).
-    pub fn start(&self) -> Vec<Cmd> {
+    pub fn start(&mut self) -> Vec<Cmd> {
+        self.pending += 3;
         vec![
             Cmd::Load(Load::Snapshot),
             Cmd::Load(Load::Held),
@@ -373,8 +377,19 @@ impl Model {
     }
 }
 
-/// Applies `msg`, returning what to run.
+/// Applies `msg`, returning what to run, and keeps count of the loads in flight (the status line
+/// says so while there are any).
 pub fn update(m: &mut Model, msg: Msg) -> Vec<Cmd> {
+    let loaded = matches!(msg, Msg::Loaded(_));
+    let cmds = apply(m, msg);
+    if loaded {
+        m.pending = m.pending.saturating_sub(1);
+    }
+    m.pending += cmds.iter().filter(|c| matches!(c, Cmd::Load(_))).count();
+    cmds
+}
+
+fn apply(m: &mut Model, msg: Msg) -> Vec<Cmd> {
     // A tick or a stray mouse move changes nothing by itself; it must never hide a pending redraw.
     let quiet = match &msg {
         Msg::Tick(_) => true,
@@ -398,7 +413,7 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Cmd> {
                 m.toast = None;
                 m.dirty = true;
             }
-            if m.job.is_some() {
+            if m.job.is_some() || m.pending > 0 {
                 m.dirty = true;
             }
             Vec::new()

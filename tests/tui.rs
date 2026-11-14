@@ -209,8 +209,42 @@ fn ac8_24_ticks_and_mouse_moves_never_hide_a_redraw() {
 }
 
 #[test]
+fn ac8_08_the_status_line_says_while_it_loads() {
+    let mut m = model(80, 24);
+    let cmds = m.start();
+    assert_eq!(m.pending, 3);
+    assert!(screen(&m).contains("… loading…"), "{}", screen(&m));
+    for _ in cmds {
+        update(&mut m, Msg::Loaded(app::Loaded::Held(Ok(Vec::new()))));
+    }
+    assert_eq!(m.pending, 0);
+    assert!(!screen(&m).contains("loading"));
+    // A reload counts too.
+    ch(&mut m, 'r');
+    assert_eq!(m.pending, 3);
+}
+
+#[test]
+fn ac8_25_a_confirmation_is_as_tall_as_what_it_says() {
+    let mut m = model(80, 24);
+    ask(
+        &mut m,
+        "Sync",
+        vec!["one".into(), "two".into()],
+        Job::Sync(None),
+    );
+    let s = screen(&m);
+    let top = s.lines().position(|l| l.contains("╭ Sync")).unwrap();
+    let bottom = s
+        .lines()
+        .position(|l| l.contains("y yes · n no ─"))
+        .unwrap();
+    assert_eq!(bottom - top, 3, "{s}");
+}
+
+#[test]
 fn ac8_08_local_state_loads_first() {
-    let m = model(80, 24);
+    let mut m = model(80, 24);
     assert_eq!(
         m.start(),
         [
@@ -1206,6 +1240,8 @@ fn ac8_23_show_and_add() {
     };
     let (_, out, _) = env.code(&["show", "local@official", "--color", "never", "--no-pager"]);
     assert_eq!(lines[0], out.lines().next().unwrap());
+    // No diff, so no file keys.
+    assert!(!screen(&m).contains("] next file"), "{}", screen(&m));
     press(&mut m, KeyCode::Esc);
     // "tool" lives in a GitHub repo: adding it is a source add, which would clone; check the ask.
     m.cursor_mut().selected = row_of(&m, "tool ");
