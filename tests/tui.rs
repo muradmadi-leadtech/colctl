@@ -611,7 +611,7 @@ fn drive(env: &Env, m: &mut Model, cmds: Vec<Cmd>) {
     while !queue.is_empty() {
         let next: Vec<Cmd> = std::mem::take(&mut queue);
         for cmd in next {
-            for msg in worker::run_now(&c, &cmd, usize::from(m.width.saturating_sub(4))) {
+            for msg in worker::run_now(&c, &cmd, view::detail_width(m)) {
                 queue.extend(update(m, msg));
             }
         }
@@ -632,6 +632,12 @@ fn mask(text: &str) -> String {
         &format!("colctl {}", env!("CARGO_PKG_VERSION")),
         "colctl [VERSION]",
     );
+    // Repos in temp folders.
+    let mut text = text.clone();
+    while let Some(at) = text.find("file://") {
+        let end = text[at..].find(['\n', '│']).map_or(text.len(), |e| at + e);
+        text.replace_range(at..end, "[REPO]");
+    }
     let mut out = String::new();
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
@@ -934,4 +940,159 @@ fn ac8_17_filter_and_open_an_item() {
     ch(&mut m, '/');
     ch(&mut m, 'z');
     assert!(screen(&m).contains("No items match \"alpz\""));
+}
+
+// ── Review (AC8-18 – 21) ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn ac8_18_the_queue() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '4');
+    let s = screen(&m);
+    assert!(s.contains("! 1 held for review"), "{s}");
+    let row = view::rows(&m)[0].to_string();
+    assert!(
+        row.contains("superpowers") && row.contains("source"),
+        "{row}"
+    );
+    assert!(row.contains(" → ") && row.contains("1 commit"), "{row}");
+    insta::assert_snapshot!(
+        "review_80x24",
+        mask(&{
+            let mut small = opened(&env, 80, 24);
+            ch(&mut small, '4');
+            screen(&small)
+        })
+    );
+    let env = in_sync_fixture();
+    let mut m = opened(&env, 80, 24);
+    ch(&mut m, '4');
+    let s = screen(&m);
+    assert!(
+        s.contains("Nothing held for review. u checks for updates"),
+        "{s}"
+    );
+    assert!(s.lines().next().unwrap().contains(" Review "), "{s}");
+}
+
+#[test]
+fn ac8_19_a_held_version_in_full() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '4');
+    let cmds = press(&mut m, KeyCode::Enter);
+    assert_eq!(cmds, [Cmd::Load(Load::Review("superpowers".into()))]);
+    drive(&env, &mut m, cmds);
+    let Some(Overlay::Detail { lines, held, .. }) = &m.overlay else {
+        panic!("{:?}", m.overlay);
+    };
+    assert_eq!(held.as_deref(), Some("superpowers"));
+    // Exactly what colctl review prints, at the overlay's width.
+    let (_, out, _) = env.code(&["review", "superpowers", "--color", "never", "--no-pager"]);
+    let cli: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], cli[0]);
+    assert_eq!(lines.len(), cli.len());
+    let first_file = lines
+        .iter()
+        .position(|l| l.starts_with("diff --git"))
+        .expect("a diff");
+    ch(&mut m, ']');
+    assert!(matches!(&m.overlay, Some(Overlay::Detail { scroll, .. }) if *scroll == first_file));
+    ch(&mut m, '[');
+    assert!(matches!(&m.overlay, Some(Overlay::Detail { scroll, .. }) if *scroll == first_file));
+    press(&mut m, KeyCode::Home);
+    let s = screen(&m);
+    assert!(s.contains("a approve · x reject · ] next file"), "{s}");
+    insta::assert_snapshot!("review_detail_100x30", mask(&s));
+}
+
+#[test]
+fn ac8_20_approve_from_the_detail() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '4');
+    let cmds = press(&mut m, KeyCode::Enter);
+    drive(&env, &mut m, cmds);
+    ch(&mut m, 'a');
+    let s = screen(&m);
+    assert!(s.contains("Approve superpowers"), "{s}");
+    assert!(s.contains("exactly as reviewed"), "{s}");
+    let cmds = ch(&mut m, 'y');
+    assert_eq!(cmds, [Cmd::Run(Job::Approve(vec!["superpowers".into()]))]);
+    drive(&env, &mut m, cmds);
+    assert_eq!(m.held_count(), 0);
+    assert!(screen(&m).contains("Nothing held for review"));
+    assert!(
+        env.code(&["review", "--color", "never"])
+            .1
+            .contains("Nothing held")
+    );
+}
+
+#[test]
+fn ac8_20_reject_from_the_list_and_no_changes_nothing() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '4');
+    ch(&mut m, 'x');
+    assert!(screen(&m).contains("Reject superpowers"));
+    ch(&mut m, 'n');
+    assert_eq!(m.held_count(), 1);
+    ch(&mut m, 'x');
+    let cmds = ch(&mut m, 'y');
+    assert_eq!(cmds, [Cmd::Run(Job::Reject(vec!["superpowers".into()]))]);
+    drive(&env, &mut m, cmds);
+    assert_eq!(m.held_count(), 0);
+}
+
+#[test]
+fn ac8_20_approve_all_lists_what_it_installs() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '4');
+    ch(&mut m, 'A');
+    let s = screen(&m);
+    assert!(
+        s.contains("Approve all") && s.contains("superpowers"),
+        "{s}"
+    );
+    let cmds = ch(&mut m, 'y');
+    assert_eq!(cmds, [Cmd::Run(Job::Approve(vec![]))]);
+    drive(&env, &mut m, cmds);
+    assert_eq!(m.held_count(), 0);
+}
+
+#[test]
+fn ac8_21_check_for_updates() {
+    let env = Env::new();
+    env.native();
+    env.ok(&["init"]);
+    let (repo, url, _) = env.upstream("superpowers", true, false, Some("superpowers-dev"));
+    env.ok(&["add", "source", &url]);
+    env.upstream_commit(&repo, "v2");
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '4');
+    ch(&mut m, 'u');
+    assert!(screen(&m).contains("Check for updates"));
+    let cmds = ch(&mut m, 'y');
+    assert_eq!(cmds, [Cmd::Run(Job::Update(vec![]))]);
+    drive(&env, &mut m, cmds);
+    assert_eq!(m.held_count(), 1);
+    assert!(screen(&m).contains("held for review"), "{}", screen(&m));
+}
+
+#[test]
+fn ec8_18_approved_elsewhere_meanwhile() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '4');
+    env.ok(&["reject", "superpowers"]);
+    ch(&mut m, 'a');
+    let cmds = ch(&mut m, 'y');
+    drive(&env, &mut m, cmds);
+    let s = screen(&m);
+    assert!(s.contains("error:"), "{s}");
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.held_count(), 0);
 }
