@@ -70,7 +70,7 @@ pub(crate) fn load(ctx: &Ctx) -> Result<Workspace, CliError> {
     let (config, config_text) = config::load(&ctx.source, &ctx.home)?;
     let state = state::load(&ctx.source)?;
     let origin_changed = origin_changes(ctx, &state);
-    let git = Git::find(&ctx.path_var).ok();
+    let git = Git::for_ctx(ctx).ok();
     let (sources, clones) = prepare_sources(ctx, &config, git.as_ref(), &BTreeMap::new());
     Ok(Workspace {
         config,
@@ -542,7 +542,7 @@ fn run_sync_led(
         .filter(|p| p.plan.root == Root::Ok && !p.plan.actions.is_empty())
         .map(|p| p.harness.name.clone())
         .collect();
-    let mut progress = crate::ui::progress::Run::new(&ctx.out.caps, &busy);
+    let mut progress = crate::ui::progress::Run::for_out(&ctx.out, &busy);
     let mut results = Vec::new();
     let mut failures = 0;
     for p in &planned {
@@ -558,8 +558,9 @@ fn run_sync_led(
             ws.state.harness_mut(&p.harness.name),
             &mut |i, a| progress.step(&name, &run_view::doing(a), i + 1, total),
         );
-        progress.done(&name, &run_view::short_summary(&applied));
-        failures += applied.iter().filter(|r| !r.outcome.is_done()).count();
+        let failed = applied.iter().filter(|r| !r.outcome.is_done()).count();
+        progress.finish(&name, &run_view::short_summary(&applied), failed == 0);
+        failures += failed;
         results.push((name, applied));
     }
     progress.clear();
@@ -578,7 +579,7 @@ fn run_sync_led(
 
 /// `colctl sync` (AC-09 … AC-19).
 pub fn sync(ctx: &Ctx, filter: Option<&str>, dry_run: bool) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     check_harness(&ws.config, filter)?;
     if dry_run {
@@ -660,7 +661,7 @@ fn remove_stale_clones(ctx: &Ctx, config: &Config) {
 
 /// `colctl init` (AC-04 … AC-07).
 pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     let found = detect(ctx);
     let config_path = ctx.source.join(CONFIG_FILE);
     if !config_path.exists() {
@@ -915,7 +916,7 @@ pub fn add_skill(
     name: Option<&str>,
     dry_run: bool,
 ) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     load(ctx)?;
     let name = name
         .map(str::to_string)
@@ -971,7 +972,7 @@ pub fn add_skill(
 
 /// `colctl add agent` (AC-21).
 pub fn add_agent(ctx: &Ctx, file: &Path, dry_run: bool) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     load(ctx)?;
     let stem = file
         .file_name()
@@ -1025,7 +1026,7 @@ pub fn add_plugin(
     list: PluginList,
     dry_run: bool,
 ) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     let (_, market) = config::split_plugin_id(id)
         .ok_or_else(|| CliError::usage(format!("plugin id \"{id}\" must be name@marketplace")))?;
@@ -1104,7 +1105,7 @@ pub fn rm(
     list: PluginList,
     dry_run: bool,
 ) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     if list == PluginList::Codex && kind != RmKind::Plugin {
         return Err(CliError::usage("--codex only applies to plugins"));
@@ -1525,7 +1526,7 @@ pub fn adopt(
     item: &[String],
     dry_run: bool,
 ) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     check_harness(&ws.config, harness)?;
     let wanted = parse_item(item)?;
@@ -1791,7 +1792,7 @@ pub fn add_source(
     plugin: Option<&str>,
     dry_run: bool,
 ) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     let wanted = wanted_source(ctx, &ws, repo)?;
     let repo = wanted.repo.as_str();
@@ -1925,7 +1926,7 @@ fn wanted_source(ctx: &Ctx, ws: &Workspace, arg: &str) -> Result<WantedSource, C
 /// Moves a plugin to its source when the source can be found (AC3-18…21); `None` to fall back
 /// to adopting it into a plugin list (AC3-22).
 fn adopt_plugin_from_source(ctx: &Ctx, harness: &Harness, id: &str) -> Option<Adoption> {
-    let git = Git::find(&ctx.path_var).ok()?;
+    let git = Git::for_ctx(ctx).ok()?;
     let head = |dir: &Path| head_of_dir(&git, dir);
     let found = match harness.kind {
         Kind::Claude => crate::origin::claude(&harness.path, id, &head),

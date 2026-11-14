@@ -9,6 +9,8 @@ use std::time::Duration;
 
 /// A run over several profiles.
 pub struct Run {
+    /// A captured run's output, which hears every step instead (cycle 8).
+    fwd: Option<super::Out>,
     multi: Option<MultiProgress>,
     bars: Vec<(String, ProgressBar)>,
     width: usize,
@@ -19,6 +21,7 @@ impl Run {
     pub fn new(caps: &Caps, profiles: &[String]) -> Self {
         if !caps.progress || profiles.is_empty() {
             return Run {
+                fwd: None,
                 multi: None,
                 bars: Vec::new(),
                 width: 0,
@@ -44,10 +47,30 @@ impl Run {
             })
             .collect();
         Run {
+            fwd: None,
             multi: Some(multi),
             bars,
             width,
         }
+    }
+
+    /// For a run printing through `out`: drawn as [`Run::new`] draws, or, when `out` is captured,
+    /// told to its observer.
+    pub fn for_out(out: &super::Out, profiles: &[String]) -> Self {
+        if out.is_captured() {
+            let mut run = Run::new(&out.caps, &[]);
+            run.fwd = Some(out.clone());
+            return run;
+        }
+        Run::new(&out.caps, profiles)
+    }
+
+    /// The profile is done, `ok` when every step was.
+    pub fn finish(&self, profile: &str, summary: &str, ok: bool) {
+        if let Some(out) = &self.fwd {
+            out.done(profile, summary, ok);
+        }
+        self.done(profile, summary);
     }
 
     fn bar(&self, profile: &str) -> Option<&ProgressBar> {
@@ -56,6 +79,9 @@ impl Run {
 
     /// The profile is working on step `n` of `total`.
     pub fn step(&self, profile: &str, what: &str, n: usize, total: usize) {
+        if let Some(out) = &self.fwd {
+            out.step(profile, what, n, total);
+        }
         if let Some(bar) = self.bar(profile) {
             bar.enable_steady_tick(Duration::from_millis(80));
             bar.set_message(format!("{what}  {n}/{total}"));

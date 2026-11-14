@@ -776,7 +776,7 @@ where
         Some(c) => c,
     };
     let result = Ctx::from_process().and_then(|mut ctx| {
-        ctx.out = out;
+        ctx.out = out.clone();
         dispatch(&ctx, subcommand)
     });
     match result {

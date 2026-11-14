@@ -121,3 +121,159 @@ fn ac8_01_status_snapshot_without_profiles() {
     assert_eq!(snap.verdict.tone, Tone::Attention);
     assert!(snap.profiles.is_empty());
 }
+
+mod runs {
+    use super::*;
+    use colctl::core::observer::{Event, Recorder};
+    use colctl::core::run::{Job, run};
+    use std::sync::{Arc, Mutex};
+
+    fn recorder() -> Arc<Mutex<Recorder>> {
+        Arc::new(Mutex::new(Recorder::default()))
+    }
+
+    fn events(r: &Arc<Mutex<Recorder>>) -> Vec<Event> {
+        r.lock().unwrap().events.clone()
+    }
+
+    #[test]
+    fn ac8_02_sync_reports_progress_through_the_observer() {
+        let env = Env::new();
+        env.native();
+        env.kilo();
+        env.ok(&["init"]);
+        env.source_skill("alpha");
+        let rec = recorder();
+        let report = run(&ctx(&env), &Job::Sync(None), 80, Box::new(rec.clone())).unwrap();
+        assert_eq!(report.exit, 0, "{report:?}");
+        assert!(report.verdict().starts_with('✓'), "{report:?}");
+        let ev = events(&rec);
+        for profile in ["claude", "kilo-claude"] {
+            assert!(
+                ev.iter()
+                    .any(|e| matches!(e, Event::Step { profile: p, .. } if p == profile)),
+                "{ev:?}"
+            );
+            assert!(
+                ev.iter()
+                    .any(|e| matches!(e, Event::Done { profile: p, ok: true, .. } if p == profile)),
+                "{ev:?}"
+            );
+        }
+        // The same state colctl sync leaves: nothing left to do.
+        assert_eq!(env.code(&["status"]).0, 0);
+        assert!(env.home.join(".claude/skills/alpha").exists());
+    }
+
+    #[test]
+    fn ac8_02_update_reports_each_source_and_stops_when_asked() {
+        let env = Env::new();
+        env.native();
+        env.ok(&["init"]);
+        let (a, url_a, _) = env.upstream("alpha-plugin", true, false, None);
+        let (b, url_b, _) = env.upstream("beta-plugin", true, false, None);
+        env.ok(&["add", "source", &url_a]);
+        env.ok(&["add", "source", &url_b]);
+        env.upstream_commit(&a, "v2");
+        env.upstream_commit(&b, "v2");
+
+        let rec = Arc::new(Mutex::new(Recorder {
+            cancel_after: Some(1),
+            ..Recorder::default()
+        }));
+        let report = run(&ctx(&env), &Job::Update(vec![]), 80, Box::new(rec.clone())).unwrap();
+        let steps: Vec<String> = events(&rec)
+            .into_iter()
+            .filter_map(|e| match e {
+                Event::Step {
+                    profile, n, total, ..
+                } => Some(format!("{profile} {n}/{total}")),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(steps.len(), 1, "{steps:?}");
+        assert!(steps[0].ends_with("1/2"), "{steps:?}");
+        assert!(
+            events(&rec)
+                .iter()
+                .any(|e| matches!(e, Event::Done { ok: true, .. })),
+            "{:?}",
+            events(&rec)
+        );
+        // What was held before the stop stays held.
+        let snap = status::snapshot(&ctx(&env), None).unwrap();
+        assert_eq!(snap.held.len(), 1, "{report:?}");
+    }
+
+    #[test]
+    fn ac8_02_approve_installs_and_reports() {
+        let env = held_fixture();
+        let rec = recorder();
+        let report = run(
+            &ctx(&env),
+            &Job::Approve(vec!["superpowers".into()]),
+            80,
+            Box::new(rec.clone()),
+        )
+        .unwrap();
+        assert!(
+            report.lines.iter().any(|l| l.contains("superpowers")),
+            "{report:?}"
+        );
+        assert!(
+            events(&rec).iter().any(|e| matches!(e, Event::Step { .. })),
+            "{:?}",
+            events(&rec)
+        );
+        let snap = status::snapshot(&ctx(&env), None).unwrap();
+        assert!(snap.held.is_empty());
+    }
+
+    #[test]
+    fn ac8_02_reject_drops_the_held_version() {
+        let env = held_fixture();
+        let report = run(
+            &ctx(&env),
+            &Job::Reject(vec!["superpowers".into()]),
+            80,
+            Box::new(recorder()),
+        )
+        .unwrap();
+        assert_eq!(report.exit, 0, "{report:?}");
+        let snap = status::snapshot(&ctx(&env), None).unwrap();
+        assert!(snap.held.is_empty());
+    }
+
+    #[test]
+    fn ac8_02_a_refusal_is_the_clis_error() {
+        let env = Env::new();
+        env.native();
+        env.ok(&["init"]);
+        let err = run(
+            &ctx(&env),
+            &Job::Approve(vec!["nope".into()]),
+            80,
+            Box::new(recorder()),
+        )
+        .unwrap_err();
+        let (code, _, stderr) = env.code(&["approve", "nope"]);
+        assert_eq!(err.code, code);
+        assert!(
+            stderr.contains(err.message.lines().next().unwrap()),
+            "{stderr}"
+        );
+    }
+
+    #[test]
+    fn ac8_02_jobs_name_their_command() {
+        assert_eq!(Job::Sync(None).command(), "colctl sync");
+        assert_eq!(
+            Job::Sync(Some("codex".into())).command(),
+            "colctl sync --harness codex"
+        );
+        assert_eq!(Job::Update(vec![]).command(), "colctl update");
+        assert_eq!(Job::Update(vec!["a".into()]).command(), "colctl update a");
+        assert_eq!(Job::Approve(vec![]).command(), "colctl approve --all");
+        assert_eq!(Job::Reject(vec!["a".into()]).command(), "colctl reject a");
+    }
+}

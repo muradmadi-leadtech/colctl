@@ -69,7 +69,7 @@ pub fn update(
     rev: Option<&str>,
     dry_run: bool,
 ) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     for n in names {
         if !ws.config.sources.iter().any(|s| &s.name == n) {
@@ -102,12 +102,29 @@ pub fn update(
     let mut newer = 0;
     let mut said: Vec<(Token, String)> = Vec::new();
     let mut held: Vec<String> = Vec::new();
-    for s in ws
+    let chosen: Vec<&config::Source> = ws
         .config
         .sources
         .iter()
         .filter(|s| names.is_empty() || names.contains(&s.name))
-    {
+        .collect();
+    // AC8-21: progress per source for a watcher, and a clean stop between sources.
+    let mut current: Option<(String, usize)> = None;
+    let finish = |current: &mut Option<(String, usize)>, said: &[(Token, String)]| {
+        if let Some((name, from)) = current.take() {
+            let last = said[from..].last();
+            let ok = last.is_none_or(|(t, _)| *t != Token::Failed);
+            let summary = last.map_or("up to date", |(_, text)| text.as_str());
+            ctx.out.done(&name, summary, ok);
+        }
+    };
+    for (i, s) in chosen.iter().enumerate() {
+        finish(&mut current, &said);
+        if ctx.out.cancelled() {
+            break;
+        }
+        ctx.out.step(&s.name, "fetching", i + 1, chosen.len());
+        current = Some((s.name.clone(), said.len()));
         let looked = vault
             .fetch_clone(&s.name, &s.clone_url())
             .and_then(|_| match rev {
@@ -205,6 +222,7 @@ pub fn update(
             Found::UpToDate => {}
         }
     }
+    finish(&mut current, &said);
     // AC6-21: a verdict, a line per source, and what to run next.
     let plural = super::plural;
     let (tone, verdict) = if failures > 0 {
@@ -1085,7 +1103,7 @@ pub(crate) fn status_entry(v: &View) -> Value {
 
 /// `colctl review [<name>] [--json]` (AC4-19…22): offline, read-only.
 pub fn review(ctx: &Ctx, name: Option<&str>, pick: bool, as_json: bool) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     // AC6-19: `review -i` picks one held version in a terminal.
     let picked;
@@ -1373,7 +1391,7 @@ fn staging_for(item: &Path) -> std::path::PathBuf {
 
 /// `colctl approve` (AC4-23…26): installs exactly the held candidates, one commit each, then syncs.
 pub fn approve(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     let picked;
     let names = match picked_names(ctx, &ws, names, all, "approve") {
@@ -1498,7 +1516,7 @@ pub fn approve(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<
 /// `colctl reject` (AC4-27): drops held candidates and remembers their versions, so `update` and
 /// `refresh` don't hold them again.
 pub fn reject(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<i32, CliError> {
-    let git = Git::find(&ctx.path_var)?;
+    let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     let picked;
     let names = match picked_names(ctx, &ws, names, all, "reject") {

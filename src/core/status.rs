@@ -118,7 +118,7 @@ pub(crate) struct Inner {
 pub fn snapshot(ctx: &Ctx, filter: Option<&str>) -> Result<Snapshot, CliError> {
     let ws = commands::load(ctx)?;
     let planned = commands::plan_all(ctx, &ws, filter)?;
-    let git = Git::find(&ctx.path_var).ok();
+    let git = Git::for_ctx(ctx).ok();
     let uncommitted = commands::uncommitted(ctx, git.as_ref());
     let held_views = quarantine::held_views(ctx, &ws, git.as_ref());
     let in_sync = commands::in_sync(&ws, &planned, &uncommitted);
