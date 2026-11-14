@@ -1,0 +1,28 @@
+---
+source: tests/tui.rs
+expression: "mask(&{\n    let mut small = opened(&env, 80, 24); ch(&mut small, '3'); screen(&small)\n})"
+---
+ Overview !  Profiles  Items  Review !1  Discover                  colctl [VERSION]
+────────────────────────────────────────────────────────────────────────────────
+ 2 items across 3 profiles · 1 needs you
+ 1 claude · 2 kilo-claude · 3 codex
+
+   kind    name         1 2 3
+ › skill   alpha        ! ✓ –
+   source  superpowers  ✓ ✓ ✓
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ⏎ open · / filter · r reload · ? keys · q quit

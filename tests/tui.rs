@@ -874,3 +874,64 @@ fn ec8_21_control_characters_never_reach_the_terminal() {
     press(&mut m, KeyCode::Enter);
     assert!(!screen(&m).contains('\u{1b}'));
 }
+
+// ── Items (AC8-17) ──────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn ac8_17_every_item_with_its_state_in_each_profile() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '3');
+    let s = screen(&m);
+    assert!(s.contains("1 claude · 2 kilo-claude · 3 codex"), "{s}");
+    assert!(s.contains("1 needs you"), "{s}");
+    let alpha = view::rows(&m)[row_of(&m, "alpha")].to_string();
+    // Missing in claude, fine in kilo-claude, not in codex.
+    assert!(alpha.ends_with("! ✓ – "), "{alpha:?}");
+    insta::assert_snapshot!(
+        "items_80x24",
+        mask(&{
+            let mut small = opened(&env, 80, 24);
+            ch(&mut small, '3');
+            screen(&small)
+        })
+    );
+}
+
+#[test]
+fn ac8_17_problems_first_within_a_kind() {
+    let env = held_fixture();
+    env.source_skill("aaa");
+    env.ok(&["sync"]);
+    fs::remove_file(env.home.join(".claude/skills/alpha")).unwrap();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '3');
+    assert!(row_of(&m, "alpha") < row_of(&m, "aaa"));
+}
+
+#[test]
+fn ac8_17_filter_and_open_an_item() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '3');
+    let all = m.list_len();
+    ch(&mut m, '/');
+    for c in "alp".chars() {
+        ch(&mut m, c);
+    }
+    assert_eq!(m.list_len(), 1, "{}", screen(&m));
+    assert!(m.list_len() < all);
+    press(&mut m, KeyCode::Enter);
+    press(&mut m, KeyCode::Enter);
+    let s = screen(&m);
+    assert!(
+        matches!(&m.overlay, Some(Overlay::Detail { title, .. }) if title == "skill alpha"),
+        "{s}"
+    );
+    assert!(s.contains("missing  skills/alpha  → colctl sync"), "{s}");
+    assert!(s.contains("· Not in codex"), "{s}");
+    press(&mut m, KeyCode::Esc);
+    ch(&mut m, '/');
+    ch(&mut m, 'z');
+    assert!(screen(&m).contains("No items match \"alpz\""));
+}
