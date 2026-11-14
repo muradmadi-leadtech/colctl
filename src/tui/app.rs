@@ -372,9 +372,6 @@ impl Model {
 
 /// Applies `msg`, returning what to run.
 pub fn update(m: &mut Model, msg: Msg) -> Vec<Cmd> {
-    if !m.quit {
-        return Vec::new();
-    }
     // A tick or a stray mouse move changes nothing by itself; it must never hide a pending redraw.
     let quiet = match &msg {
         Msg::Tick(_) => true,

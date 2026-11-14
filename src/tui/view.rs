@@ -264,9 +264,6 @@ pub fn styled_verdict(t: Theme, text: &str) -> Line<'static> {
 
 /// Draws the whole screen.
 pub fn draw(m: &Model, f: &mut Frame) {
-    if !m.quit {
-        return;
-    }
     let t = theme(m);
     let a = area(m);
     if m.too_small() {

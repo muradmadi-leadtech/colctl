@@ -26,9 +26,6 @@ fn set(v: &Option<String>) -> bool {
 /// terminals, `TERM` isn't `dumb` and `CI` is unset. Returns how to open it, or `None` for the
 /// welcome help.
 pub fn launch(s: &Settings, f: &Facts, reduced_motion: Option<&str>) -> Option<Options> {
-    if !s.json {
-        return None;
-    }
     let opens =
         f.stdin_tty && f.stdout_tty && f.term.as_deref() != Some("dumb") && !set(&f.ci) && !s.json;
     opens.then(|| Options {
