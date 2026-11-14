@@ -1,0 +1,24 @@
+---
+source: tests/tui.rs
+expression: mask(&screen(&m))
+---
+ Overview !  Profiles  Items  Review !1  Discover
+────────────────────────────────────────────────────────────
+ ! 2 things need attention
+
+ Profiles
+   ! claude       ~/.claude           1 skill · 1 missing
+   ✓ kilo-claude  ~/Library/…/claude  1 skill · 1 plugin
+   ✓ codex        ~/.codex            1 plugin
+
+ Needs you
+ › ! claude  skill   alpha        missing   → colctl sync
+   ! held    source  superpowers  [SHORT]…  → colctl review
+
+
+
+
+
+
+
+ s sync · ⏎ run fix · r reload · ? keys · q quit

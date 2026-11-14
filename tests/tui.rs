@@ -1,9 +1,13 @@
 //! Cycle 8: the TUI. The model is driven with keys and mouse events, drawn into ratatui's
 //! TestBackend with motion off, and compared as text. Named after AC8-NN / EC8-NN.
 
+mod support;
+
 use colctl::core::run::{Job, Report};
+use colctl::ctx::Ctx;
 use colctl::error::CliError;
 use colctl::tui::app::{self, Cmd, JobEvent, Load, Model, Msg, Options, Overlay, Tab, ask, update};
+use colctl::tui::worker;
 use colctl::tui::{launch, view};
 use colctl::ui::term::{ColorChoice, Facts, Settings};
 use ratatui::Terminal;
@@ -12,6 +16,9 @@ use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::style::Color;
+use std::ffi::OsString;
+use std::fs;
+use support::Env;
 
 const PLAIN: Options = Options {
     color: false,
@@ -585,4 +592,279 @@ fn cursor_stays_in_range_and_on_screen() {
     assert_eq!(c, app::Cursor::default());
     c.move_by(1, 0, 10);
     assert_eq!(c, app::Cursor::default());
+}
+
+// ── Fixtures driven end to end ─────────────────────────────────────────────────────────────
+
+fn ctx(env: &Env) -> Ctx {
+    Ctx::from_vars(&[
+        ("HOME".into(), OsString::from(&env.home)),
+        ("PATH".into(), env.path.clone()),
+    ])
+    .unwrap()
+}
+
+/// Runs `cmds` (and whatever they lead to) to the end, inline.
+fn drive(env: &Env, m: &mut Model, cmds: Vec<Cmd>) {
+    let c = ctx(env);
+    let mut queue = cmds;
+    while !queue.is_empty() {
+        let next: Vec<Cmd> = std::mem::take(&mut queue);
+        for cmd in next {
+            for msg in worker::run_now(&c, &cmd, usize::from(m.width.saturating_sub(4))) {
+                queue.extend(update(m, msg));
+            }
+        }
+    }
+}
+
+/// A model with everything loaded from `env`.
+fn opened(env: &Env, w: u16, h: u16) -> Model {
+    let mut m = model(w, h);
+    let start = m.start();
+    drive(env, &mut m, start);
+    m
+}
+
+/// Commit ids and colctl's version masked, for snapshots.
+fn mask(text: &str) -> String {
+    let text = &text.replace(
+        &format!("colctl {}", env!("CARGO_PKG_VERSION")),
+        "colctl [VERSION]",
+    );
+    let mut out = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let run = chars[i..]
+            .iter()
+            .take_while(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+            .count();
+        let boundary = i == 0 || !chars[i - 1].is_ascii_alphanumeric();
+        let end = chars
+            .get(i + run)
+            .is_none_or(|c| !c.is_ascii_alphanumeric());
+        if boundary
+            && end
+            && (run == 7 || run == 40)
+            && chars[i..i + run].iter().any(|c| c.is_ascii_digit())
+        {
+            out.push_str(if run == 7 { "[SHORT]" } else { "[SHA]" });
+            i += run;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Three profiles, a source plugin with an update held, and a skill missing from one profile.
+fn held_fixture() -> Env {
+    let env = Env::new();
+    env.native();
+    env.kilo();
+    env.codex();
+    env.ok(&["init"]);
+    let (repo, url, _) = env.upstream("superpowers", true, true, Some("superpowers-dev"));
+    env.ok(&["add", "source", &url]);
+    env.upstream_commit(&repo, "v2");
+    env.ok(&["update"]);
+    env.source_skill("alpha");
+    env.ok(&["sync"]);
+    fs::remove_file(env.home.join(".claude/skills/alpha")).unwrap();
+    env
+}
+
+fn in_sync_fixture() -> Env {
+    let env = Env::new();
+    env.native();
+    env.kilo();
+    env.ok(&["init"]);
+    env.source_skill("alpha");
+    env.ok(&["sync"]);
+    env
+}
+
+fn row_of(m: &Model, text: &str) -> usize {
+    let rows = view::rows(m);
+    rows.iter()
+        .position(|l| l.to_string().contains(text))
+        .unwrap_or_else(|| panic!("no row with {text:?}"))
+}
+
+// ── Overview and Profiles (AC8-13 – 16) ─────────────────────────────────────────────────────
+
+#[test]
+fn ac8_13_overview_leads_with_the_status_verdict() {
+    let env = held_fixture();
+    let m = opened(&env, 100, 30);
+    let (_, out, _) = env.code(&["status", "--color", "never"]);
+    let cli = out.lines().next().unwrap();
+    let s = screen(&m);
+    assert_eq!(s.lines().nth(2).unwrap().trim(), cli, "{s}");
+    assert!(s.contains("Profiles") && s.contains("Needs you"), "{s}");
+    assert!(s.contains("claude") && s.contains("1 missing"), "{s}");
+    assert!(s.contains("→ colctl review superpowers"), "{s}");
+    assert!(s.lines().next().unwrap().contains("Overview !"), "{s}");
+    assert!(s.lines().next().unwrap().contains("Review !1"), "{s}");
+}
+
+#[test]
+fn ac8_13_snapshots_of_overview() {
+    let env = held_fixture();
+    for (w, h) in [(80, 24), (120, 40), (60, 20)] {
+        let m = opened(&env, w, h);
+        insta::assert_snapshot!(format!("overview_held_{w}x{h}"), mask(&screen(&m)));
+    }
+    let env = in_sync_fixture();
+    let m = opened(&env, 80, 24);
+    let s = screen(&m);
+    assert!(!s.contains("Needs you"), "{s}");
+    insta::assert_snapshot!("overview_in_sync_80x24", mask(&s));
+}
+
+#[test]
+fn ac8_14_a_review_fix_opens_the_review() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    m.cursor_mut().selected = row_of(&m, "colctl review superpowers");
+    let cmds = press(&mut m, KeyCode::Enter);
+    assert_eq!(m.tab, Tab::Review);
+    assert_eq!(cmds, [Cmd::Load(Load::Review("superpowers".into()))]);
+    drive(&env, &mut m, cmds);
+    assert!(matches!(&m.overlay, Some(Overlay::Detail { title, .. }) if title == "superpowers"));
+}
+
+#[test]
+fn ac8_14_a_writing_fix_asks_first() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    m.cursor_mut().selected = row_of(&m, "→ colctl sync");
+    assert!(press(&mut m, KeyCode::Enter).is_empty());
+    assert!(matches!(
+        &m.overlay,
+        Some(Overlay::Confirm {
+            job: Job::Sync(None),
+            ..
+        })
+    ));
+}
+
+#[test]
+fn ac8_15_sync_from_overview_ends_in_sync() {
+    let env = held_fixture();
+    // Leave only the missing skill to fix.
+    env.ok(&["reject", "superpowers"]);
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, 's');
+    let s = screen(&m);
+    assert!(s.contains("Make every profile match ~/.colctl."), "{s}");
+    assert!(s.contains("Profiles: claude, kilo-claude, codex"), "{s}");
+    let cmds = ch(&mut m, 'y');
+    assert_eq!(cmds, [Cmd::Run(Job::Sync(None))]);
+    // Progress arrives while it runs.
+    let c = ctx(&env);
+    let msgs = worker::run_now(&c, &cmds[0], 96);
+    let mut after = Vec::new();
+    for msg in msgs {
+        let finished = matches!(msg, Msg::Job(JobEvent::Finished(_)));
+        if finished {
+            let s = screen(&m);
+            assert!(s.contains("✓ claude"), "{s}");
+        }
+        after.extend(update(&mut m, msg));
+    }
+    drive(&env, &mut m, after);
+    let s = screen(&m);
+    assert!(s.contains("✓ All 3 profiles in sync"), "{s}");
+    assert_eq!(env.code(&["status"]).0, 0);
+}
+
+#[test]
+fn ac8_16_profiles_list_filter_open_and_sync_one() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '2');
+    assert_eq!(m.list_len(), 3);
+    insta::assert_snapshot!(
+        "profiles_80x24",
+        mask(&{
+            let mut small = opened(&env, 80, 24);
+            ch(&mut small, '2');
+            screen(&small)
+        })
+    );
+    ch(&mut m, '/');
+    for c in "kilo".chars() {
+        ch(&mut m, c);
+    }
+    assert_eq!(m.list_len(), 1);
+    assert!(screen(&m).contains("› kilo▏"));
+    press(&mut m, KeyCode::Enter);
+    assert!(!m.filter().focused);
+    press(&mut m, KeyCode::Enter);
+    let s = screen(&m);
+    assert!(
+        matches!(&m.overlay, Some(Overlay::Detail { title, .. }) if title == "kilo-claude"),
+        "{s}"
+    );
+    assert!(s.contains("skill") && s.contains("alpha"), "{s}");
+    press(&mut m, KeyCode::Esc);
+    ch(&mut m, 's');
+    assert!(matches!(
+        &m.overlay,
+        Some(Overlay::Confirm { job: Job::Sync(Some(p)), .. }) if p == "kilo-claude"
+    ));
+    ch(&mut m, 'n');
+    // Esc clears the filter.
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.list_len(), 3);
+    ch(&mut m, '/');
+    ch(&mut m, 'z');
+    assert!(screen(&m).contains("No profiles match \"z\""));
+}
+
+#[test]
+fn ec8_01_not_set_up() {
+    let env = Env::new();
+    env.native();
+    let m = opened(&env, 80, 24);
+    let s = screen(&m);
+    assert!(s.contains("colctl isn't set up yet"), "{s}");
+    assert!(s.contains("Quit and run colctl init."), "{s}");
+}
+
+#[test]
+fn ec8_02_a_broken_config_says_why_and_r_retries() {
+    let env = in_sync_fixture();
+    fs::write(env.source.join("config.toml"), "this is = = not toml").unwrap();
+    let mut m = opened(&env, 100, 24);
+    let s = screen(&m);
+    assert!(s.contains("✗ "), "{s}");
+    assert!(s.contains("r tries again"), "{s}");
+    let cmds = ch(&mut m, 'r');
+    assert!(cmds.contains(&Cmd::Load(Load::Snapshot)));
+}
+
+#[test]
+fn ec8_03_no_profiles() {
+    let env = Env::new();
+    env.ok(&["init"]);
+    let m = opened(&env, 80, 24);
+    let s = screen(&m);
+    assert!(s.contains("! No profiles registered"), "{s}");
+    assert!(s.contains("colctl init"), "{s}");
+}
+
+#[test]
+fn ec8_21_control_characters_never_reach_the_terminal() {
+    let env = in_sync_fixture();
+    env.source_skill("evil\u{1b}[31mred");
+    let mut m = opened(&env, 100, 30);
+    let s = screen(&m);
+    assert!(!s.contains('\u{1b}'), "{s:?}");
+    ch(&mut m, '2');
+    press(&mut m, KeyCode::Enter);
+    assert!(!screen(&m).contains('\u{1b}'));
 }

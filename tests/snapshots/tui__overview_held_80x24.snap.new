@@ -1,0 +1,29 @@
+---
+source: tests/tui.rs
+assertion_line: 718
+expression: mask(&screen(&m))
+---
+ Overview !  Profiles  Items  Review !1  Discover                  colctl [VERSION]
+────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ s sync · ⏎ run fix · r reload · ? keys · q quit

@@ -299,7 +299,8 @@ pub fn draw(m: &Model, f: &mut Frame) {
     f.render_widget(Paragraph::new(Line::from(spans)), r.tabs);
     let version = format!("colctl {} ", env!("CARGO_PKG_VERSION"));
     let vw = text_width(&version) as u16;
-    if r.tabs.width > vw {
+    let tabs_end = tab_spans(m).last().map_or(0, |(.., end)| *end);
+    if r.tabs.width >= tabs_end + 2 + vw {
         f.render_widget(
             Paragraph::new(Span::styled(version, t.style(Token::Muted))),
             Rect::new(r.tabs.width - vw, 0, vw, 1),
