@@ -39,6 +39,8 @@ pub struct ItemRow {
     pub state: String,
     pub tone: Tone,
     pub hint: Option<String>,
+    /// Where it lives in the profile: `skills/foo`, `agents/foo.md`, `CLAUDE.md`, `plugin p@m`.
+    pub address: String,
 }
 
 /// One registered profile.
@@ -239,6 +241,7 @@ fn profile(ctx: &Ctx, p: &Planned, agents: Option<&str>) -> Profile {
                 state: i.state.as_str().to_string(),
                 tone: tone(i.state),
                 hint: i.hint.clone(),
+                address: i.address.clone(),
             })
             .collect(),
     }

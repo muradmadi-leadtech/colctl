@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! What each tab shows and does (design spec § Screens). Every fact comes from `core`, every action
 //! is a `core::run::Job` the CLI also runs.
 
@@ -49,6 +50,18 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
                 let lines = profile_detail(p);
                 m.overlay = Some(Overlay::Detail {
                     title: p.name.clone(),
+                    lines,
+                    scroll: 0,
+                    held: None,
+                });
+            }
+            Vec::new()
+        }
+        (Tab::Items, Action::Open) if m.quit => {
+            if let Some(item) = focused_item(m) {
+                let (title, lines) = item_detail(m, &item);
+                m.overlay = Some(Overlay::Detail {
+                    title,
                     lines,
                     scroll: 0,
                     held: None,
@@ -460,4 +473,224 @@ fn profile_detail(p: &Profile) -> Vec<String> {
         out.push(line.trim_end().to_string());
     }
     out
+}
+
+// ── Items (AC8-17) ──────────────────────────────────────────────────────────────────────────
+
+/// Kinds in the order Items lists them.
+const KINDS: [&str; 5] = ["instructions", "skill", "agent", "plugin", "source"];
+
+/// One item across every profile that has it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemAcross {
+    pub kind: String,
+    pub name: String,
+    /// Per profile, in profile order: its state there, or `None` when that profile doesn't have it.
+    pub states: Vec<Option<Tone>>,
+}
+
+impl ItemAcross {
+    fn needs_you(&self) -> bool {
+        self.states
+            .iter()
+            .any(|s| matches!(s, Some(Tone::Attention | Tone::Failed)))
+    }
+}
+
+/// Every item, by kind, problems first, then by name; filtered by the Items filter.
+pub fn items_across(m: &Model) -> Vec<ItemAcross> {
+    let Some(s) = m.snapshot.ready() else {
+        return Vec::new();
+    };
+    let f = m.filters[2].text.to_lowercase();
+    let mut out: Vec<ItemAcross> = Vec::new();
+    for (pi, p) in s.profiles.iter().enumerate() {
+        for i in p.items.iter().filter(|i| KINDS.contains(&i.kind.as_str())) {
+            if !f.is_empty() && !i.name.to_lowercase().contains(&f) {
+                continue;
+            }
+            let at = match out
+                .iter()
+                .position(|a| a.kind == i.kind && a.name == i.name)
+            {
+                Some(at) => at,
+                None => {
+                    out.push(ItemAcross {
+                        kind: i.kind.clone(),
+                        name: i.name.clone(),
+                        states: vec![None; s.profiles.len()],
+                    });
+                    out.len() - 1
+                }
+            };
+            out[at].states[pi] = Some(i.tone);
+        }
+    }
+    let rank = |k: &str| KINDS.iter().position(|x| *x == k).unwrap_or(KINDS.len());
+    out.sort_by(|a, b| {
+        rank(&a.kind)
+            .cmp(&rank(&b.kind))
+            .then(b.needs_you().cmp(&a.needs_you()))
+            .then(a.name.cmp(&b.name))
+    });
+    out
+}
+
+fn focused_item(m: &Model) -> Option<ItemAcross> {
+    items_across(m).get(m.cursor().selected).cloned()
+}
+
+fn items(m: &Model, t: Theme) -> Body {
+    let cols = usize::from(m.width.saturating_sub(4));
+    let Some(s) = m.snapshot.ready() else {
+        return Body {
+            header: not_ready(t, &m.snapshot),
+            ..Body::default()
+        };
+    };
+    let all = items_across(m);
+    let mut header = Vec::new();
+    let total = {
+        let mut names: Vec<(&str, &str)> = s
+            .profiles
+            .iter()
+            .flat_map(|p| p.items.iter())
+            .filter(|i| KINDS.contains(&i.kind.as_str()))
+            .map(|i| (i.kind.as_str(), i.name.as_str()))
+            .collect();
+        names.sort();
+        names.dedup();
+        names.len()
+    };
+    let problems = all.iter().filter(|a| a.needs_you()).count();
+    let mut lead = vec![Span::raw(format!(
+        "{total} item{} across {} profile{}",
+        if total == 1 { "" } else { "s" },
+        s.profiles.len(),
+        if s.profiles.len() == 1 { "" } else { "s" }
+    ))];
+    if problems > 0 {
+        lead.push(Span::styled(
+            format!(
+                " · {problems} need{} you",
+                if problems == 1 { "s" } else { "" }
+            ),
+            t.style(Token::Attention),
+        ));
+    }
+    header.push(Line::from(lead));
+    // The legend: profile numbers.
+    let legend: Vec<String> = s
+        .profiles
+        .iter()
+        .enumerate()
+        .map(|(i, p)| format!("{} {}", i + 1, escape(&p.name)))
+        .collect();
+    header.push(Line::styled(
+        cut(&legend.join(" · "), cols),
+        t.style(Token::Muted),
+    ));
+    header.push(Line::default());
+    if let Some(l) = filter_line(t, m, "items") {
+        header.push(l);
+        header.push(Line::default());
+    }
+    let n = s.profiles.len();
+    let marks_w = 2 * n;
+    let kind_w = all.iter().map(|a| width(&a.kind)).max().unwrap_or(4);
+    let name_room = cols.saturating_sub(2 + kind_w + 2 + 2 + marks_w).max(8);
+    let name_w = all
+        .iter()
+        .map(|a| width(&escape(&a.name)))
+        .max()
+        .unwrap_or(0)
+        .min(name_room);
+    if !all.is_empty() {
+        let numbers: String = (1..=n).map(|i| format!("{:<2}", i % 10)).collect();
+        header.push(Line::styled(
+            format!(
+                "  {}  {}  {}",
+                pad("kind", kind_w),
+                pad("name", name_w),
+                numbers.trim_end()
+            ),
+            t.style(Token::Muted),
+        ));
+    }
+    let rows = all
+        .iter()
+        .map(|a| {
+            let mut spans = vec![
+                Span::styled(pad(&a.kind, kind_w), t.style(Token::Muted)),
+                Span::raw("  "),
+                Span::styled(
+                    pad(&cut(&escape(&a.name), name_w), name_w),
+                    t.style(Token::Name),
+                ),
+                Span::raw("  "),
+            ];
+            for st in &a.states {
+                match st {
+                    Some(tone) => spans.push(Span::styled(
+                        symbol(*tone).to_string(),
+                        t.style((*tone).into()),
+                    )),
+                    None => spans.push(Span::styled("–", t.style(Token::Muted))),
+                }
+                spans.push(Span::raw(" "));
+            }
+            Line::from(spans)
+        })
+        .collect();
+    let empty = Some(if m.filter().text.is_empty() {
+        Line::styled("No items yet", t.style(Token::Muted))
+    } else {
+        Line::styled(
+            format!("No items match \"{}\"", escape(&m.filter().text)),
+            t.style(Token::Muted),
+        )
+    });
+    Body {
+        header,
+        rows,
+        empty,
+    }
+}
+
+/// One item in full: each profile's state, where it lives there, and its fix.
+fn item_detail(m: &Model, a: &ItemAcross) -> (String, Vec<String>) {
+    let title = format!("{} {}", a.kind, escape(&a.name));
+    let Some(s) = m.snapshot.ready() else {
+        return (title, Vec::new());
+    };
+    let name_w = s.profiles.iter().map(|p| width(&p.name)).max().unwrap_or(0);
+    let mut lines = Vec::new();
+    let mut missing = Vec::new();
+    for p in &s.profiles {
+        match p
+            .items
+            .iter()
+            .find(|i| i.kind == a.kind && i.name == a.name)
+        {
+            Some(i) => {
+                let mut line = format!(
+                    "{} {}  {}  {}",
+                    symbol(i.tone),
+                    pad(&escape(&p.name), name_w),
+                    i.state,
+                    escape(&i.address)
+                );
+                if let Some(h) = &i.hint {
+                    line.push_str(&format!("  → {}", escape(h)));
+                }
+                lines.push(line);
+            }
+            None => missing.push(escape(&p.name)),
+        }
+    }
+    if !missing.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("· Not in {}", missing.join(", ")));
+    }
+    (title, lines)
 }
