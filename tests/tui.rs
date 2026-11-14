@@ -1096,3 +1096,156 @@ fn ec8_18_approved_elsewhere_meanwhile() {
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.held_count(), 0);
 }
+
+// ── Discover (AC8-22, AC8-23) ───────────────────────────────────────────────────────────────
+
+/// A Claude profile that knows one marketplace with "tool", "toolbox" and "local".
+fn catalog_fixture() -> Env {
+    let env = Env::new();
+    let native = env.native();
+    env.ok(&["init"]);
+    let market = env.home.parent().unwrap().join("markets/official");
+    let write = |path: &std::path::Path, v: serde_json::Value| {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, v.to_string()).unwrap();
+    };
+    write(
+        &market.join(".claude-plugin/marketplace.json"),
+        serde_json::json!({"name": "official", "plugins": [
+            {"name": "tool", "description": "A tool", "author": {"name": "Ann"},
+             "source": {"source": "github", "repo": "ann/tool"}},
+            {"name": "toolbox", "description": "Many tools", "author": {"name": "Bo"},
+             "source": {"source": "github", "repo": "bo/toolbox"}},
+            {"name": "local", "description": "A local one", "source": "./local"}]}),
+    );
+    write(
+        &native.join("plugins/known_marketplaces.json"),
+        serde_json::json!({"official": {"source": {"source": "github", "repo": "o/official"},
+                              "installLocation": market.display().to_string()}}),
+    );
+    env
+}
+
+#[test]
+fn ac8_08_discover_says_it_is_loading() {
+    let mut m = model(80, 24);
+    ch(&mut m, '5');
+    assert!(screen(&m).contains("Loading catalogs…"));
+}
+
+#[test]
+fn ac8_22_search_as_you_type() {
+    let env = catalog_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '5');
+    let s = screen(&m);
+    assert!(s.contains("3 of 3 plugins · 1 catalog"), "{s}");
+    insta::assert_snapshot!(
+        "discover_80x24",
+        mask(&{
+            let mut small = opened(&env, 80, 24);
+            ch(&mut small, '5');
+            screen(&small)
+        })
+    );
+    ch(&mut m, '/');
+    for c in "tl".chars() {
+        ch(&mut m, c);
+    }
+    // Letters in order: tool and toolbox, the closer match first.
+    let s = screen(&m);
+    assert!(s.contains("2 of 3 plugins"), "{s}");
+    assert!(view::rows(&m)[0].to_string().contains("tool "), "{s}");
+    // The same order colctl search gives.
+    let (_, out, _) = env.code(&["search", "tl", "--color", "never"]);
+    let cli: Vec<String> = out
+        .lines()
+        .filter(|l| l.contains("@official"))
+        .map(|l| {
+            l.split_whitespace()
+                .next()
+                .unwrap()
+                .split('@')
+                .next()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    let ours: Vec<String> = view::rows(&m)
+        .iter()
+        .map(|l| l.to_string().split_whitespace().next().unwrap().to_string())
+        .collect();
+    assert_eq!(ours, cli);
+    ch(&mut m, 'z');
+    assert!(screen(&m).contains("No plugins match \"tlz\""));
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.list_len(), 3);
+}
+
+#[test]
+fn ec8_26_spaces_list_everything() {
+    let env = catalog_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '5');
+    ch(&mut m, '/');
+    ch(&mut m, ' ');
+    assert_eq!(m.list_len(), 3);
+}
+
+#[test]
+fn ac8_23_show_and_add() {
+    let env = catalog_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '5');
+    m.cursor_mut().selected = row_of(&m, "local");
+    let cmds = press(&mut m, KeyCode::Enter);
+    assert_eq!(cmds, [Cmd::Load(Load::Show("local@official".into()))]);
+    drive(&env, &mut m, cmds);
+    let Some(Overlay::Detail { lines, .. }) = &m.overlay else {
+        panic!("{:?}", m.overlay);
+    };
+    let (_, out, _) = env.code(&["show", "local@official", "--color", "never", "--no-pager"]);
+    assert_eq!(lines[0], out.lines().next().unwrap());
+    press(&mut m, KeyCode::Esc);
+    // "tool" lives in a GitHub repo: adding it is a source add, which would clone; check the ask.
+    m.cursor_mut().selected = row_of(&m, "tool ");
+    ch(&mut m, 'a');
+    let s = screen(&m);
+    assert!(
+        s.contains("Add tool") && s.contains("Runs colctl add source"),
+        "{s}"
+    );
+    ch(&mut m, 'n');
+}
+
+#[test]
+fn ac8_23_what_cannot_be_added_says_why() {
+    let env = catalog_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '5');
+    if let app::Data::Ready(c) = &mut m.catalog {
+        for p in &mut c.plugins {
+            p.add = "already source plugin tool".into();
+        }
+    }
+    assert!(ch(&mut m, 'a').is_empty());
+    assert!(m.overlay.is_none());
+    assert!(
+        m.toast
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("already source plugin tool")
+    );
+}
+
+#[test]
+fn ec8_04_no_catalogs() {
+    let env = Env::new();
+    env.native();
+    env.ok(&["init"]);
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '5');
+    let s = screen(&m);
+    assert!(s.contains("! No catalogs found"), "{s}");
+}

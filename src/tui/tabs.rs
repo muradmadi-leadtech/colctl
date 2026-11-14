@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! What each tab shows and does (design spec § Screens). Every fact comes from `core`, every action
 //! is a `core::run::Job` the CLI also runs.
 
@@ -19,11 +20,7 @@ pub fn body(m: &Model, t: Theme) -> Body {
         Tab::Profiles => profiles(m, t),
         Tab::Items => items(m, t),
         Tab::Review => review(m, t),
-        tab => Body {
-            header: vec![Line::styled(tab.title().to_string(), t.style(Token::Name))],
-            rows: Vec::new(),
-            empty: None,
-        },
+        Tab::Discover => Body::default(),
     }
 }
 
@@ -103,6 +100,29 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             ],
             Job::Update(Vec::new()),
         ),
+        (Tab::Discover, Action::Open) if m.quit => match focused_plugin(m) {
+            Some(p) => vec![Cmd::Load(Load::Show(p.ids[0].clone()))],
+            None => Vec::new(),
+        },
+        (Tab::Discover, Action::Add) if m.quit => match focused_plugin(m) {
+            Some(p) => match crate::core::discover::add_words(&p) {
+                Ok(words) => {
+                    let body = vec![
+                        format!("Runs colctl {}", words.join(" ")),
+                        "and syncs every profile.".into(),
+                    ];
+                    app::ask(m, format!("Add {}", p.name), body, Job::Add(words))
+                }
+                Err(why) => {
+                    m.toast = Some(app::Toast {
+                        text: format!("· {}: {}", p.name, why),
+                        until: Some(m.now + app::TOAST_MS),
+                    });
+                    Vec::new()
+                }
+            },
+            None => Vec::new(),
+        },
         (_, Action::NextFile | Action::PrevFile) => {
             if let Some(Overlay::Detail { lines, scroll, .. }) = &mut m.overlay {
                 let is_file = |l: &String| l.trim_start().starts_with("diff --git ");
@@ -893,6 +913,137 @@ fn review(m: &Model, t: Theme) -> Body {
             Line::from(spans)
         })
         .collect();
+    Body {
+        header,
+        rows,
+        empty,
+    }
+}
+
+// ── Discover (AC8-22, AC8-23) ───────────────────────────────────────────────────────────────
+
+/// The plugins matching the search line, ranked as `colctl search` ranks them, and how many in all.
+pub fn results(m: &Model) -> (Vec<crate::search::Plugin>, usize) {
+    let Some(c) = m.catalog.ready() else {
+        return (Vec::new(), 0);
+    };
+    let q = crate::search::Query {
+        terms: m.filters[4]
+            .text
+            .split_whitespace()
+            .map(String::from)
+            .collect(),
+        limit: 0,
+        ..crate::search::Query::default()
+    };
+    crate::core::discover::rank(&c.plugins, &q)
+}
+
+fn focused_plugin(m: &Model) -> Option<crate::search::Plugin> {
+    results(m).0.into_iter().nth(m.cursor().selected)
+}
+
+fn discover(m: &Model, t: Theme) -> Body {
+    let cols = usize::from(m.width.saturating_sub(4));
+    let c = match &m.catalog {
+        Data::Ready(c) => c,
+        Data::Loading => {
+            return Body {
+                header: vec![Line::styled("Loading catalogs…", t.style(Token::Muted))],
+                ..Body::default()
+            };
+        }
+        Data::Failed(e) => {
+            return Body {
+                header: error_lines(t, e),
+                ..Body::default()
+            };
+        }
+    };
+    let f = m.filter();
+    let mut search = vec![
+        Span::styled("› ", t.style(Token::Accent)),
+        Span::raw(f.text.clone()),
+    ];
+    if f.focused {
+        search.push(Span::styled("▏", t.style(Token::Accent)));
+    } else if f.text.is_empty() {
+        search.push(Span::styled("/ to search", t.style(Token::Muted)));
+    }
+    let mut header = vec![Line::from(search)];
+    if c.plugins.is_empty() {
+        header.push(Line::default());
+        header.push(Line::styled(
+            "! No catalogs found",
+            t.style(Token::Attention),
+        ));
+        header.push(Line::styled(
+            "hint: start Claude or Codex once, or add a marketplace to config.toml",
+            t.style(Token::Muted),
+        ));
+        return Body {
+            header,
+            ..Body::default()
+        };
+    }
+    let (shown, _) = results(m);
+    header.push(Line::styled(
+        format!(
+            "{} of {} plugins · {} catalog{}",
+            shown.len(),
+            c.plugins.len(),
+            c.catalogs,
+            if c.catalogs == 1 { "" } else { "s" }
+        ),
+        t.style(Token::Muted),
+    ));
+    for w in &c.warnings {
+        header.push(Line::styled(
+            cut(&format!("! {}", escape(w)), cols),
+            t.style(Token::Attention),
+        ));
+    }
+    header.push(Line::default());
+    let name_w = shown
+        .iter()
+        .map(|p| width(&escape(&p.name)))
+        .max()
+        .unwrap_or(0)
+        .min(28);
+    let dev_w = shown
+        .iter()
+        .map(|p| width(&escape(&p.developer)))
+        .max()
+        .unwrap_or(0)
+        .min(18);
+    let desc_w = cols.saturating_sub(2 + name_w + 2 + dev_w + 2 + 2).max(10);
+    let rows = shown
+        .iter()
+        .map(|p| {
+            let installed = !p.installed.is_empty();
+            Line::from(vec![
+                Span::styled(
+                    pad(&cut(&escape(&p.name), name_w), name_w),
+                    t.style(Token::Name),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    pad(&cut(&escape(&p.developer), dev_w), dev_w),
+                    t.style(Token::Muted),
+                ),
+                Span::raw("  "),
+                Span::raw(pad(&cut(&escape(&p.description), desc_w), desc_w)),
+                Span::styled(
+                    if installed { " ✓" } else { "  " }.to_string(),
+                    t.style(Token::Ok),
+                ),
+            ])
+        })
+        .collect();
+    let empty = Some(Line::styled(
+        format!("No plugins match \"{}\"", escape(f.text.trim())),
+        t.style(Token::Muted),
+    ));
     Body {
         header,
         rows,
