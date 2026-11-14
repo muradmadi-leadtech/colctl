@@ -562,3 +562,77 @@ mod tests {
         assert_eq!(d[0].catalogs, vec!["m", "n"]);
     }
 }
+
+#[cfg(test)]
+mod fuzzy_tests {
+    use super::*;
+
+    fn plugin(name: &str, description: &str, keywords: &[&str]) -> Plugin {
+        merge(&[Entry {
+            id: format!("{name}@m"),
+            name: name.into(),
+            catalog: "m".into(),
+            tool: "claude".into(),
+            kind: "plugin".into(),
+            description: description.into(),
+            keywords: keywords.iter().map(|k| k.to_string()).collect(),
+            ..Entry::default()
+        }])
+        .remove(0)
+    }
+
+    fn names(plugins: &[Plugin], terms: &[&str]) -> Vec<String> {
+        let q = Query {
+            terms: terms.iter().map(|t| t.to_string()).collect(),
+            ..Query::default()
+        };
+        search(plugins, &q).0.into_iter().map(|p| p.name).collect()
+    }
+
+    fn catalog() -> Vec<Plugin> {
+        vec![
+            plugin("superpowers", "Skills for planning and review", &["tdd"]),
+            plugin("superpowers-lab", "Experimental skills", &[]),
+            plugin("spr-pw-tools", "Sprint and power tools", &[]),
+            plugin("qdrant", "Vector search", &["embeddings"]),
+            plugin("planner", "Plans", &[]),
+        ]
+    }
+
+    #[test]
+    fn ac8_05_letters_in_order_match_names() {
+        let found = names(&catalog(), &["sprpw"]);
+        assert!(found.contains(&"superpowers".to_string()), "{found:?}");
+        assert!(found.contains(&"superpowers-lab".to_string()), "{found:?}");
+        assert!(!found.contains(&"qdrant".to_string()), "{found:?}");
+        // Keywords too.
+        assert_eq!(names(&catalog(), &["embdg"]), ["qdrant"]);
+    }
+
+    #[test]
+    fn ac8_05_what_matched_before_still_matches_first() {
+        // A substring hit anywhere (here a description) ranks above every fuzzy hit.
+        let found = names(&catalog(), &["plan"]);
+        assert_eq!(found[0], "planner", "{found:?}");
+        assert_eq!(found[1], "superpowers", "{found:?}");
+        // Exact name first, as in 2.3.
+        assert_eq!(names(&catalog(), &["superpowers"])[0], "superpowers");
+    }
+
+    #[test]
+    fn ac8_05_every_word_must_match() {
+        assert_eq!(names(&catalog(), &["sprpw", "lab"]), ["superpowers-lab"]);
+        assert!(names(&catalog(), &["sprpw", "zzz"]).is_empty());
+    }
+
+    #[test]
+    fn ac8_05_descriptions_never_match_fuzzily() {
+        // "vctr" is in order in "Vector search" but descriptions only match as substrings.
+        assert!(names(&catalog(), &["vctr"]).is_empty());
+    }
+
+    #[test]
+    fn ec8_26_no_terms_lists_everything() {
+        assert_eq!(names(&catalog(), &[]).len(), 5);
+    }
+}
