@@ -1,0 +1,28 @@
+---
+source: tests/tui.rs
+expression: mask(&s)
+---
+ Overview  Profiles  Items  Review  Discover                       colctl [VERSION]
+────────────────────────────────────────────────────────────────────────────────
+ ✓ All 2 profiles in sync · 0 sources · nothing held for review
+
+ Profiles
+   ✓ claude       ~/.claude            1 skill
+   ✓ kilo-claude  ~/…/profiles/claude  1 skill
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ s sync · ⏎ run fix · r reload · ? keys · q quit

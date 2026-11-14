@@ -1,0 +1,44 @@
+---
+source: tests/tui.rs
+expression: mask(&screen(&m))
+---
+ Overview !  Profiles  Items  Review !1  Discover                                                          colctl [VERSION]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ! 2 things need attention
+
+ Profiles
+   ! claude       ~/.claude                    1 skill · 1 plugin · 1 missing
+   ✓ kilo-claude  ~/Library/…/profiles/claude  1 skill · 1 plugin
+   ✓ codex        ~/.codex                     1 plugin
+
+ Needs you
+ › ! claude  skill   alpha        missing            → colctl sync
+   ! held    source  superpowers  [SHORT] → [SHORT]  → colctl review superpowers
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ s sync · ⏎ run fix · r reload · ? keys · q quit
