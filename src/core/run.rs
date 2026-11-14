@@ -73,6 +73,18 @@ pub fn run(
     width: usize,
     observer: Box<dyn Observer>,
 ) -> Result<Report, CliError> {
-    let _ = (ctx, job, width, observer, commands::sync, Out::default);
-    Err(CliError::usage("not built yet"))
+    let (out, sink) = Out::capture(width, observer);
+    let mut ctx = ctx.clone();
+    ctx.out = out;
+    let exit = match job {
+        Job::Sync(h) => commands::sync(&ctx, h.as_deref(), false),
+        Job::Update(names) => commands::update(&ctx, names, false, None, false),
+        Job::Approve(names) => commands::approve(&ctx, names, names.is_empty(), false),
+        Job::Reject(names) => commands::reject(&ctx, names, names.is_empty(), false),
+    }?;
+    Ok(Report {
+        exit,
+        lines: sink.lines(),
+        errors: sink.errors(),
+    })
 }
