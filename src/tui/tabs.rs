@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! What each tab shows and does (design spec § Screens). Every fact comes from `core`, every action
 //! is a `core::run::Job` the CLI also runs.
 
@@ -18,6 +17,7 @@ pub fn body(m: &Model, t: Theme) -> Body {
     match m.tab {
         Tab::Overview => overview(m, t),
         Tab::Profiles => profiles(m, t),
+        Tab::Items => items(m, t),
         tab => Body {
             header: vec![Line::styled(tab.title().to_string(), t.style(Token::Name))],
             rows: Vec::new(),
@@ -57,7 +57,7 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             }
             Vec::new()
         }
-        (Tab::Items, Action::Open) if m.quit => {
+        (Tab::Items, Action::Open) => {
             if let Some(item) = focused_item(m) {
                 let (title, lines) = item_detail(m, &item);
                 m.overlay = Some(Overlay::Detail {
