@@ -587,7 +587,7 @@ pub fn sync(ctx: &Ctx, filter: Option<&str>, dry_run: bool) -> Result<i32, CliEr
             .lines(run_view::plan(ctx, &plan_all(ctx, &ws, filter)?));
         return Ok(0);
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     run_sync(ctx, &git, filter)
 }
 
@@ -684,7 +684,7 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
         }
         fs::create_dir_all(ctx.source.join(STATE_DIR))
             .map_err(|e| CliError::usage(format!("creating {}: {e}", ctx.source.display())))?;
-        let _lock = Lock::acquire(&ctx.source)?;
+        let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
         ensure_layout(ctx)?;
         let harnesses: Vec<(String, String, Kind)> = found
             .iter()
@@ -761,7 +761,7 @@ pub fn init(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
             });
             return Ok(0);
         }
-        let _lock = Lock::acquire(&ctx.source)?;
+        let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
         ensure_layout(ctx)?;
         if !additions.is_empty() {
             let mut updated = text.clone();
@@ -939,7 +939,7 @@ pub fn add_skill(
     if dry_or_write(ctx, dry_run, &format!("add skill {name} from {shown}")) {
         return Ok(0);
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     commit_pending(&git, ctx)?;
     let clone_dir = tempfile::tempdir().map_err(|e| CliError::usage(e.to_string()))?;
     let root = if is_url(from) {
@@ -998,7 +998,7 @@ pub fn add_agent(ctx: &Ctx, file: &Path, dry_run: bool) -> Result<i32, CliError>
     ) {
         return Ok(0);
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     commit_pending(&git, ctx)?;
     fs::create_dir_all(dest.parent().unwrap_or(&ctx.source))
         .and_then(|_| fs::copy(file, &dest))
@@ -1069,7 +1069,7 @@ pub fn add_plugin(
     ) {
         return Ok(0);
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     commit_pending(&git, ctx)?;
     write_config(ctx, &text)?;
     commit(&git, ctx, &format!("colctl: add {label} {id}"))?;
@@ -1148,7 +1148,7 @@ pub fn rm(
     ) {
         return Ok(EXIT_DRIFT);
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     commit_pending(&git, ctx)?;
     match &path {
         Some(p) => fsx::remove_any(p).map_err(|e| CliError::usage(format!("{e:#}")))?,
@@ -1580,7 +1580,7 @@ pub fn adopt(
             .lines(item_lines(ctx, Token::Info, &verdict, &[], &said));
         return Ok(0);
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     commit_pending(&git, ctx)?;
     let mut refused = 0;
     let mut seen = false;
@@ -1820,7 +1820,7 @@ pub fn add_source(
     ) {
         return Ok(0);
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     commit_pending(&git, ctx)?;
     let guess = wanted.from_catalog && !plugin_given;
     let (pinned, _, plugin) = clone_and_check(

@@ -267,6 +267,12 @@ pub struct Lock {
 impl Lock {
     /// Takes the lock, reclaiming it from a pid that is no longer running (EC-27).
     pub fn acquire(source: &Path) -> Result<Lock, CliError> {
+        Self::acquire_with(source, &crate::ui::Out::default())
+    }
+
+    /// [`Lock::acquire`], warning through `out` (a captured run's warnings never reach the
+    /// terminal, cycle 8).
+    pub fn acquire_with(source: &Path, out: &crate::ui::Out) -> Result<Lock, CliError> {
         let dir = state_dir(source);
         fs::create_dir_all(&dir)
             .map_err(|e| CliError::usage(format!("creating {}: {e}", dir.display())))?;
@@ -291,7 +297,7 @@ impl Lock {
                             path.display()
                         )));
                     }
-                    crate::ui::Out::default().warn(&format!(
+                    out.warn(&format!(
                         "reclaimed a stale lock from pid {}",
                         holder.trim()
                     ));

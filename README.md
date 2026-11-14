@@ -29,6 +29,9 @@ keeps a single copy of all of it in `~/.colctl` and points every profile at it, 
   result from its own repo.
 - **Readable output**: every command leads with a verdict, lists only what needs you (with the command that fixes it),
   shows live progress in a terminal, and asks before destructive steps. `--json` and exit codes are for scripts.
+- **A full-screen view**: `colctl` on its own, in a terminal, opens a TUI over all of the above: what's in sync and
+  what needs you, every item across every profile, the review queue with diffs, and a search across every catalog.
+  Sync, update, approve, reject and add are one key away, and each runs exactly what its command would.
 - **`~/.colctl` is a local git repo**, committed after every change, so you can see and undo what changed.
 
 colctl never overwrites or deletes anything it didn't create. What it finds that isn't its own is reported, and
@@ -52,6 +55,7 @@ colctl init      # create ~/.colctl and register the Claude profiles found on th
 colctl adopt     # move the skills, agents, CLAUDE.md and plugins you already have into ~/.colctl
 colctl status    # what's in sync and what isn't (exit 1 if anything needs attention)
 colctl sync      # make every profile match ~/.colctl
+colctl           # in a terminal: the full-screen view of all of it
 ```
 
 After that, edit `~/.colctl/AGENTS.md` and `~/.colctl/skills/*` directly, or use `colctl add skill|agent|plugin` and
@@ -61,7 +65,8 @@ After that, edit `~/.colctl/AGENTS.md` and `~/.colctl/skills/*` directly, or use
 
 The docs follow [Diataxis](https://diataxis.fr):
 
-- **Tutorial:** [Your first sync](docs/tutorials/first-sync.md)
+- **Tutorial:** [Your first sync](docs/tutorials/first-sync.md) ·
+  [A first look around the TUI](docs/tutorials/a-first-look-around-the-tui.md)
 - **How-to:** [Add a Claude profile](docs/how-to/add-a-claude-profile.md) · [Add Codex](docs/how-to/add-codex.md) ·
   [Adopt what you already have](docs/how-to/adopt-what-you-have.md) · [Add a plugin](docs/how-to/add-a-plugin.md) ·
   [Take over skills a tool installed](docs/how-to/take-over-skills-a-tool-installed.md) ·
@@ -70,14 +75,16 @@ The docs follow [Diataxis](https://diataxis.fr):
   [Find a plugin and add it from its source](docs/how-to/find-and-add-a-plugin.md) ·
   [Use a Claude-only plugin in Codex](docs/how-to/use-a-claude-only-plugin-in-codex.md)
 - **Reference:** [commands](docs/reference/commands.md) · [`config.toml`](docs/reference/config.md) ·
-  [exit codes](docs/reference/exit-codes.md) · [output](docs/reference/output.md) · [the `.state` folder](docs/reference/state.md)
+  [exit codes](docs/reference/exit-codes.md) · [output](docs/reference/output.md) · [the TUI](docs/reference/tui.md) ·
+  [the `.state` folder](docs/reference/state.md)
 - **Explanation:** [Links, not copies](docs/explanation/links-not-copies.md) ·
   [What "owned" means](docs/explanation/ownership.md) ·
   [Codex and the shared skills folder](docs/explanation/codex-and-the-shared-skills-folder.md) ·
   [Plugins from source](docs/explanation/plugins-from-source.md) · [Quarantine](docs/explanation/quarantine.md) ·
   [Where the catalogs come from](docs/explanation/catalogs.md) ·
   [How colctl talks to you](docs/explanation/how-colctl-talks.md) ·
-  [Converting plugins](docs/explanation/converting-plugins.md)
+  [Converting plugins](docs/explanation/converting-plugins.md) ·
+  [The TUI and the CLI](docs/explanation/the-tui-and-the-cli.md)
 
 colctl is built in [FORGE](https://github.com/scottfeltham/forge-framework) cycles. Each cycle's intent (PRD,
 architecture, acceptance criteria) is in `docs/prd/`, `docs/tasks/` and `docs/<cycle>/`.

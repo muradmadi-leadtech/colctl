@@ -343,6 +343,7 @@ pub fn draw(m: &Model, f: &mut Frame) {
     );
 
     // Body.
+    let mut position: Option<String> = None;
     let body = tabs::body(m, t);
     let header_h = (body.header.len() as u16).min(r.body.height);
     f.render_widget(
@@ -375,23 +376,26 @@ pub fn draw(m: &Model, f: &mut Frame) {
             .collect();
         let total = m.list_len();
         f.render_widget(Paragraph::new(shown), list);
-        if total > usize::from(list.height) && list.height > 0 {
-            let pos = format!("{}/{}", c.selected + 1, total);
-            let w = text_width(&pos) as u16;
-            f.render_widget(
-                Paragraph::new(Span::styled(pos, t.style(Token::Muted))),
-                Rect::new(
-                    list.x + list.width.saturating_sub(w),
-                    list.y + list.height - 1,
-                    w,
-                    1,
-                ),
-            );
+        if total > usize::from(list.height) && list.height > 0 && m.job.is_none() {
+            position = Some(format!("{}/{}", c.selected + 1, total));
         }
     }
 
-    // Status and keys.
+    // Status and keys; where you are in a long list goes at the right of the status line.
     f.render_widget(Paragraph::new(status_lines(m)), r.status);
+    if let Some(pos) = position {
+        let w = text_width(&pos) as u16;
+        let st = r.status;
+        f.render_widget(
+            Paragraph::new(Span::styled(pos, t.style(Token::Muted))),
+            Rect::new(
+                st.x + st.width.saturating_sub(w),
+                st.y + st.height.saturating_sub(1),
+                w,
+                1,
+            ),
+        );
+    }
     let mut keyline = Vec::new();
     for (i, (_, text, ..)) in key_spans(m).into_iter().enumerate() {
         if i > 0 {

@@ -2,6 +2,7 @@
 
 | Command | Page | Changes things |
 |---|---|---|
+| `colctl` (in a terminal) | [tui](tui.md) | only what you confirm |
 | `colctl init [--dry-run]` | [init](init.md) | yes |
 | `colctl status [--harness <name>] [--json]` | [status](status.md) | never |
 | `colctl sync [--harness <name>] [--dry-run]` | [sync](sync.md) | yes |
@@ -42,6 +43,7 @@ Every command that changes something:
 |---|---|
 | `COLCTL_HOME` | Use this absolute path as the source instead of `~/.colctl`. Generated `CLAUDE.md` files then import it by its absolute path. |
 | `COLCTL_TOOL_TIMEOUT_SECS` | Seconds one `claude` or `codex` call may take before it is killed (default 300). |
+| `COLCTL_REDUCED_MOTION` | `1` turns the TUI's animations off ([TUI](tui.md#environment)). |
 | `COLCTL_CLAUDE_TIMEOUT_SECS` | The 1.0 name of the same setting; used when `COLCTL_TOOL_TIMEOUT_SECS` isn't set. |
 | `HOME` | Required. `~` in `config.toml` expands to it. |
 

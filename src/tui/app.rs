@@ -305,9 +305,9 @@ impl Model {
         self.width < MIN_WIDTH || self.height < MIN_HEIGHT
     }
 
-    /// Rows the body has for a list.
+    /// Rows the current tab's list has on screen.
     pub fn body_rows(&self) -> usize {
-        usize::from(self.height.saturating_sub(6))
+        usize::from(super::view::list_area(self).height).max(1)
     }
 
     pub fn cursor(&self) -> Cursor {

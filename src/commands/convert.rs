@@ -245,7 +245,7 @@ fn undo_convert(
         }
         return Ok(0);
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     if held {
         let mut st = state::load(&ctx.source)?;
         st.quarantine.remove(&key);
@@ -333,7 +333,7 @@ pub fn convert(
     }
     let digest = pkg.digest();
     if !dry_run {
-        let _lock = Lock::acquire(&ctx.source)?;
+        let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
         let key = conversion_key(name);
         repackage::write(&pkg, &state::snapshot_path(&ctx.source, &key))
             .map_err(CliError::refused)?;

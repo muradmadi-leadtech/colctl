@@ -171,6 +171,7 @@ fn defined_ids() -> BTreeSet<String> {
         ("discovery", "AC5", "EC5"),
         ("cli-output-design", "AC6", "EC6"),
         ("convert", "AC7", "EC7"),
+        ("tui", "AC8", "EC8"),
     ] {
         for (file, prefix, id) in [
             ("acceptance-criteria.md", format!("**{ac}-"), ac),
@@ -218,7 +219,7 @@ fn tested_ids() -> BTreeSet<String> {
             for pair in parts.windows(2) {
                 if [
                     "ac", "ec", "ac2", "ec2", "ac3", "ec3", "ac4", "ec4", "ac5", "ec5", "ac6",
-                    "ec6", "ac7", "ec7",
+                    "ec6", "ac7", "ec7", "ac8", "ec8",
                 ]
                 .contains(&pair[0])
                     && pair[1].len() == 2
@@ -233,7 +234,8 @@ fn tested_ids() -> BTreeSet<String> {
 }
 
 #[test]
-fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_ac6_30_every_criterion_and_edge_case_has_a_named_test() {
+fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_ac6_30_ac8_31_every_criterion_and_edge_case_has_a_named_test()
+{
     let defined = defined_ids();
     for (prefix, count) in [
         ("AC-", 35),
@@ -250,6 +252,8 @@ fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_ac6_30_every_criterion_and_edge_case_has_a_
         ("EC6-", 23),
         ("AC7-", 17),
         ("EC7-", 20),
+        ("AC8-", 31),
+        ("EC8-", 26),
     ] {
         assert_eq!(
             defined.iter().filter(|i| i.starts_with(prefix)).count(),
@@ -408,4 +412,42 @@ fn ac6_29_docs_cover_the_output_design() {
     assert!(read("docs/reference/sync.md").contains("✓ Synced 5 profiles"));
     assert!(read("docs/reference/commands.md").contains("colctl completions"));
     assert!(read("README.md").contains("Readable output"));
+}
+
+#[test]
+fn ac8_31_docs_cover_the_tui() {
+    let tui = read("docs/reference/tui.md");
+    for needle in [
+        "stdin and stdout are terminals",
+        "TERM",
+        "CI",
+        "NO_COLOR",
+        "COLCTL_REDUCED_MOTION",
+        "Ctrl-C",
+        "Mouse",
+        "60 columns by 20 rows",
+        "101",
+    ] {
+        assert!(tui.contains(needle), "reference/tui.md lacks {needle}");
+    }
+    // Every key in the keymap is documented.
+    for b in colctl::tui::keys::KEYMAP {
+        let key = match b.key {
+            "esc" => "Esc",
+            "tab" => "Tab",
+            "⇧tab" => "⇧Tab",
+            "pgup" => "PgUp",
+            "pgdn" => "PgDn",
+            "home" => "Home",
+            "end" => "End",
+            "1" | "2" | "3" | "4" | "5" => "1–5",
+            k => k,
+        };
+        assert!(tui.contains(key), "reference/tui.md lacks the key {key}");
+    }
+    assert!(read("docs/tutorials/a-first-look-around-the-tui.md").contains("colctl"));
+    assert!(read("docs/explanation/the-tui-and-the-cli.md").contains("CLI first"));
+    assert!(read("docs/reference/search.md").contains("letters appear in that order"));
+    assert!(read("docs/reference/commands.md").contains("[tui](tui.md)"));
+    assert!(read("README.md").contains("full-screen view"));
 }
