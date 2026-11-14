@@ -277,3 +277,140 @@ mod runs {
         assert_eq!(Job::Reject(vec!["a".into()]).command(), "colctl reject a");
     }
 }
+
+mod review_and_discovery {
+    use super::*;
+    use colctl::core::discover;
+    use colctl::core::observer::Recorder;
+    use colctl::core::quarantine;
+    use colctl::core::run::{Job, run};
+    use serde_json::{Value, json};
+    use std::path::Path;
+
+    fn write(path: &Path, value: &Value) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, value.to_string()).unwrap();
+    }
+
+    /// A Claude profile that knows one marketplace with one plugin, "tool".
+    fn catalog_fixture() -> Env {
+        let env = Env::new();
+        let native = env.native();
+        env.ok(&["init"]);
+        let market = env.home.parent().unwrap().join("markets/official");
+        write(
+            &market.join(".claude-plugin/marketplace.json"),
+            &json!({"name": "official", "plugins": [
+                {"name": "tool", "description": "A tool", "author": {"name": "Ann"},
+                 "source": {"source": "github", "repo": "ann/tool"}, "keywords": ["x"]},
+                {"name": "local", "description": "A local one", "source": "./local"}]}),
+        );
+        write(
+            &native.join("plugins/known_marketplaces.json"),
+            &json!({"official": {"source": {"source": "github", "repo": "o/official"},
+                                  "installLocation": market.display().to_string()}}),
+        );
+        env
+    }
+
+    fn stdout_lines(env: &Env, args: &[&str]) -> Vec<String> {
+        let mut all = args.to_vec();
+        all.extend(["--color", "never", "--no-pager"]);
+        let (_, out, _) = env.code(&all);
+        out.lines().map(String::from).collect()
+    }
+
+    #[test]
+    fn ac8_04_held_lists_what_review_lists() {
+        let env = held_fixture();
+        let held = quarantine::held(&ctx(&env)).unwrap();
+        assert_eq!(held.len(), 1);
+        let h = &held[0];
+        assert_eq!(
+            (h.name.as_str(), h.kind.as_str()),
+            ("superpowers", "source")
+        );
+        assert!(h.change.contains(" → "), "{h:?}");
+        assert_eq!(h.size, "1 commit");
+        assert_eq!(h.error, None);
+        let list = stdout_lines(&env, &["review"]).join("\n");
+        assert!(list.contains("1 commit"), "{list}");
+    }
+
+    #[test]
+    fn ac8_04_review_detail_is_the_clis() {
+        let env = held_fixture();
+        let ours = quarantine::review(&ctx(&env), "superpowers", 80).unwrap();
+        assert_eq!(ours, stdout_lines(&env, &["review", "superpowers"]));
+        assert!(quarantine::review(&ctx(&env), "nope", 80).is_err());
+    }
+
+    #[test]
+    fn ac8_04_catalog_and_show_are_the_clis() {
+        let env = catalog_fixture();
+        let c = discover::catalog(&ctx(&env)).unwrap();
+        let names: Vec<&str> = c.plugins.iter().map(|p| p.name.as_str()).collect();
+        assert!(
+            names.contains(&"tool") && names.contains(&"local"),
+            "{names:?}"
+        );
+        assert_eq!(c.catalogs, 1);
+        assert!(c.warnings.is_empty());
+        let ours = discover::show(&ctx(&env), "tool", 80).unwrap();
+        assert_eq!(ours, stdout_lines(&env, &["show", "tool"]));
+    }
+
+    #[test]
+    fn ac8_04_add_runs_what_show_says() {
+        let env = catalog_fixture();
+        let c = discover::catalog(&ctx(&env)).unwrap();
+        let tool = c.plugins.iter().find(|p| p.name == "tool").unwrap();
+        let words = discover::add_words(tool).unwrap();
+        assert_eq!(words[..2], ["add".to_string(), "source".to_string()]);
+        // Running a source add would clone from GitHub; a plugin add runs on the fake claude.
+        let market = env.home.parent().unwrap().join("markets/official");
+        let words_local: Vec<String> = vec![
+            "add".into(),
+            "plugin".into(),
+            "local@official".into(),
+            "--marketplace".into(),
+            market.display().to_string(),
+        ];
+        let job = Job::Add(words_local.clone());
+        assert_eq!(job.command(), format!("colctl {}", words_local.join(" ")));
+        let report = run(&ctx(&env), &job, 80, Box::new(Recorder::default())).unwrap();
+        assert_eq!(report.exit, 0, "{report:?}");
+        assert!(env.config().contains("local@official"), "{}", env.config());
+    }
+
+    #[test]
+    fn ac8_04_nothing_to_add_says_why() {
+        let mut p = discover::catalog(&ctx(&catalog_fixture())).unwrap().plugins[0].clone();
+        p.add = "already source plugin tool".into();
+        assert_eq!(
+            discover::add_words(&p).unwrap_err(),
+            "already source plugin tool"
+        );
+    }
+
+    #[test]
+    fn ac8_04_only_add_commands_run_as_add() {
+        let env = catalog_fixture();
+        let err = run(
+            &ctx(&env),
+            &Job::Add(vec!["rm".into(), "plugin".into(), "x".into()]),
+            80,
+            Box::new(Recorder::default()),
+        )
+        .unwrap_err();
+        assert!(err.message.contains("isn't an add command"), "{err:?}");
+        let err = run(
+            &ctx(&env),
+            &Job::Add(vec!["add".into(), "--nope".into()]),
+            80,
+            Box::new(Recorder::default()),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, 2, "{err:?}");
+    }
+}

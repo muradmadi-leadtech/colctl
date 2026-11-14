@@ -654,7 +654,7 @@ fn change_text(ctx: &Ctx, c: &Candidate) -> String {
 }
 
 /// How big a candidate is: commits (or "goes back n commits") for a source, files for a copy.
-fn size_text(v: &View, r: &Review) -> String {
+pub(crate) fn size_text(v: &View, r: &Review) -> String {
     match (&v.candidate, r.direction) {
         (Candidate::Source(_), Direction::Back) => {
             format!("goes back {}", plural(r.commits.len(), "commit", "commits"))
