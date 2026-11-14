@@ -826,6 +826,27 @@ fn detail_lines(ctx: &Ctx, v: &View) -> Vec<String> {
     if let Some(w) = &v.warning {
         lines.push(format!("  {}", render::warning(caps, &escape(w))));
     }
+    // AC8-36: what to do, before any detail.
+    let rec = crate::risk::recommend(&r.flags);
+    lines.push(String::new());
+    if rec.approve {
+        lines.push(render::verdict(
+            caps,
+            Token::Ok,
+            &format!("Recommendation: approve. {}", rec.reason),
+            &[],
+        ));
+    } else {
+        lines.push(render::verdict(
+            caps,
+            Token::Attention,
+            &format!("Look before approving: {}", escape(&rec.reason)),
+            &[],
+        ));
+        for f in &rec.suspicious {
+            lines.push(format!("    {}  {}", escape(&f.path), escape(&f.reason)));
+        }
+    }
     let section = |lines: &mut Vec<String>, title: &str| {
         lines.push(String::new());
         lines.push(render::heading(caps, title));
@@ -1043,6 +1064,10 @@ pub(crate) fn view_json(v: &View, full: bool) -> Value {
         out["commits"] = json!(r.map(|r| r.commits.clone()).unwrap_or_default());
         out["files"] = json!(r.map(|r| r.files.clone()).unwrap_or_default());
         out["flags"] = json!(r.map(|r| r.flags.clone()).unwrap_or_default());
+        // AC8-36: additive.
+        if let Some(r) = r {
+            out["recommendation"] = json!(crate::risk::recommend(&r.flags));
+        }
     } else {
         out["flags"] = json!(r.map_or(0, |r| r.flags.len()));
     }

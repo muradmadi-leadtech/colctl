@@ -23,6 +23,12 @@ pub struct HeldSummary {
     pub flags: usize,
     /// Why it can't be approved, when it can't.
     pub error: Option<String>,
+    /// Files changed.
+    pub files: usize,
+    /// Every risk flag, by path.
+    pub flag_list: Vec<crate::risk::Flag>,
+    /// What to do (AC8-36); `None` when it can't be reviewed.
+    pub recommendation: Option<crate::risk::Recommendation>,
 }
 
 /// Every held version, in `colctl review`'s order.
@@ -45,6 +51,13 @@ pub fn held(ctx: &Ctx) -> Result<Vec<HeldSummary>, CliError> {
                     .unwrap_or_default(),
                 flags: v.review.as_ref().map_or(0, |r| r.flags.len()),
                 error: v.error.clone(),
+                files: v.review.as_ref().map_or(0, |r| r.files.len()),
+                flag_list: v
+                    .review
+                    .as_ref()
+                    .map(|r| r.flags.clone())
+                    .unwrap_or_default(),
+                recommendation: v.review.as_ref().map(|r| crate::risk::recommend(&r.flags)),
             }
         })
         .collect())

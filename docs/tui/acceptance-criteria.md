@@ -269,6 +269,23 @@ When colctl syncs a Claude profile and `claude plugin update` leaves the old com
 Then colctl reinstalls the plugin (uninstall, install) and checks again, and the profile ends at the new commit
 ```
 
+**AC8-36 A review leads with a recommendation (CLI first)**
+```gherkin
+When I run colctl review <name>, or open a held version in the TUI
+Then the first lines say what changed, whether anything looks like malware, and a recommendation:
+  "approve" when no malware pattern is found, else "look before approving" with each pattern found
+And --json carries "recommendation": {"approve": bool, "reason": …, "suspicious": [...]} (additive)
+And the TUI opens on that summary; d shows the full review, diff included
+```
+
+**AC8-37 Malware patterns**
+```gherkin
+Given an added or changed line in a held version that downloads and runs code (curl/wget piped to a shell, eval of
+  a download), decodes and runs code (base64 to a shell or eval), opens a reverse shell (/dev/tcp, nc -e), reads
+  credentials (SSH keys, ~/.aws/credentials, the keychain), deletes a home or root folder, or mines crypto
+Then it is flagged "suspicious" with what it does, and the recommendation is "look before approving"
+```
+
 ## Constraints (not criteria)
 
 - Built on ratatui, crossterm, tachyonfx and nucleo-matcher. No async runtime, and no new process model.

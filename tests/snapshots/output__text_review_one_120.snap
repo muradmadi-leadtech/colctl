@@ -7,6 +7,8 @@ exit 0
 ! superpowers  [SHORT] → [SHORT] · 1 commit · no flags
   file://[ROOT]/upstreams/superpowers
 
+✓ Recommendation: approve. No malware patterns, and nothing in it runs code.
+
 Risk flags
   · none
 

@@ -104,6 +104,10 @@ fn offered(m: &Model, b: &keys::Binding) -> bool {
         (Some(Overlay::Detail { lines, .. }), Action::NextFile | Action::PrevFile) => {
             lines.iter().any(|l| l.starts_with("diff --git "))
         }
+        // A summary offers the full review; the full review is already open.
+        (Some(Overlay::Detail { held, lines, .. }), Action::FullReview) => {
+            held.is_some() && !lines.iter().any(|l| l.starts_with("Risk flags"))
+        }
         _ => true,
     }
 }

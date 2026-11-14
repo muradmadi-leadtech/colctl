@@ -1034,13 +1034,20 @@ fn ac8_18_the_queue() {
 }
 
 #[test]
-fn ac8_19_a_held_version_in_full() {
+fn ac8_19_ac8_36_a_held_version_at_a_glance_then_in_full() {
     let env = held_fixture();
     let mut m = opened(&env, 100, 30);
     ch(&mut m, '4');
-    let cmds = press(&mut m, KeyCode::Enter);
+    // ⏎ opens the summary at once; d asks for the full review.
+    assert!(press(&mut m, KeyCode::Enter).is_empty());
+    let s = screen(&m);
+    assert!(s.contains("✓ Recommendation: approve"), "{s}");
+    assert!(s.contains("d full review"), "{s}");
+    insta::assert_snapshot!("review_summary_100x30", mask(&s));
+    let cmds = ch(&mut m, 'd');
     assert_eq!(cmds, [Cmd::Load(Load::Review("superpowers".into()))]);
     drive(&env, &mut m, cmds);
+    assert!(!screen(&m).contains("d full review"));
     let Some(Overlay::Detail { lines, held, .. }) = &m.overlay else {
         panic!("{:?}", m.overlay);
     };

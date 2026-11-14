@@ -701,7 +701,8 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
         | Action::ApproveAll
         | Action::Add
         | Action::NextFile
-        | Action::PrevFile => return super::tabs::act(m, action),
+        | Action::PrevFile
+        | Action::FullReview => return super::tabs::act(m, action),
     }
     Vec::new()
 }

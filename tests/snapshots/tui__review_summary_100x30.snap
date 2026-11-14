@@ -1,0 +1,34 @@
+---
+source: tests/tui.rs
+expression: mask(&s)
+---
+ Overview !  Profiles  Items  Review !1  Discover                                      colctl [VERSION]
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ! 1 held for review
+
+   superpowers  source  [SHORT] → [SHORT]  1 commit
+
+
+
+
+
+
+
+          ╭ superpowers ─────────────────────────────────────────────────────────────────╮
+          │ superpowers  [SHORT] → [SHORT] · 1 commit · 1 file                           │
+          │                                                                              │
+          │ ✓ Recommendation: approve                                                    │
+          │   No malware patterns, and nothing in it runs code.                          │
+          ╰ a approve · x reject · d full review · esc close ────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+ a approve · x reject · d full review · esc close · r reload · ? keys · q quit

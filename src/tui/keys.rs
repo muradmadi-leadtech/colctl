@@ -39,6 +39,7 @@ pub enum Action {
     Add,
     NextFile,
     PrevFile,
+    FullReview,
     Help,
     Quit,
     Yes,
@@ -91,6 +92,14 @@ pub const KEYMAP: &[Binding] = &[
     // Detail overlays.
     b("a", K::Char('a'), S::Detail, A::Approve, "approve", true),
     b("x", K::Char('x'), S::Detail, A::Reject, "reject", true),
+    b(
+        "d",
+        K::Char('d'),
+        S::Detail,
+        A::FullReview,
+        "full review",
+        true,
+    ),
     b("]", K::Char(']'), S::Detail, A::NextFile, "next file", true),
     b(
         "[",
