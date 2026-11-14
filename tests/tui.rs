@@ -518,6 +518,29 @@ fn ac8_15_progress_rows_then_the_verdict() {
 }
 
 #[test]
+fn ac8_15_a_failed_run_stays_on_screen_until_a_key() {
+    let mut m = model(80, 24);
+    ask(&mut m, "Approve", vec![], Job::Approve(vec!["q".into()]));
+    ch(&mut m, 'y');
+    let failed = Report {
+        exit: 1,
+        lines: vec![
+            "✓ Approved 1 held version".into(),
+            "✗ Synced 3 of 5 profiles · 2 failed".into(),
+        ],
+        errors: Vec::new(),
+    };
+    update(&mut m, Msg::Job(JobEvent::Finished(Ok(failed))));
+    let toast = m.toast.clone().unwrap();
+    assert!(toast.text.starts_with("✗ Synced 3 of 5"), "{toast:?}");
+    assert_eq!(toast.until, None, "a failure stays");
+    update(&mut m, Msg::Tick(60_000));
+    assert!(m.toast.is_some());
+    ch(&mut m, '2');
+    assert!(m.toast.is_none());
+}
+
+#[test]
 fn ac8_27_errors_show_what_why_and_what_to_do() {
     let mut m = model(80, 24);
     ask(&mut m, "Sync", vec![], Job::Sync(None));
