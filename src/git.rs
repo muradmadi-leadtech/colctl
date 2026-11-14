@@ -10,20 +10,38 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct Git {
     program: PathBuf,
+    /// `HOME` for git (its global config): the context's, so a run for another home never reads
+    /// this process's.
+    home: Option<PathBuf>,
 }
 
 impl Git {
     /// Finds `git` on `path_var` (AC-32).
     pub fn find(path_var: &OsStr) -> Result<Self, CliError> {
         runner::find_program("git", path_var)
-            .map(|program| Self { program })
+            .map(|program| Self {
+                program,
+                home: None,
+            })
             .ok_or_else(|| CliError::usage("colctl needs git, and git isn't on PATH"))
+    }
+
+    /// Finds `git` on the context's `PATH`, run with the context's home.
+    pub fn for_ctx(ctx: &crate::ctx::Ctx) -> Result<Self, CliError> {
+        let mut git = Self::find(&ctx.path_var)?;
+        git.home = Some(ctx.home.clone());
+        Ok(git)
     }
 
     fn cmd(&self, dir: &Path, args: &[&str]) -> Cmd {
         let mut all = vec!["-C", dir.to_str().unwrap_or_default()];
         all.extend_from_slice(args);
-        Cmd::new(&self.program, &all)
+        let mut cmd = Cmd::new(&self.program, &all);
+        if let Some(home) = &self.home {
+            cmd.env_set
+                .push(("HOME".into(), home.display().to_string()));
+        }
+        cmd
     }
 
     /// Runs `git -C <dir> <args>`, returning stdout or an error carrying stderr.

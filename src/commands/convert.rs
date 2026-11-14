@@ -290,7 +290,7 @@ pub fn convert(
     dry_run: bool,
     as_json: bool,
 ) -> Result<i32, CliError> {
-    let _git = Git::find(&ctx.path_var)?;
+    let _git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     let Some(s) = ws.config.sources.iter().find(|s| s.name == name).cloned() else {
         return Err(CliError::usage(format!("no source named \"{name}\"")).hint("colctl status"));

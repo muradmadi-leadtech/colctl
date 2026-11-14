@@ -140,6 +140,9 @@ impl Tool {
                     .cloned(),
             )
             .collect();
+        // The context's home, never this process's (in-process callers, cycle 8).
+        cmd.env_set
+            .push(("HOME".into(), ctx.home.display().to_string()));
         if !self.is_native(ctx, harness) {
             cmd.env_set
                 .push((self.home_var().into(), harness.path.display().to_string()));
