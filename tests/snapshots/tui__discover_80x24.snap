@@ -25,4 +25,4 @@ expression: "mask(&{\n    let mut small = opened(&env, 80, 24); ch(&mut small, '
 
 
 
- ⏎ details · a add · / search · r reload · ? keys · q quit
+ type to search · ⏎ details · esc clear · ←→ tabs · ctrl-c quit · ? keys

@@ -6,19 +6,19 @@ expression: mask(&screen(&m))
 ────────────────────────────────────────────────────────────
  ! 2 things need attention
 
- Profiles
+ › Sync every profile         s
+   Check for updates          u
+   Review 1 held version      4
+   Find a plugin              5
+   Look through every item    3
+
+   Profiles
    ! claude       ~/.claude           1 skill · 1 missing
    ✓ kilo-claude  ~/Library/…/claude  1 skill · 1 plugin
    ✓ codex        ~/.codex            1 plugin
 
- Needs you
- › ! claude  skill   alpha        missing   → colctl sync
+   Needs you
+   ! claude  skill   alpha        missing   → colctl sync
    ! held    source  superpowers  [SHORT]…  → colctl review
 
-
-
-
-
-
-
- s sync · ⏎ run fix · r reload · ? keys · q quit
+ ⏎ run · s sync · u check updates · ? keys · q quit

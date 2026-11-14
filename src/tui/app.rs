@@ -93,6 +93,8 @@ pub enum JobEvent {
 pub enum Msg {
     Key(KeyEvent),
     Mouse(MouseEvent),
+    /// Wheel or trackpad, already combined: rows to scroll, at most 3 either way (AC8-34).
+    Scroll(i32),
     Paste(String),
     Resize(u16, u16),
     /// Milliseconds since the app started.
@@ -109,6 +111,29 @@ pub enum Load {
     Catalog,
     Review(String),
     Show(String),
+}
+
+impl Load {
+    /// The command this load is, for the status line (AC8-38).
+    pub fn command(&self) -> String {
+        match self {
+            Load::Snapshot => "colctl status".into(),
+            Load::Held => "colctl review".into(),
+            Load::Catalog => "colctl search".into(),
+            Load::Review(n) => format!("colctl review {n}"),
+            Load::Show(id) => format!("colctl show {id}"),
+        }
+    }
+
+    fn answers(&self, l: &Loaded) -> bool {
+        match (self, l) {
+            (Load::Snapshot, Loaded::Snapshot(_))
+            | (Load::Held, Loaded::Held(_))
+            | (Load::Catalog, Loaded::Catalog(_)) => true,
+            (Load::Review(n) | Load::Show(n), Loaded::Detail { title, .. }) => n == title,
+            _ => false,
+        }
+    }
 }
 
 /// What the app asks its runtime to do.
@@ -260,7 +285,19 @@ pub struct Model {
     /// How many times the snapshot has loaded (motion marks a reload).
     pub loads: usize,
     /// Loads asked for and not back yet.
-    pub pending: usize,
+    pub pending: Vec<Load>,
+    /// How many times the catalog has loaded (Discover's results are cached per load and query).
+    pub catalog_loads: usize,
+    /// Discover's ranked results for (query, catalog load).
+    pub discover_cache: std::cell::RefCell<Option<DiscoverCache>>,
+}
+
+/// Discover's results for one query on one catalog load (AC8-35).
+#[derive(Debug, Clone)]
+pub struct DiscoverCache {
+    pub query: String,
+    pub catalog: usize,
+    pub results: std::rc::Rc<Vec<crate::search::Plugin>>,
 }
 
 /// The smallest screen the TUI draws on (AC8-11).
@@ -291,13 +328,16 @@ impl Model {
             dirty: true,
             last_click: None,
             loads: 0,
-            pending: 0,
+            pending: Vec::new(),
+            catalog_loads: 0,
+            discover_cache: std::cell::RefCell::new(None),
         }
     }
 
     /// What to load when the app opens: local state first; the catalog after (AC8-08).
     pub fn start(&mut self) -> Vec<Cmd> {
-        self.pending += 3;
+        self.pending
+            .extend([Load::Snapshot, Load::Held, Load::Catalog]);
         vec![
             Cmd::Load(Load::Snapshot),
             Cmd::Load(Load::Held),
@@ -380,12 +420,17 @@ impl Model {
 /// Applies `msg`, returning what to run, and keeps count of the loads in flight (the status line
 /// says so while there are any).
 pub fn update(m: &mut Model, msg: Msg) -> Vec<Cmd> {
-    let loaded = matches!(msg, Msg::Loaded(_));
-    let cmds = apply(m, msg);
-    if loaded {
-        m.pending = m.pending.saturating_sub(1);
+    if let Msg::Loaded(l) = &msg
+        && let Some(i) = m.pending.iter().position(|p| p.answers(l))
+    {
+        m.pending.remove(i);
     }
-    m.pending += cmds.iter().filter(|c| matches!(c, Cmd::Load(_))).count();
+    let cmds = apply(m, msg);
+    for c in &cmds {
+        if let Cmd::Load(l) = c {
+            m.pending.push(l.clone());
+        }
+    }
     cmds
 }
 
@@ -413,7 +458,7 @@ fn apply(m: &mut Model, msg: Msg) -> Vec<Cmd> {
                 m.toast = None;
                 m.dirty = true;
             }
-            if m.job.is_some() || m.pending > 0 {
+            if m.job.is_some() || !m.pending.is_empty() {
                 m.dirty = true;
             }
             Vec::new()
@@ -437,6 +482,7 @@ fn apply(m: &mut Model, msg: Msg) -> Vec<Cmd> {
             Vec::new()
         }
         Msg::Mouse(ev) => mouse(m, ev),
+        Msg::Scroll(by) => scroll(m, by),
         Msg::Key(ev) => key(m, ev),
     }
 }
@@ -457,6 +503,7 @@ fn loaded(m: &mut Model, l: Loaded) -> Vec<Cmd> {
             };
         }
         Loaded::Catalog(r) => {
+            m.catalog_loads += 1;
             m.catalog = match r {
                 Ok(c) => Data::Ready(c),
                 Err(e) => Data::Failed(e),
@@ -477,6 +524,7 @@ fn loaded(m: &mut Model, l: Loaded) -> Vec<Cmd> {
     }
     let (len, rows) = (m.list_len(), m.body_rows());
     m.cursor_mut().fit(len, rows);
+    settle(m, 1);
     Vec::new()
 }
 
@@ -518,12 +566,23 @@ fn job_event(m: &mut Model, e: JobEvent) -> Vec<Cmd> {
         }
         JobEvent::Note(_) | JobEvent::Warn(_) => {}
         JobEvent::Finished(result) => {
-            m.job = None;
+            let report_job = m.job.take().map(|j| j.job);
             match result {
                 Ok(report) => {
-                    // A run that didn't succeed stays until a key is pressed.
+                    // A run that didn't succeed stays until a key is pressed, and its full report
+                    // says why (AC8-39).
                     let text = report.verdict();
                     m.toast(text, report.exit != 0);
+                    if report.exit != 0 && m.quit {
+                        let mut lines = report.lines.clone();
+                        lines.extend(report.errors.iter().cloned());
+                        m.overlay = Some(Overlay::Detail {
+                            title: format!("Result: {}", running_command(&report_job)),
+                            lines: lines.iter().map(|l| crate::review::escape(l)).collect(),
+                            scroll: 0,
+                            held: None,
+                        });
+                    }
                 }
                 Err(e) => m.error(&e),
             }
@@ -539,6 +598,10 @@ fn job_event(m: &mut Model, e: JobEvent) -> Vec<Cmd> {
         }
     }
     Vec::new()
+}
+
+fn running_command(job: &Option<Job>) -> String {
+    job.as_ref().map_or_else(|| "colctl".into(), Job::command)
 }
 
 /// Asks to run `job` after a confirmation, unless another is running (AC8-25, AC8-26).
@@ -594,7 +657,10 @@ fn input_key(m: &mut Model, ev: KeyEvent) -> Option<Vec<Cmd>> {
     {
         return None;
     }
+    let discover = m.tab == Tab::Discover && m.quit;
     match ev.code {
+        // In Discover, `?` is still help; every other character searches (AC8-35).
+        KeyCode::Char('?') if discover && !m.filter().focused => None,
         KeyCode::Char(c) => {
             m.filter_mut().text.push(c);
             *m.cursor_mut() = Cursor::default();
@@ -610,6 +676,8 @@ fn input_key(m: &mut Model, ev: KeyEvent) -> Option<Vec<Cmd>> {
             *m.cursor_mut() = Cursor::default();
             Some(Vec::new())
         }
+        // Discover's search is always on: everything else is a normal key.
+        _ if discover && !m.filter().focused => None,
         KeyCode::Enter | KeyCode::Down | KeyCode::Up | KeyCode::Tab | KeyCode::BackTab => {
             m.filter_mut().focused = false;
             match ev.code {
@@ -636,8 +704,9 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
     match action {
         Action::Quit => return quit(m),
         Action::Help => m.overlay = Some(Overlay::Help),
-        Action::NextTab => m.go(m.tab.step(1)),
-        Action::PrevTab => m.go(m.tab.step(-1)),
+        Action::NextTab if m.overlay.is_none() => m.go(m.tab.step(1)),
+        Action::PrevTab if m.overlay.is_none() => m.go(m.tab.step(-1)),
+        Action::NextTab | Action::PrevTab => {}
         Action::GoTab(t) => m.go(t),
         Action::Up
         | Action::Down
@@ -659,6 +728,7 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
                 *scroll = (*scroll as isize + by).clamp(0, max as isize) as usize;
             } else {
                 m.cursor_mut().move_by(by, len, rows);
+                settle(m, by.signum());
             }
         }
         Action::Back => match &m.overlay {
@@ -707,10 +777,65 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
     Vec::new()
 }
 
+/// Moves the selection off rows that can't be selected (headings, profile lines), in `dir`, or
+/// back the other way at an end.
+pub fn settle(m: &mut Model, dir: isize) {
+    if !m.quit {
+        return;
+    }
+    let skip = super::view::skipped(m);
+    let len = m.list_len();
+    if skip.is_empty() || len == 0 {
+        return;
+    }
+    let rows = m.body_rows();
+    let dir = if dir == 0 { 1 } else { dir };
+    let mut at = m.cursor().selected as isize;
+    for d in [dir, -dir] {
+        let mut i = at;
+        while i >= 0 && (i as usize) < len && skip.contains(&(i as usize)) {
+            i += d;
+        }
+        if i >= 0 && (i as usize) < len {
+            at = i;
+            break;
+        }
+    }
+    let c = m.cursor_mut();
+    c.selected = at.max(0) as usize;
+    c.fit(len, rows);
+}
+
+/// Scrolls the view by `rows` (AC8-34): the selection moves only to stay on screen.
+fn scroll(m: &mut Model, by: i32) -> Vec<Cmd> {
+    if !m.quit {
+        return act(m, if by > 0 { Action::Down } else { Action::Up });
+    }
+    let by = by.clamp(-3, 3) as isize;
+    if let Some(Overlay::Detail { lines, scroll, .. }) = &mut m.overlay {
+        let max = lines.len().saturating_sub(1);
+        *scroll = (*scroll as isize + by).clamp(0, max as isize) as usize;
+        return Vec::new();
+    }
+    let (len, rows) = (m.list_len(), m.body_rows());
+    let c = m.cursor_mut();
+    let max = len.saturating_sub(rows) as isize;
+    c.offset = (c.offset as isize + by).clamp(0, max) as usize;
+    if c.selected < c.offset {
+        c.selected = c.offset;
+    } else if c.selected >= c.offset + rows {
+        c.selected = (c.offset + rows)
+            .saturating_sub(1)
+            .min(len.saturating_sub(1));
+    }
+    settle(m, by.signum());
+    Vec::new()
+}
+
 fn mouse(m: &mut Model, ev: MouseEvent) -> Vec<Cmd> {
     match ev.kind {
-        MouseEventKind::ScrollDown => act(m, Action::Down),
-        MouseEventKind::ScrollUp => act(m, Action::Up),
+        MouseEventKind::ScrollDown => scroll(m, 1),
+        MouseEventKind::ScrollUp => scroll(m, -1),
         MouseEventKind::Down(MouseButton::Left) => {
             let (x, y) = (ev.column, ev.row);
             if let Some(action) = super::view::key_at(m, x, y) {

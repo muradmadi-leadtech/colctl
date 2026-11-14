@@ -23,11 +23,11 @@ Ctrl-C, after an error, or after a bug.
 
 | Tab | Shows | Actions |
 |---|---|---|
-| **Overview** | `colctl status`'s verdict, one line per profile with what it has, and **Needs you**: each problem with its fix | `s` sync every profile; ⏎ runs the focused fix (a review opens it; sync and update ask first; anything else says which command to run) |
+| **Overview** | `colctl status`'s verdict; a menu (sync every profile, check for updates, review what's held, find a plugin, look through every item); one line per profile with what it has; and **Needs you**: each problem with its fix | ⏎ runs the focused menu entry or fix (a review opens it; sync and update ask first; anything else says which command to run); `s` sync, `u` check for updates |
 | **Profiles** | Every profile with its path and what it has | ⏎ lists a profile's items, like `status --harness <name> --all`; `s` syncs only that profile; `/` filters |
 | **Items** | Every instructions file, skill, agent, plugin and source plugin once, with its state in each profile (numbered columns; the legend is above) | ⏎ shows each profile's state, where the item lives there, and its fix; `/` filters |
 | **Review** | What's held for review, as `colctl review` lists it; the count is on the tab | ⏎ shows a held version at a glance: what changed, the recommendation, anything suspicious, what runs code; `d` shows everything `colctl review <name>` prints, diff included; `a` approve, `x` reject, `A` approve all, `u` check for updates |
-| **Discover** | Every plugin every catalog knows, ranked as `colctl search` ranks them | `/` searches as you type; ⏎ shows what `colctl show <id>` prints; `a` adds it as its add command says |
+| **Discover** | Every plugin every catalog knows, ranked as `colctl search` ranks them | type to search (every key but `?` goes to the search; Ctrl-C quits); ⏎ shows what `colctl show <id>` prints, and `a` there adds it as its add command says; Esc clears the search |
 
 The tab bar marks the current tab. `Overview !` means something needs you, and `Review !2` means two versions are
 held.
@@ -36,12 +36,13 @@ held.
 
 | Key | Where | Does |
 |---|---|---|
-| Tab, ⇧Tab, 1–5 | everywhere | next, previous, go to a tab |
+| → ←, Tab, ⇧Tab, 1–5 | everywhere (digits and letters search in Discover) | next, previous, go to a tab |
 | ↑ ↓, k j | lists, details | move |
 | PgUp PgDn, g G, Home End | lists, details | page, top, bottom |
 | ⏎ | lists | open, or run the focused fix |
 | Esc | everywhere | close the overlay, clear the filter, stop an update after the source it's on |
-| / | Profiles, Items, Discover | filter or search; ⏎ or ↓ leaves the line, Esc clears it |
+| / | Profiles, Items | filter; ⏎ or ↓ leaves the line, Esc clears it |
+| type | Discover | search; Esc clears it; ←→ still switch tabs and ctrl-c quits |
 | r | everywhere | reload from disk |
 | s | Overview, Profiles | sync |
 | u | Review | check for updates |
@@ -56,14 +57,19 @@ held.
 
 The key bar at the bottom shows the most useful keys for where you are. `?` shows all of them.
 
-**Mouse:** click a tab to open it, click a row to focus it, double-click to open it, scroll with the wheel, and click
-a key in the key bar to run it. A click outside an overlay closes it, except for a confirmation.
+**Mouse:** click a tab to open it, click a row to focus it, double-click to open it, and click a key in the key bar to
+run it. The wheel and trackpad scroll the view, at most 3 rows a frame however fast you flick; the selection moves
+only to stay on screen. A click outside an overlay closes it, except for a confirmation.
 
 ## Writing
 
 Anything that changes something (sync, update, approve, reject, add) asks first, saying what will happen and to
 which profiles. While it runs, the status line shows each profile (or source) with its current step and `n/total`,
-then ✓ or ✗. It ends with the command's verdict, and every tab reloads.
+then ✓ or ✗. It ends with the command's verdicts, worst first, and every tab reloads. While anything loads, the
+status line names it the same way, as the command it is (`⠋ colctl status`, `⠋ colctl review databricks`).
+
+When a run doesn't succeed, a **Result** overlay opens with the CLI's full report: which profiles failed, why, and
+what to run.
 
 - Only one write runs at a time. Another write waits ("Wait for colctl sync to finish"), and reading keeps working.
 - A sync, approve or add runs to the end. An update stops after the source it's on when you press Esc.

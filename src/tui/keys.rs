@@ -84,6 +84,7 @@ use KeyCode as K;
 use Scope as S;
 
 /// Every binding. Earlier entries win when two match in one scope.
+#[rustfmt::skip]
 pub const KEYMAP: &[Binding] = &[
     // Confirmations: y or n, nothing else (⏎ alone does nothing).
     b("y", K::Char('y'), S::Confirm, A::Yes, "yes", true),
@@ -111,115 +112,28 @@ pub const KEYMAP: &[Binding] = &[
     ),
     b("esc", K::Esc, S::Detail, A::Back, "close", true),
     // Tabs.
-    b(
-        "s",
-        K::Char('s'),
-        S::Tab(Tab::Overview),
-        A::Sync,
-        "sync",
-        true,
-    ),
-    b(
-        "⏎",
-        K::Enter,
-        S::Tab(Tab::Overview),
-        A::Open,
-        "run fix",
-        true,
-    ),
-    b(
-        "s",
-        K::Char('s'),
-        S::Tab(Tab::Profiles),
-        A::Sync,
-        "sync",
-        true,
-    ),
+    b("⏎", K::Enter, S::Tab(Tab::Overview), A::Open, "run", true),
+    b("s", K::Char('s'), S::Tab(Tab::Overview), A::Sync, "sync", true),
+    b("u", K::Char('u'), S::Tab(Tab::Overview), A::Update, "check updates", true),
+    b("s", K::Char('s'), S::Tab(Tab::Profiles), A::Sync, "sync", true),
     b("⏎", K::Enter, S::Tab(Tab::Profiles), A::Open, "open", true),
-    b(
-        "/",
-        K::Char('/'),
-        S::Tab(Tab::Profiles),
-        A::Filter,
-        "filter",
-        true,
-    ),
+    b("/", K::Char('/'), S::Tab(Tab::Profiles), A::Filter, "filter", true),
     b("⏎", K::Enter, S::Tab(Tab::Items), A::Open, "open", true),
-    b(
-        "/",
-        K::Char('/'),
-        S::Tab(Tab::Items),
-        A::Filter,
-        "filter",
-        true,
-    ),
-    b(
-        "a",
-        K::Char('a'),
-        S::Tab(Tab::Review),
-        A::Approve,
-        "approve",
-        true,
-    ),
-    b(
-        "x",
-        K::Char('x'),
-        S::Tab(Tab::Review),
-        A::Reject,
-        "reject",
-        true,
-    ),
-    b(
-        "u",
-        K::Char('u'),
-        S::Tab(Tab::Review),
-        A::Update,
-        "check updates",
-        true,
-    ),
+    b("/", K::Char('/'), S::Tab(Tab::Items), A::Filter, "filter", true),
+    b("a", K::Char('a'), S::Tab(Tab::Review), A::Approve, "approve", true),
+    b("x", K::Char('x'), S::Tab(Tab::Review), A::Reject, "reject", true),
+    b("u", K::Char('u'), S::Tab(Tab::Review), A::Update, "check updates", true),
     b("⏎", K::Enter, S::Tab(Tab::Review), A::Open, "open", true),
-    b(
-        "A",
-        K::Char('A'),
-        S::Tab(Tab::Review),
-        A::ApproveAll,
-        "approve all",
-        false,
-    ),
-    b(
-        "⏎",
-        K::Enter,
-        S::Tab(Tab::Discover),
-        A::Open,
-        "details",
-        true,
-    ),
-    b(
-        "a",
-        K::Char('a'),
-        S::Tab(Tab::Discover),
-        A::Add,
-        "add",
-        true,
-    ),
-    b(
-        "/",
-        K::Char('/'),
-        S::Tab(Tab::Discover),
-        A::Filter,
-        "search",
-        true,
-    ),
+    b("A", K::Char('A'), S::Tab(Tab::Review), A::ApproveAll, "approve all", false),
+    // Discover: typing searches (AC8-35); these only show in the key bar and help.
+    b("type", K::Null, S::Tab(Tab::Discover), A::Filter, "to search", true),
+    b("⏎", K::Enter, S::Tab(Tab::Discover), A::Open, "details", true),
+    b("esc", K::Esc, S::Tab(Tab::Discover), A::Back, "clear", true),
+    b("←→", K::Null, S::Tab(Tab::Discover), A::NextTab, "tabs", true),
+    b("ctrl-c", K::Null, S::Tab(Tab::Discover), A::Quit, "quit", true),
     // Everywhere.
     b("tab", K::Tab, S::Global, A::NextTab, "next tab", false),
-    b(
-        "⇧tab",
-        K::BackTab,
-        S::Global,
-        A::PrevTab,
-        "previous tab",
-        false,
-    ),
+    b("⇧tab", K::BackTab, S::Global, A::PrevTab, "previous tab", false),
     b(
         "1",
         K::Char('1'),
@@ -299,7 +213,7 @@ pub fn lookup(scopes: &[Scope], ev: &KeyEvent) -> Option<Action> {
     scopes.iter().find_map(|scope| {
         KEYMAP
             .iter()
-            .find(|b| b.scope == *scope && same(b, ev))
+            .find(|b| b.scope == *scope && b.code != K::Null && same(b, ev))
             .map(|b| b.action)
     })
 }

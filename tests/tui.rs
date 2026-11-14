@@ -209,19 +209,27 @@ fn ac8_24_ticks_and_mouse_moves_never_hide_a_redraw() {
 }
 
 #[test]
-fn ac8_08_the_status_line_says_while_it_loads() {
+fn ac8_08_ac8_38_the_status_line_names_what_loads() {
     let mut m = model(80, 24);
-    let cmds = m.start();
-    assert_eq!(m.pending, 3);
-    assert!(screen(&m).contains("… loading…"), "{}", screen(&m));
-    for _ in cmds {
-        update(&mut m, Msg::Loaded(app::Loaded::Held(Ok(Vec::new()))));
-    }
-    assert_eq!(m.pending, 0);
-    assert!(!screen(&m).contains("loading"));
+    m.start();
+    assert_eq!(m.pending.len(), 3);
+    assert!(screen(&m).contains("… colctl status"), "{}", screen(&m));
+    update(
+        &mut m,
+        Msg::Loaded(app::Loaded::Snapshot(Box::new(Err(CliError::usage("x"))))),
+    );
+    assert!(screen(&m).contains("… colctl review"), "{}", screen(&m));
+    update(&mut m, Msg::Loaded(app::Loaded::Held(Ok(Vec::new()))));
+    assert!(screen(&m).contains("… colctl search"), "{}", screen(&m));
+    update(
+        &mut m,
+        Msg::Loaded(app::Loaded::Catalog(Err(CliError::usage("x")))),
+    );
+    assert!(m.pending.is_empty());
+    assert!(!screen(&m).contains("colctl s"), "{}", screen(&m));
     // A reload counts too.
     ch(&mut m, 'r');
-    assert_eq!(m.pending, 3);
+    assert_eq!(m.pending.len(), 3);
 }
 
 #[test]
@@ -266,6 +274,8 @@ fn ac8_09_tabs_by_key() {
     press(&mut m, KeyCode::BackTab);
     press(&mut m, KeyCode::BackTab);
     assert_eq!(m.tab, Tab::Discover);
+    // In Discover digits search; from anywhere else they go to a tab.
+    press(&mut m, KeyCode::Tab);
     for (c, t) in [
         ('1', Tab::Overview),
         ('2', Tab::Profiles),
@@ -1212,7 +1222,6 @@ fn ac8_22_ec8_05_search_as_you_type() {
             screen(&small)
         })
     );
-    ch(&mut m, '/');
     for c in "tl".chars() {
         ch(&mut m, c);
     }
@@ -1251,7 +1260,6 @@ fn ec8_26_spaces_list_everything() {
     let env = catalog_fixture();
     let mut m = opened(&env, 100, 30);
     ch(&mut m, '5');
-    ch(&mut m, '/');
     ch(&mut m, ' ');
     assert_eq!(m.list_len(), 3);
 }
@@ -1275,6 +1283,8 @@ fn ac8_23_show_and_add() {
     press(&mut m, KeyCode::Esc);
     // "tool" lives in a GitHub repo: adding it is a source add, which would clone; check the ask.
     m.cursor_mut().selected = row_of(&m, "tool ");
+    let cmds = press(&mut m, KeyCode::Enter);
+    drive(&env, &mut m, cmds);
     ch(&mut m, 'a');
     let s = screen(&m);
     assert!(
@@ -1294,8 +1304,10 @@ fn ac8_23_what_cannot_be_added_says_why() {
             p.add = "already source plugin tool".into();
         }
     }
+    let cmds = press(&mut m, KeyCode::Enter);
+    drive(&env, &mut m, cmds);
     assert!(ch(&mut m, 'a').is_empty());
-    assert!(m.overlay.is_none());
+    assert!(!matches!(m.overlay, Some(Overlay::Confirm { .. })));
     assert!(
         m.toast
             .as_ref()
@@ -1685,6 +1697,8 @@ fn ac8_30_add_matches_the_cli() {
     let mut m = opened(&tui, 100, 30);
     ch(&mut m, '5');
     m.cursor_mut().selected = row_of(&m, "helper");
+    let cmds = press(&mut m, KeyCode::Enter);
+    drive(&tui, &mut m, cmds);
     ch(&mut m, 'a');
     let Some(Overlay::Confirm {
         job: Job::Add(words),
@@ -1788,7 +1802,7 @@ fn ec8_06_a_thousand_plugins() {
     let mut m = opened(&env, 120, 40);
     ch(&mut m, '5');
     assert_eq!(m.list_len(), 1000);
-    ch(&mut m, 'G');
+    press(&mut m, KeyCode::End);
     let started = Instant::now();
     let s = screen(&m);
     let took = started.elapsed();
@@ -1964,4 +1978,234 @@ fn constraint_the_tui_has_no_logic_of_its_own() {
             );
         }
     }
+}
+
+// ── Revise (AC8-32 – 35, 38, 39, EC8-27) ────────────────────────────────────────────────────
+
+#[test]
+fn ac8_32_arrows_switch_tabs() {
+    let mut m = model(80, 24);
+    press(&mut m, KeyCode::Right);
+    assert_eq!(m.tab, Tab::Profiles);
+    press(&mut m, KeyCode::Left);
+    press(&mut m, KeyCode::Left);
+    assert_eq!(m.tab, Tab::Discover);
+    press(&mut m, KeyCode::Right);
+    assert_eq!(m.tab, Tab::Overview);
+    // Not behind an overlay.
+    ch(&mut m, '?');
+    press(&mut m, KeyCode::Right);
+    assert_eq!(m.tab, Tab::Overview);
+}
+
+#[test]
+fn ac8_33_overview_offers_a_menu() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    let rows: Vec<String> = view::rows(&m).iter().map(|l| l.to_string()).collect();
+    assert!(rows[0].starts_with("Sync every profile"), "{rows:#?}");
+    assert!(rows[1].starts_with("Check for updates"));
+    assert!(rows[2].starts_with("Review 1 held version"));
+    assert!(rows[3].starts_with("Find a plugin"));
+    assert!(rows[4].starts_with("Look through every item"));
+    let s = screen(&m);
+    let menu = s
+        .lines()
+        .position(|l| l.contains("Sync every profile"))
+        .unwrap();
+    let profiles = s.lines().position(|l| l.trim() == "Profiles").unwrap();
+    assert!(menu < profiles, "the menu comes before the profiles:\n{s}");
+    insta::assert_snapshot!("overview_menu_100x30", mask(&s));
+    // ⏎ on Sync asks; on Review goes there; on Find goes to Discover.
+    press(&mut m, KeyCode::Enter);
+    assert!(matches!(
+        &m.overlay,
+        Some(Overlay::Confirm {
+            job: Job::Sync(None),
+            ..
+        })
+    ));
+    ch(&mut m, 'n');
+    ch(&mut m, 'j');
+    press(&mut m, KeyCode::Enter);
+    assert!(matches!(
+        &m.overlay,
+        Some(Overlay::Confirm {
+            job: Job::Update(_),
+            ..
+        })
+    ));
+    ch(&mut m, 'n');
+    ch(&mut m, 'j');
+    press(&mut m, KeyCode::Enter);
+    assert_eq!(m.tab, Tab::Review);
+    ch(&mut m, '1');
+    m.cursor_mut().selected = 3;
+    press(&mut m, KeyCode::Enter);
+    assert_eq!(m.tab, Tab::Discover);
+    ch(&mut m, 'x');
+    press(&mut m, KeyCode::Esc);
+    press(&mut m, KeyCode::Right);
+    assert_eq!(m.tab, Tab::Overview);
+    // ↓ from the last entry skips the profiles and lands on what needs you.
+    m.cursor_mut().selected = 4;
+    ch(&mut m, 'j');
+    let at = view::rows(&m)[m.cursor().selected].to_string();
+    assert!(at.starts_with("! "), "{at:?}");
+    ch(&mut m, 'k');
+    assert_eq!(m.cursor().selected, 4);
+    // u checks for updates from Overview too.
+    ch(&mut m, 'u');
+    assert!(matches!(
+        &m.overlay,
+        Some(Overlay::Confirm {
+            job: Job::Update(_),
+            ..
+        })
+    ));
+}
+
+fn thousand() -> Env {
+    let env = Env::new();
+    let native = env.native();
+    env.ok(&["init"]);
+    let market = env.home.parent().unwrap().join("markets/big");
+    let plugins: Vec<serde_json::Value> = (0..1000)
+        .map(|i| serde_json::json!({"name": format!("plugin-{i:04}"), "description": "x", "source": format!("./p{i}")}))
+        .collect();
+    fs::create_dir_all(market.join(".claude-plugin")).unwrap();
+    fs::write(
+        market.join(".claude-plugin/marketplace.json"),
+        serde_json::json!({"name": "big", "plugins": plugins}).to_string(),
+    )
+    .unwrap();
+    fs::create_dir_all(native.join("plugins")).unwrap();
+    fs::write(
+        native.join("plugins/known_marketplaces.json"),
+        serde_json::json!({"big": {"source": {"source": "directory", "path": market.display().to_string()},
+                           "installLocation": market.display().to_string()}})
+        .to_string(),
+    )
+    .unwrap();
+    env
+}
+
+#[test]
+fn ac8_34_the_wheel_scrolls_the_view() {
+    let env = thousand();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '5');
+    update(&mut m, Msg::Scroll(3));
+    assert_eq!(m.cursor().offset, 3);
+    assert_eq!(m.cursor().selected, 3, "the selection stays on screen");
+    let sel = m.cursor().selected;
+    m.cursor_mut().selected = sel + 5;
+    update(&mut m, Msg::Scroll(3));
+    assert_eq!(m.cursor().offset, 6);
+    assert_eq!(
+        m.cursor().selected,
+        sel + 5,
+        "a visible selection doesn't move"
+    );
+    update(&mut m, Msg::Scroll(-99));
+    assert_eq!(m.cursor().offset, 3, "at most 3 rows a frame");
+}
+
+#[test]
+fn ec8_27_a_trackpad_flick_is_three_rows() {
+    let wheel = |kind| {
+        Msg::Mouse(MouseEvent {
+            kind,
+            column: 5,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+    let burst: Vec<Msg> = (0..200)
+        .map(|_| wheel(MouseEventKind::ScrollDown))
+        .collect();
+    let out = colctl::tui::coalesce(burst);
+    assert!(matches!(out.as_slice(), [Msg::Scroll(3)]), "{out:?}");
+    let mixed = vec![
+        wheel(MouseEventKind::ScrollUp),
+        Msg::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
+        wheel(MouseEventKind::ScrollDown),
+        wheel(MouseEventKind::ScrollDown),
+    ];
+    let out = colctl::tui::coalesce(mixed);
+    assert!(
+        matches!(
+            out.as_slice(),
+            [Msg::Scroll(-1), Msg::Key(_), Msg::Scroll(2)]
+        ),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn ac8_35_discover_searches_as_you_type() {
+    let env = catalog_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '5');
+    for c in "tl".chars() {
+        ch(&mut m, c);
+    }
+    assert_eq!(m.filter().text, "tl");
+    assert_eq!(m.list_len(), 2);
+    // q types, it doesn't quit; ? is still help.
+    assert!(ch(&mut m, 'q').is_empty());
+    assert!(!m.quit);
+    press(&mut m, KeyCode::Backspace);
+    ch(&mut m, '?');
+    assert_eq!(m.overlay, Some(Overlay::Help));
+    press(&mut m, KeyCode::Esc);
+    // The key bar says how it works.
+    let keys = screen(&m).lines().last().unwrap().to_string();
+    assert!(keys.contains("type to search"), "{keys}");
+    assert!(!keys.contains("q quit"), "{keys}");
+    // Results are ranked once per query.
+    let (a, _) = colctl::tui::tabs::results(&m);
+    let (b, _) = colctl::tui::tabs::results(&m);
+    assert!(std::rc::Rc::ptr_eq(&a, &b));
+    // ⏎ opens, a adds from there.
+    let cmds = press(&mut m, KeyCode::Enter);
+    assert!(matches!(cmds.as_slice(), [Cmd::Load(Load::Show(_))]));
+    drive(&env, &mut m, cmds);
+    assert!(screen(&m).contains("a add"), "{}", screen(&m));
+    ch(&mut m, 'a');
+    assert!(matches!(
+        &m.overlay,
+        Some(Overlay::Confirm {
+            job: Job::Add(_),
+            ..
+        })
+    ));
+    ch(&mut m, 'n');
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.filter().text, "");
+    assert_eq!(m.list_len(), 3);
+}
+
+#[test]
+fn ac8_39_a_failed_run_says_why() {
+    let mut m = model(100, 30);
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    ch(&mut m, 'y');
+    let failed = Report {
+        exit: 1,
+        lines: vec![
+            "✗ Synced 3 of 5 profiles · 2 failed".into(),
+            "  ✗  claude       1 step failed".into(),
+            "      ✗ update qdrant failed: qdrant@qdrant is still at d2127f6".into(),
+            "→ colctl sync retries".into(),
+        ],
+        errors: Vec::new(),
+    };
+    update(&mut m, Msg::Job(JobEvent::Finished(Ok(failed))));
+    let s = screen(&m);
+    assert!(s.contains("Result: colctl sync"), "{s}");
+    assert!(
+        s.contains("update qdrant failed: qdrant@qdrant is still at d2127f6"),
+        "{s}"
+    );
 }

@@ -286,6 +286,46 @@ Given an added or changed line in a held version that downloads and runs code (c
 Then it is flagged "suspicious" with what it does, and the recommendation is "look before approving"
 ```
 
+**AC8-32 Arrows switch tabs**
+```gherkin
+When I press → or ← with no overlay open and no text input focused
+Then the next or previous tab shows, as Tab and Shift-Tab do
+```
+
+**AC8-33 Overview has a menu of actions**
+```gherkin
+Then Overview lists, above the profiles, what you can do: sync every profile, check for updates, review what's
+  held (with the count), find a plugin, and look through profiles and items
+And ↑/↓ moves through the menu and then the "Needs you" rows; ⏎ runs the focused entry (writes ask first)
+```
+
+**AC8-34 The wheel scrolls the view**
+```gherkin
+When the wheel or a trackpad sends scroll events over a list
+Then the view scrolls at most 3 rows per frame however many events arrive, and the selection moves only to stay
+  on screen
+```
+
+**AC8-35 Discover searches as you type**
+```gherkin
+When Discover is open and I type letters
+Then they go to the search line (no "/" needed); ↑/↓ move through results; ⏎ opens the plugin; "a" in the open
+  plugin adds it; Esc clears the search
+And the results are ranked once per change of query or catalog, not on every frame
+```
+
+**AC8-38 The status line always says what runs**
+```gherkin
+Then while anything runs or loads, the status line shows a spinner and the command it is, the same way for every
+  kind of work ("colctl approve qdrant-skills", "colctl status", "colctl review databricks")
+```
+
+**AC8-39 A failed run says why**
+```gherkin
+When a run ends with any profile failing
+Then a result overlay opens with the CLI's full report: which profiles failed, each failure's reason, and the fix
+```
+
 ## Constraints (not criteria)
 
 - Built on ratatui, crossterm, tachyonfx and nucleo-matcher. No async runtime, and no new process model.

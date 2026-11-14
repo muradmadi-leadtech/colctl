@@ -6,7 +6,13 @@ expression: mask(&s)
 ────────────────────────────────────────────────────────────────────────────────
  ✓ All 2 profiles in sync · 0 sources · nothing held for review
 
- Profiles
+ › Sync every profile                 s
+   Check for updates                  u
+   Review held versions (none now)    4
+   Find a plugin                      5
+   Look through every item            3
+
+   Profiles
    ✓ claude       ~/.claude            1 skill
    ✓ kilo-claude  ~/…/profiles/claude  1 skill
 
@@ -19,10 +25,4 @@ expression: mask(&s)
 
 
 
-
-
-
-
-
-
- s sync · ⏎ run fix · r reload · ? keys · q quit
+ ⏎ run · s sync · u check updates · r reload · ? keys · q quit

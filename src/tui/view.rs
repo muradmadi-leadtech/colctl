@@ -22,6 +22,13 @@ pub struct Body {
     pub header: Vec<Line<'static>>,
     pub rows: Vec<Line<'static>>,
     pub empty: Option<Line<'static>>,
+    /// Rows the selection skips: headings and lines that are only there to read.
+    pub skip: Vec<usize>,
+}
+
+/// The current tab's rows the selection skips.
+pub fn skipped(m: &Model) -> Vec<usize> {
+    tabs::body(m, theme(m)).skip
 }
 
 /// The rows the current tab lists.
@@ -100,7 +107,14 @@ pub fn tab_at(m: &Model, x: u16, y: u16) -> Option<Tab> {
 /// jumps only in a detail with a diff.
 fn offered(m: &Model, b: &keys::Binding) -> bool {
     match (&m.overlay, b.action) {
-        (Some(Overlay::Detail { held, .. }), Action::Approve | Action::Reject) => held.is_some(),
+        (Some(Overlay::Detail { held, .. }), Action::Approve) => {
+            held.is_some() || m.tab == Tab::Discover
+        }
+        (Some(Overlay::Detail { held, .. }), Action::Reject) => held.is_some(),
+        // In Discover's search, letters search: only keys that aren't text are offered.
+        (None, _) if m.tab == Tab::Discover && b.scope == keys::Scope::Global => {
+            !matches!(b.code, ratatui::crossterm::event::KeyCode::Char(c) if c != '?')
+        }
         (Some(Overlay::Detail { lines, .. }), Action::NextFile | Action::PrevFile) => {
             lines.iter().any(|l| l.starts_with("diff --git "))
         }
@@ -109,6 +123,14 @@ fn offered(m: &Model, b: &keys::Binding) -> bool {
             held.is_some() && !lines.iter().any(|l| l.starts_with("Risk flags"))
         }
         _ => true,
+    }
+}
+
+/// A key's label where you are: `a` adds in Discover.
+fn label(m: &Model, b: &keys::Binding) -> &'static str {
+    match (m.tab, b.action) {
+        (Tab::Discover, Action::Approve) => "add",
+        _ => b.label,
     }
 }
 
@@ -138,7 +160,7 @@ fn key_spans(m: &Model) -> Vec<(Action, String, u16, u16)> {
         chosen.remove(drop);
     }
     for b in chosen {
-        let text = format!("{} {}", b.key, b.label);
+        let text = format!("{} {}", b.key, label(m, b));
         let w = text_width(&text) as u16;
         if x + w > max {
             break;
@@ -284,14 +306,14 @@ fn status_lines(m: &Model) -> Vec<Line<'static>> {
         Some(toast) => styled_verdict(t, &toast.text),
         None => Line::default(),
     };
-    if m.pending > 0 {
+    // AC8-38: what runs is always shown the same way: a spinner and its command.
+    if let Some(load) = m.pending.first() {
         if !line.spans.is_empty() {
             line.spans.push(Span::raw("   "));
         }
         line.spans
             .push(Span::styled(spinner(m), t.style(Token::Accent)));
-        line.spans
-            .push(Span::styled(" loading…", t.style(Token::Muted)));
+        line.spans.push(Span::raw(format!(" {}", load.command())));
     }
     vec![line]
 }
@@ -521,7 +543,7 @@ fn overlay(m: &Model, f: &mut Frame, o: &Overlay) {
             let keys: Vec<String> = keys::bar(&m.scopes())
                 .iter()
                 .filter(|b| b.scope == keys::Scope::Detail && offered(m, b))
-                .map(|b| format!("{} {}", b.key, b.label))
+                .map(|b| format!("{} {}", b.key, label(m, b)))
                 .collect();
             (title.clone(), shown, format!("{}{pos}", keys.join(" · ")))
         }

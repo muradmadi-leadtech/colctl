@@ -70,6 +70,31 @@ pub fn run(ctx: &Ctx, opts: Options) -> i32 {
     }
 }
 
+/// Combines a burst of wheel or trackpad events into one scroll of at most 3 rows either way, so a
+/// flick never races through a list (AC8-34, EC8-27). Everything else passes through in order.
+pub fn coalesce(msgs: Vec<Msg>) -> Vec<Msg> {
+    if !msgs.is_empty() {
+        return msgs;
+    }
+    let mut out: Vec<Msg> = Vec::new();
+    for msg in msgs {
+        let step = match &msg {
+            Msg::Mouse(e) if e.kind == event::MouseEventKind::ScrollDown => 1,
+            Msg::Mouse(e) if e.kind == event::MouseEventKind::ScrollUp => -1,
+            _ => 0,
+        };
+        if step == 0 {
+            out.push(msg);
+            continue;
+        }
+        match out.last_mut() {
+            Some(Msg::Scroll(n)) => *n = (*n + step).clamp(-3, 3),
+            _ => out.push(Msg::Scroll(step)),
+        }
+    }
+    out
+}
+
 /// After the terminal stops working, a running write finishes before the app exits, so nothing is
 /// left half done (EC8-16).
 pub fn wait_for_job(rx: &std::sync::mpsc::Receiver<Msg>, m: &mut Model) {
@@ -134,14 +159,22 @@ fn frames(
         let busy = model.job.is_some() || fx.running();
         let wait = Duration::from_millis(if busy { 33 } else { 250 });
         if event::poll(wait)? {
-            let msg = match event::read()? {
-                Event::Key(k) if k.kind == event::KeyEventKind::Press => Some(Msg::Key(k)),
-                Event::Mouse(m) => Some(Msg::Mouse(m)),
-                Event::Resize(w, h) => Some(Msg::Resize(w, h)),
-                Event::Paste(p) => Some(Msg::Paste(p)),
-                _ => None,
-            };
-            if let Some(msg) = msg {
+            // Everything waiting, so a trackpad's burst of scrolls becomes one (AC8-34).
+            let mut msgs = Vec::new();
+            loop {
+                let msg = match event::read()? {
+                    Event::Key(k) if k.kind == event::KeyEventKind::Press => Some(Msg::Key(k)),
+                    Event::Mouse(m) => Some(Msg::Mouse(m)),
+                    Event::Resize(w, h) => Some(Msg::Resize(w, h)),
+                    Event::Paste(p) => Some(Msg::Paste(p)),
+                    _ => None,
+                };
+                msgs.extend(msg);
+                if msgs.len() >= 256 || !event::poll(Duration::ZERO)? {
+                    break;
+                }
+            }
+            for msg in coalesce(msgs) {
                 // A key or click finishes any effect at once (AC8-24).
                 if matches!(
                     msg,
