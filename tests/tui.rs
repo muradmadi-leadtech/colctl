@@ -635,9 +635,7 @@ fn mask(text: &str) -> String {
     // Repos in temp folders.
     let mut text = text.clone();
     while let Some(at) = text.find("file://") {
-        let end = text[at..]
-            .find(['\n', '│'])
-            .map_or(text.len(), |e| at + e);
+        let end = text[at..].find(['\n', '│']).map_or(text.len(), |e| at + e);
         text.replace_range(at..end, "[REPO]");
     }
     let mut out = String::new();
