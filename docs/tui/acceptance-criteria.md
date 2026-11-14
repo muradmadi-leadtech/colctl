@@ -260,6 +260,15 @@ Then docs/tutorials has "A first look around colctl's TUI", docs/reference has a
 And every AC8 and EC8 id has a test whose name contains it
 ```
 
+## Revise (owner, 2026-11-14)
+
+**AC8-40 A source whose version didn't change still updates in Claude**
+```gherkin
+Given a source plugin pinned to a new commit whose plugin.json version is unchanged
+When colctl syncs a Claude profile and `claude plugin update` leaves the old commit installed
+Then colctl reinstalls the plugin (uninstall, install) and checks again, and the profile ends at the new commit
+```
+
 ## Constraints (not criteria)
 
 - Built on ratatui, crossterm, tachyonfx and nucleo-matcher. No async runtime, and no new process model.

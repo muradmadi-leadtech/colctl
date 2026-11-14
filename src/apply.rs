@@ -99,6 +99,13 @@ fn converged(
     }
 }
 
+/// The commit Claude records for `id` in a profile, if any.
+fn claude_rev(harness: &Harness, id: &str) -> Option<String> {
+    crate::adapter::read_plugins(&harness.path)
+        .ok()
+        .and_then(|p| p.revs.get(id).cloned())
+}
+
 fn file_outcome(result: anyhow::Result<()>) -> Outcome {
     match result {
         Ok(()) => Outcome::Done,
@@ -265,7 +272,21 @@ pub fn apply_observed(
                 } else if already {
                     Outcome::Done
                 } else {
-                    converged(run(action), tool, harness, id, marketplace, rev)
+                    let mut outcome = run(action);
+                    // AC8-40: Claude keeps a plugin by its version, so a new commit at the same
+                    // version is "already at the latest version". Reinstalling picks it up.
+                    if outcome.is_done()
+                        && tool == Some(Tool::Claude)
+                        && matches!(action, Action::UpdateSource { .. })
+                        && !marketplace.starts_with("colctl-")
+                        && claude_rev(harness, id).is_some_and(|at| at != *rev)
+                    {
+                        outcome = run(&Action::Uninstall { id: id.clone() });
+                        if outcome.is_done() {
+                            outcome = run(&Action::Install { id: id.clone() });
+                        }
+                    }
+                    converged(outcome, tool, harness, id, marketplace, rev)
                 };
                 if outcome.is_done() {
                     state.sources.insert(

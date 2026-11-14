@@ -28,3 +28,4 @@
 | EC8-24 | Boundary | `colctl --color never` with no command | Opens the TUI without colour (global flags apply to the TUI) |
 | EC8-25 | Boundary | `colctl -q` or `-v` with no command | The TUI opens; `-q` and `-v` don't apply to it |
 | EC8-26 | Boundary | Search query with only spaces | Treated as empty: every plugin listed |
+| EC8-28 | Failure | Reinstalling a Claude plugin fails half way (uninstalled, install fails) | The step fails with the install's error; the next sync installs it again |

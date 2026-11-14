@@ -35,9 +35,30 @@ fn source_entry(src: &str) -> Value {
     }
 }
 
-/// The installed_plugins.json entry: a local (directory) marketplace records its checkout's commit.
-fn install_entry(markets: &Value, market: &str) -> Value {
-    let mut entry = json!({"scope": "user"});
+/// The version a marketplace's plugin declares in its plugin.json ("0.0.0" when it says none).
+fn plugin_version(markets: &Value, market: &str, name: &str) -> String {
+    let location = Path::new(
+        markets[market]["installLocation"]
+            .as_str()
+            .unwrap_or_default(),
+    );
+    let listing = read(&location.join(".claude-plugin/marketplace.json"), json!({}));
+    let source = listing["plugins"]
+        .as_array()
+        .and_then(|ps| ps.iter().find(|p| p["name"] == name))
+        .and_then(|p| p["source"].as_str())
+        .unwrap_or("./");
+    let manifest = read(
+        &location.join(source).join(".claude-plugin/plugin.json"),
+        json!({}),
+    );
+    manifest["version"].as_str().unwrap_or("0.0.0").to_string()
+}
+
+/// The installed_plugins.json entry: a local (directory) marketplace records its checkout's commit,
+/// and every entry records the plugin's version, as Claude keys its cache by it.
+fn install_entry(markets: &Value, market: &str, name: &str) -> Value {
+    let mut entry = json!({"scope": "user", "version": plugin_version(markets, market, name)});
     let location = markets[market]["installLocation"]
         .as_str()
         .unwrap_or_default();
@@ -152,7 +173,8 @@ fn main() {
                 eprintln!("Plugin \"{id}\" not found: marketplace \"{market}\" is not known");
                 exit(1);
             }
-            let entry = install_entry(&markets, market);
+            let name = id.rsplit_once('@').map_or(*id, |(n, _)| n);
+            let entry = install_entry(&markets, market, name);
             let plugins = installed["plugins"].as_object_mut().unwrap();
             plugins.insert(id.to_string(), json!([entry]));
             write(&installed_path, &installed);
@@ -163,7 +185,14 @@ fn main() {
                 eprintln!("Plugin \"{id}\" is not installed");
                 exit(1);
             }
-            let entry = install_entry(&markets, market);
+            // Like Claude: the same version is "already at the latest version", whatever the commit.
+            let name = id.rsplit_once('@').map_or(*id, |(n, _)| n);
+            let now = &installed["plugins"][*id][0]["version"];
+            if now.as_str() == Some(plugin_version(&markets, market, name).as_str()) {
+                println!("✔ {name} is already at the latest version");
+                return;
+            }
+            let entry = install_entry(&markets, market, name);
             installed["plugins"][*id] = json!([entry]);
             write(&installed_path, &installed);
         }

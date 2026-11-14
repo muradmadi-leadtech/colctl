@@ -252,8 +252,8 @@ fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_ac6_30_ac8_31_every_criterion_and_edge_case
         ("EC6-", 23),
         ("AC7-", 17),
         ("EC7-", 20),
-        ("AC8-", 31),
-        ("EC8-", 26),
+        ("AC8-", 32),
+        ("EC8-", 27),
     ] {
         assert_eq!(
             defined.iter().filter(|i| i.starts_with(prefix)).count(),
