@@ -315,7 +315,12 @@ fn attention_rows(t: Theme, rows: &[Attention], cols: usize) -> Vec<Line<'static
     let what_room = cols
         .saturating_sub(2 + place_w + 2 + kind_w + 2 + name_w + 2 + 2 + fix_w)
         .max(8)
-        .min(rows.iter().map(|a| width(&escape(&a.what))).max().unwrap_or(0));
+        .min(
+            rows.iter()
+                .map(|a| width(&escape(&a.what)))
+                .max()
+                .unwrap_or(0),
+        );
     rows.iter()
         .map(|a| {
             let what = cut(&escape(&a.what), what_room);
