@@ -452,7 +452,7 @@ pub fn refresh(ctx: &Ctx, items: &[String], dry_run: bool) -> Result<i32, CliErr
 }
 
 /// A held candidate as `review`, `status` and `approve` see it.
-pub(super) struct View {
+pub(crate) struct View {
     pub key: String,
     pub name: String,
     pub candidate: Candidate,
@@ -987,7 +987,7 @@ fn detail_lines(ctx: &Ctx, v: &View) -> Vec<String> {
 }
 
 /// The JSON object for one candidate (interfaces.md § JSON).
-pub(super) fn view_json(v: &View, full: bool) -> Value {
+pub(crate) fn view_json(v: &View, full: bool) -> Value {
     let (from, to, origin, held_at) = match &v.candidate {
         Candidate::Source(c) => (c.from.clone(), c.to.clone(), None, c.held_at),
         Candidate::Skill(c) | Candidate::Agent(c) => (
@@ -1055,7 +1055,7 @@ pub(super) fn view_json(v: &View, full: bool) -> Value {
 }
 
 /// Every held candidate, for `status` (no diff). Without git, candidates are listed unchecked.
-pub(super) fn held_views(ctx: &Ctx, ws: &Workspace, git: Option<&Git>) -> Vec<View> {
+pub(crate) fn held_views(ctx: &Ctx, ws: &Workspace, git: Option<&Git>) -> Vec<View> {
     ws.state
         .quarantine
         .iter()
@@ -1077,7 +1077,7 @@ pub(super) fn held_views(ctx: &Ctx, ws: &Workspace, git: Option<&Git>) -> Vec<Vi
 }
 
 /// The `status --json` entry for a held candidate (AC4-29).
-pub(super) fn status_entry(v: &View) -> Value {
+pub(crate) fn status_entry(v: &View) -> Value {
     let mut out = view_json(v, false);
     out["state"] = json!("pending-review");
     out

@@ -3,7 +3,8 @@
 //! still needs attention. Tool calls appear with `-v`.
 
 use super::Planned;
-use super::status_view::{Attention, attention_rows, rows_with_fixes};
+use super::status_view::{attention_rows, rows_with_fixes};
+use crate::core::status::Attention;
 
 use crate::adapter::Root;
 use crate::apply::{Applied, Outcome};
