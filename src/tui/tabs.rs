@@ -1217,16 +1217,31 @@ pub fn held_summary(h: &crate::core::quarantine::HeldSummary) -> Vec<String> {
         }
         None => out.push("· No review available".into()),
     }
-    let code: Vec<&crate::risk::Flag> = h
+    // One line per file, its reasons joined.
+    let mut code: Vec<(String, Vec<String>)> = Vec::new();
+    for f in h
         .flag_list
         .iter()
         .filter(|f| f.kind != crate::risk::FlagKind::Suspicious)
-        .collect();
+    {
+        match code.iter_mut().find(|(p, _)| *p == f.path) {
+            Some((_, reasons)) => reasons.push(f.reason.clone()),
+            None => code.push((f.path.clone(), vec![f.reason.clone()])),
+        }
+    }
     if !code.is_empty() {
         out.push(String::new());
-        out.push(format!("Flagged ({})", code.len()));
-        for f in code.iter().take(8) {
-            out.push(format!("  {}  {}", escape(&f.path), escape(&f.reason)));
+        out.push(format!(
+            "Flagged ({} file{})",
+            code.len(),
+            if code.len() == 1 { "" } else { "s" }
+        ));
+        for (path, reasons) in code.iter().take(8) {
+            out.push(format!(
+                "  {}  {}",
+                escape(path),
+                escape(&reasons.join("; "))
+            ));
         }
         if code.len() > 8 {
             out.push(format!(
