@@ -494,3 +494,60 @@ fn ac8_15_a_run_with_two_verdicts_reports_both_worst_first() {
     };
     assert_eq!(none.verdict(), "plain");
 }
+
+mod same_version {
+    use super::*;
+
+    /// One Claude profile with a source plugin whose upstream moved on without bumping its version.
+    fn fixture() -> (Env, String) {
+        let env = Env::new();
+        env.native();
+        env.ok(&["init"]);
+        let (repo, url, _) = env.upstream("superpowers", true, false, Some("superpowers-dev"));
+        env.ok(&["add", "source", &url]);
+        let new = env.upstream_commit(&repo, "v2");
+        env.ok(&["update"]);
+        (env, new)
+    }
+
+    fn installed_sha(env: &Env) -> String {
+        let v: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(env.home.join(".claude/plugins/installed_plugins.json")).unwrap(),
+        )
+        .unwrap();
+        v["plugins"]["superpowers@superpowers-dev"][0]["gitCommitSha"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    #[test]
+    fn ac8_40_a_new_commit_at_the_same_version_still_installs() {
+        let (env, new) = fixture();
+        let (code, out, err) = env.code(&["approve", "superpowers", "--color", "never"]);
+        assert_eq!(code, 0, "{out}{err}");
+        assert_eq!(installed_sha(&env), new);
+        let calls = env.log_args().join("\n");
+        assert!(
+            calls.contains("plugin update superpowers@superpowers-dev"),
+            "{calls}"
+        );
+        assert!(
+            calls.contains("plugin uninstall superpowers@superpowers-dev"),
+            "{calls}"
+        );
+        assert_eq!(env.code(&["status"]).0, 0);
+    }
+
+    #[test]
+    fn ec8_28_a_reinstall_that_fails_is_retried_by_the_next_sync() {
+        let (env, new) = fixture();
+        let mut env = env.var("FAKE_CLAUDE_FAIL", "plugin install");
+        let (code, out, _) = env.code(&["approve", "superpowers", "--color", "never"]);
+        assert_eq!(code, 1, "{out}");
+        assert!(out.contains("plugin install"), "{out}");
+        env.vars.clear();
+        env.ok(&["sync"]);
+        assert_eq!(installed_sha(&env), new);
+    }
+}
