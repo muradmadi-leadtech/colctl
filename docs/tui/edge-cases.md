@@ -5,7 +5,7 @@
 | EC8-01 | Empty | `~/.colctl` doesn't exist | Overview: "colctl isn't set up yet. Quit and run colctl init." Other tabs show the same line, except Discover, which still searches catalogs |
 | EC8-02 | Invalid | `config.toml` doesn't parse | The error overlay with the CLI's error, cause and hint, then Overview with the same message. The app stays open, and `r` retries |
 | EC8-03 | Empty | No profiles registered | Overview's verdict says so, with `→ colctl init` |
-| EC8-04 | Empty | No catalogs known | Discover: "No plugin catalogs yet", with the CLI's hint |
+| EC8-04 | Empty | No catalogs known | Discover: the CLI's "No catalogs found", with its hint |
 | EC8-05 | Empty | A search with no results | "No plugins match "<q>"", and Esc clears it |
 | EC8-06 | Boundary | 1000+ items, or a 10 000-line diff | Lists and diffs scroll smoothly. Only visible rows render, and each frame takes ≤ 16 ms in the benchmark test |
 | EC8-07 | Boundary | Names and paths with wide characters (CJK, emoji) | Columns stay aligned, using the CLI's width rules |

@@ -70,6 +70,22 @@ pub fn run(ctx: &Ctx, opts: Options) -> i32 {
     }
 }
 
+/// After the terminal stops working, a running write finishes before the app exits, so nothing is
+/// left half done (EC8-16).
+pub fn wait_for_job(rx: &std::sync::mpsc::Receiver<Msg>, m: &mut Model) {
+    if !m.quit {
+        return;
+    }
+    while m.job.is_some() {
+        match rx.recv() {
+            Ok(msg) => {
+                app::update(m, msg);
+            }
+            Err(_) => break,
+        }
+    }
+}
+
 fn run_loop(ctx: &Ctx, opts: Options) -> std::io::Result<()> {
     let _guard = terminal::Guard::enter()?;
     let mut term = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
@@ -77,29 +93,42 @@ fn run_loop(ctx: &Ctx, opts: Options) -> std::io::Result<()> {
     let mut model = Model::new(opts, size.width, size.height);
     let (tx, rx) = std::sync::mpsc::channel();
     let mut worker = worker::Worker::new(ctx.clone(), tx);
+    let result = frames(&mut term, &mut model, &rx, &mut worker);
+    if result.is_err() {
+        wait_for_job(&rx, &mut model);
+    }
+    result
+}
+
+fn frames(
+    term: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    model: &mut Model,
+    rx: &std::sync::mpsc::Receiver<Msg>,
+    worker: &mut worker::Worker,
+) -> std::io::Result<()> {
     let started = Instant::now();
     let width = |m: &Model| view::detail_width(m).max(36);
     for cmd in model.start() {
-        worker.spawn(cmd, width(&model));
+        worker.spawn(cmd, width(model));
     }
-    let mut fx = motion::Fx::new(&model);
+    let mut fx = motion::Fx::new(model);
     loop {
         let mut cmds: Vec<Cmd> = Vec::new();
         while let Ok(msg) = rx.try_recv() {
-            cmds.extend(app::update(&mut model, msg));
+            cmds.extend(app::update(model, msg));
         }
         let now = started.elapsed().as_millis() as u64;
-        cmds.extend(app::update(&mut model, Msg::Tick(now)));
+        cmds.extend(app::update(model, Msg::Tick(now)));
         if model.dirty || fx.running() {
-            fx.observe(&model);
+            fx.observe(model);
             term.draw(|f| {
-                view::draw(&model, f);
+                view::draw(model, f);
                 fx.apply(now, f.buffer_mut());
             })?;
             model.dirty = false;
         }
         for cmd in cmds.drain(..) {
-            worker.spawn(cmd, width(&model));
+            worker.spawn(cmd, width(model));
         }
         if model.quit {
             return Ok(());
@@ -127,8 +156,8 @@ fn run_loop(ctx: &Ctx, opts: Options) -> std::io::Result<()> {
                 ) {
                     fx.finish();
                 }
-                for cmd in app::update(&mut model, msg) {
-                    worker.spawn(cmd, width(&model));
+                for cmd in app::update(model, msg) {
+                    worker.spawn(cmd, width(model));
                 }
             }
         }

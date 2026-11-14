@@ -91,7 +91,7 @@ pub fn update(
     let _lock = if check || dry_run {
         None
     } else {
-        Some(Lock::acquire(&ctx.source)?)
+        Some(Lock::acquire_with(&ctx.source, &ctx.out)?)
     };
     let vault = Vault {
         git: &git,
@@ -404,7 +404,7 @@ pub fn refresh(ctx: &Ctx, items: &[String], dry_run: bool) -> Result<i32, CliErr
             .lines(super::item_lines(ctx, Token::Info, &verdict, &[], &said));
         return Ok(0);
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     if keys.is_empty() {
         ctx.out.line(crate::ui::render::verdict(
             &ctx.out.caps,
@@ -1459,7 +1459,7 @@ pub fn approve(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<
             return Ok(EXIT_DRIFT);
         }
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     commit_pending(&git, ctx)?;
     let ws = load(ctx)?;
     let mut st = ws.state.clone();
@@ -1581,7 +1581,7 @@ pub fn reject(ctx: &Ctx, names: &[String], all: bool, dry_run: bool) -> Result<i
             return Ok(EXIT_DRIFT);
         }
     }
-    let _lock = Lock::acquire(&ctx.source)?;
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
     let mut st = state::load(&ctx.source)?;
     let vault = Vault {
         git: &git,

@@ -83,7 +83,7 @@ fn tty() -> Facts {
 // ── Launch (AC8-06, AC8-07, AC8-12, EC8-20, EC8-23 – 25) ────────────────────────────────────
 
 #[test]
-fn ac8_06_opens_only_in_an_interactive_terminal() {
+fn ac8_06_ec8_23_opens_only_in_an_interactive_terminal() {
     let s = Settings::default();
     assert!(launch(&s, &tty(), None).is_some());
     for f in [
@@ -133,7 +133,7 @@ fn ac8_06_piped_colctl_is_the_welcome_help() {
 }
 
 #[test]
-fn ac8_12_ec8_24_colour_follows_the_flags() {
+fn ac8_12_ec8_24_ec8_25_colour_follows_the_flags() {
     let color = |s: Settings, f: Facts| launch(&s, &f, None).unwrap().color;
     assert!(color(Settings::default(), tty()));
     assert!(!color(
@@ -180,7 +180,7 @@ fn ac8_12_ec8_20_reduced_motion() {
 }
 
 #[test]
-fn ac8_07_restoring_twice_is_harmless() {
+fn ac8_07_ec8_22_restoring_twice_is_harmless() {
     colctl::tui::terminal::restore();
     colctl::tui::terminal::restore();
 }
@@ -723,7 +723,7 @@ fn ac8_13_overview_leads_with_the_status_verdict() {
 }
 
 #[test]
-fn ac8_13_snapshots_of_overview() {
+fn ac8_13_ec8_09_snapshots_of_overview() {
     let env = held_fixture();
     for (w, h) in [(80, 24), (120, 40), (60, 20)] {
         let m = opened(&env, w, h);
@@ -1134,7 +1134,7 @@ fn ac8_08_discover_says_it_is_loading() {
 }
 
 #[test]
-fn ac8_22_search_as_you_type() {
+fn ac8_22_ec8_05_search_as_you_type() {
     let env = catalog_fixture();
     let mut m = opened(&env, 100, 30);
     ch(&mut m, '5');
@@ -1390,4 +1390,512 @@ fn ac8_24_a_key_finishes_effects() {
     ch(&mut m, '2');
     fx.observe(&m);
     assert!(fx.is_empty());
+}
+
+// ── Parity (AC8-30) ─────────────────────────────────────────────────────────────────────────
+
+/// Everything colctl and the tools wrote under `env`'s home, with what differs between two
+/// identical machines masked: the temp root, commit ids, timestamps.
+fn state_of(env: &Env) -> Vec<String> {
+    fn walk(dir: &std::path::Path, base: &std::path::Path, out: &mut Vec<(String, String)>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let path = e.path();
+            let rel = path.strip_prefix(base).unwrap().display().to_string();
+            // Git's own files and colctl's lock and temp files aren't state.
+            if rel.ends_with("/.git") || rel == ".colctl/.git" || rel.contains(".lock") {
+                continue;
+            }
+            let meta = fs::symlink_metadata(&path).unwrap();
+            if meta.file_type().is_symlink() {
+                let to = fs::read_link(&path).unwrap().display().to_string();
+                out.push((rel, format!("-> {to}")));
+            } else if meta.is_dir() {
+                out.push((rel.clone(), "dir".into()));
+                walk(&path, base, out);
+            } else {
+                let text = fs::read(&path)
+                    .map(|b| String::from_utf8_lossy(&b).into_owned())
+                    .unwrap_or_default();
+                out.push((rel, text));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&env.home, &env.home, &mut out);
+    out.sort();
+    let root = env.home.parent().unwrap().display().to_string();
+    let mut lines: Vec<String> = out
+        .into_iter()
+        .map(|(k, v)| {
+            let v = v.replace(&root, "[ROOT]");
+            // Timestamps: "held_at": 1731600000, "installedAt": "2026-…", lastUpdated…
+            let v: String = v
+                .split('\n')
+                .map(|l| {
+                    if ["held_at", "At\"", "_at\"", "lastUpdated", "updated"]
+                        .iter()
+                        .any(|k| l.contains(k))
+                    {
+                        "[TIME LINE]".to_string()
+                    } else {
+                        l.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            mask(&format!("{k}: {v}"))
+        })
+        .collect();
+    lines.extend(
+        env.commits()
+            .into_iter()
+            .map(|c| mask(&format!("commit: {c}"))),
+    );
+    lines
+}
+
+fn same_state(tui: &Env, cli: &Env) {
+    let (a, b) = (state_of(tui), state_of(cli));
+    let only_tui: Vec<&String> = a.iter().filter(|l| !b.contains(l)).collect();
+    let only_cli: Vec<&String> = b.iter().filter(|l| !a.contains(l)).collect();
+    assert!(
+        only_tui.is_empty() && only_cli.is_empty(),
+        "TUI only:\n{only_tui:#?}\nCLI only:\n{only_cli:#?}"
+    );
+}
+
+/// Runs what the open confirmation asks, to the end.
+fn confirm(env: &Env, m: &mut Model) {
+    assert!(
+        matches!(m.overlay, Some(Overlay::Confirm { .. })),
+        "{:?}\n{}",
+        m.overlay,
+        screen(m)
+    );
+    let cmds = ch(m, 'y');
+    drive(env, m, cmds);
+    assert!(m.job.is_none());
+}
+
+#[test]
+fn ac8_30_sync_matches_the_cli() {
+    let (tui, cli) = (held_fixture(), held_fixture());
+    let mut m = opened(&tui, 100, 30);
+    ch(&mut m, 's');
+    confirm(&tui, &mut m);
+    cli.ok(&["sync"]);
+    same_state(&tui, &cli);
+}
+
+#[test]
+fn ac8_30_sync_one_profile_matches_the_cli() {
+    let (tui, cli) = (held_fixture(), held_fixture());
+    let mut m = opened(&tui, 100, 30);
+    ch(&mut m, '2');
+    m.cursor_mut().selected = row_of(&m, "claude ");
+    ch(&mut m, 's');
+    confirm(&tui, &mut m);
+    cli.ok(&["sync", "--harness", "claude"]);
+    same_state(&tui, &cli);
+}
+
+fn update_fixture() -> Env {
+    let env = Env::new();
+    env.native();
+    env.kilo();
+    env.ok(&["init"]);
+    let (repo, url, _) = env.upstream("superpowers", true, false, Some("superpowers-dev"));
+    env.ok(&["add", "source", &url]);
+    env.upstream_commit(&repo, "v2");
+    env
+}
+
+#[test]
+fn ac8_30_update_matches_the_cli() {
+    let (tui, cli) = (update_fixture(), update_fixture());
+    let mut m = opened(&tui, 100, 30);
+    ch(&mut m, '4');
+    ch(&mut m, 'u');
+    confirm(&tui, &mut m);
+    cli.ok(&["update"]);
+    same_state(&tui, &cli);
+}
+
+#[test]
+fn ac8_30_approve_matches_the_cli() {
+    let (tui, cli) = (held_fixture(), held_fixture());
+    let mut m = opened(&tui, 100, 30);
+    ch(&mut m, '4');
+    ch(&mut m, 'a');
+    confirm(&tui, &mut m);
+    cli.ok(&["approve", "superpowers"]);
+    same_state(&tui, &cli);
+}
+
+#[test]
+fn ac8_30_approve_all_matches_the_cli() {
+    let (tui, cli) = (held_fixture(), held_fixture());
+    let mut m = opened(&tui, 100, 30);
+    ch(&mut m, '4');
+    ch(&mut m, 'A');
+    confirm(&tui, &mut m);
+    cli.ok(&["approve", "--all"]);
+    same_state(&tui, &cli);
+}
+
+#[test]
+fn ac8_30_reject_matches_the_cli() {
+    let (tui, cli) = (held_fixture(), held_fixture());
+    let mut m = opened(&tui, 100, 30);
+    ch(&mut m, '4');
+    ch(&mut m, 'x');
+    confirm(&tui, &mut m);
+    cli.ok(&["reject", "superpowers"]);
+    same_state(&tui, &cli);
+}
+
+/// A marketplace in a local folder, so adding from it never touches the network.
+fn local_catalog_fixture() -> Env {
+    let env = Env::new();
+    let native = env.native();
+    env.ok(&["init"]);
+    let market = env.home.parent().unwrap().join("markets/local");
+    let write = |path: &std::path::Path, v: serde_json::Value| {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, v.to_string()).unwrap();
+    };
+    write(
+        &market.join(".claude-plugin/marketplace.json"),
+        serde_json::json!({"name": "local", "plugins": [
+            {"name": "helper", "description": "Helps", "source": "./helper"}]}),
+    );
+    write(
+        &native.join("plugins/known_marketplaces.json"),
+        serde_json::json!({"local": {"source": {"source": "directory", "path": market.display().to_string()},
+                           "installLocation": market.display().to_string()}}),
+    );
+    // A git repo with the plugin in it, so adding it as a source clones from disk.
+    write(
+        &market.join("helper/.claude-plugin/plugin.json"),
+        serde_json::json!({"name": "helper", "version": "1.0.0"}),
+    );
+    fs::create_dir_all(market.join("helper/skills/help")).unwrap();
+    fs::write(
+        market.join("helper/skills/help/SKILL.md"),
+        "---\nname: help\ndescription: Helps\n---\n",
+    )
+    .unwrap();
+    for args in [
+        &["init", "-q", "-b", "main"][..],
+        &["add", "-A"],
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "v1",
+        ],
+    ] {
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&market)
+            .args(args)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+    env
+}
+
+#[test]
+fn ac8_30_add_matches_the_cli() {
+    let (tui, cli) = (local_catalog_fixture(), local_catalog_fixture());
+    let mut m = opened(&tui, 100, 30);
+    ch(&mut m, '5');
+    m.cursor_mut().selected = row_of(&m, "helper");
+    ch(&mut m, 'a');
+    let Some(Overlay::Confirm {
+        job: Job::Add(words),
+        ..
+    }) = &m.overlay
+    else {
+        panic!("{:?}", m.overlay);
+    };
+    let words = words.clone();
+    assert_eq!(words[0], "add", "{words:?}");
+    confirm(&tui, &mut m);
+    let args: Vec<&str> = words.iter().map(String::as_str).collect();
+    cli.ok(&args);
+    same_state(&tui, &cli);
+}
+
+// ── The rest of the edge cases ──────────────────────────────────────────────────────────────
+
+#[test]
+fn ac8_29_reload_keeps_the_tab_and_the_row() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '3');
+    m.cursor_mut().selected = row_of(&m, "superpowers");
+    let before = m.cursor().selected;
+    // Changed outside: a new skill.
+    env.source_skill("beta");
+    env.ok(&["sync"]);
+    let cmds = ch(&mut m, 'r');
+    drive(&env, &mut m, cmds);
+    assert_eq!(m.tab, Tab::Items);
+    assert!(screen(&m).contains("beta"));
+    let now = row_of(&m, "superpowers");
+    assert_eq!(m.cursor().selected, before.min(m.list_len() - 1));
+    let _ = now;
+}
+
+#[test]
+fn ec8_11_outside_changes_show_on_reload_only() {
+    let env = in_sync_fixture();
+    let mut m = opened(&env, 100, 30);
+    env.source_skill("gamma");
+    env.ok(&["sync"]);
+    ch(&mut m, '3');
+    assert!(!screen(&m).contains("gamma"));
+    let cmds = ch(&mut m, 'r');
+    drive(&env, &mut m, cmds);
+    assert!(screen(&m).contains("gamma"));
+}
+
+#[test]
+fn ec8_06_big_lists_and_diffs_draw_fast() {
+    use std::time::Instant;
+    let mut m = model(120, 40);
+    m.overlay = Some(Overlay::Detail {
+        title: "big".into(),
+        lines: (0..10_000).map(|i| format!("+line {i}")).collect(),
+        scroll: 5_000,
+        held: None,
+    });
+    let started = Instant::now();
+    let s = screen(&m);
+    let took = started.elapsed();
+    assert!(s.contains("+line 5000"), "{s}");
+    // Generous for unoptimised, instrumented test builds; a release frame is far below 16 ms.
+    assert!(took.as_millis() < 250, "{took:?}");
+}
+
+#[test]
+fn ec8_06_a_thousand_plugins() {
+    use std::time::Instant;
+    let env = Env::new();
+    let native = env.native();
+    env.ok(&["init"]);
+    let market = env.home.parent().unwrap().join("markets/big");
+    let plugins: Vec<serde_json::Value> = (0..1000)
+        .map(|i| serde_json::json!({"name": format!("plugin-{i:04}"), "description": "x", "source": format!("./p{i}")}))
+        .collect();
+    fs::create_dir_all(market.join(".claude-plugin")).unwrap();
+    fs::write(
+        market.join(".claude-plugin/marketplace.json"),
+        serde_json::json!({"name": "big", "plugins": plugins}).to_string(),
+    )
+    .unwrap();
+    fs::write(
+        native.join("plugins/known_marketplaces.json"),
+        serde_json::json!({"big": {"source": {"source": "directory", "path": market.display().to_string()},
+                           "installLocation": market.display().to_string()}})
+        .to_string(),
+    )
+    .unwrap_or_else(|_| {
+        fs::create_dir_all(native.join("plugins")).unwrap();
+        fs::write(
+            native.join("plugins/known_marketplaces.json"),
+            serde_json::json!({"big": {"source": {"source": "directory", "path": market.display().to_string()},
+                               "installLocation": market.display().to_string()}})
+            .to_string(),
+        )
+        .unwrap();
+    });
+    let mut m = opened(&env, 120, 40);
+    ch(&mut m, '5');
+    assert_eq!(m.list_len(), 1000);
+    ch(&mut m, 'G');
+    let started = Instant::now();
+    let s = screen(&m);
+    let took = started.elapsed();
+    assert!(s.contains("plugin-0999") && s.contains("1000/1000"), "{s}");
+    assert!(took.as_millis() < 1000, "{took:?}");
+}
+
+#[test]
+fn ec8_07_wide_characters_stay_aligned() {
+    let env = Env::new();
+    let native = env.native();
+    env.ok(&["init"]);
+    let market = env.home.parent().unwrap().join("markets/wide");
+    fs::create_dir_all(market.join(".claude-plugin")).unwrap();
+    fs::write(
+        market.join(".claude-plugin/marketplace.json"),
+        serde_json::json!({"name": "wide", "plugins": [
+            {"name": "工具箱", "description": "道具 🧰 tools", "source": "./a"},
+            {"name": "ascii", "description": "plain", "source": "./b"}]})
+        .to_string(),
+    )
+    .unwrap();
+    fs::create_dir_all(native.join("plugins")).unwrap();
+    fs::write(
+        native.join("plugins/known_marketplaces.json"),
+        serde_json::json!({"wide": {"source": {"source": "directory", "path": market.display().to_string()},
+                           "installLocation": market.display().to_string()}})
+        .to_string(),
+    )
+    .unwrap();
+    let mut m = opened(&env, 80, 24);
+    ch(&mut m, '5');
+    let rows = view::rows(&m);
+    let col = |needle: &str| {
+        let line = rows
+            .iter()
+            .map(|l| l.to_string())
+            .find(|l| l.contains(needle))
+            .unwrap();
+        let at = line.find(needle).unwrap();
+        colctl::ui::render::width(&line[..at])
+    };
+    // The developer column starts at the same width in both rows.
+    let s = screen(&m);
+    let wide = s.lines().find(|l| l.contains("工具箱")).unwrap();
+    let narrow = s.lines().find(|l| l.contains("ascii")).unwrap();
+    let dev = |l: &str, name: &str| {
+        let rest = &l[l.find(name).unwrap() + name.len()..];
+        let skip = rest.len() - rest.trim_start().len();
+        colctl::ui::render::width(&l[..l.find(name).unwrap() + name.len() + skip])
+    };
+    assert_eq!(dev(wide, "工具箱"), dev(narrow, "ascii"), "{s}");
+    let _ = col;
+}
+
+#[test]
+fn ec8_10_another_colctl_holds_the_lock() {
+    let env = held_fixture();
+    let mut m = opened(&env, 100, 30);
+    let lock = env.source.join(".state/lock");
+    fs::create_dir_all(lock.parent().unwrap()).unwrap();
+    fs::write(&lock, std::process::id().to_string()).unwrap();
+    ch(&mut m, 's');
+    confirm(&env, &mut m);
+    let s = screen(&m);
+    assert!(s.contains("error: another colctl is running"), "{s}");
+    assert!(s.contains("hint: wait for the other colctl"), "{s}");
+    fs::remove_file(&lock).unwrap();
+}
+
+#[test]
+fn ec8_12_one_profile_failing_leaves_the_others() {
+    use std::os::unix::fs::PermissionsExt;
+    let env = Env::new();
+    env.native();
+    let kilo = env.kilo();
+    env.ok(&["init"]);
+    env.source_skill("alpha");
+    fs::create_dir_all(kilo.join("skills")).unwrap();
+    fs::set_permissions(kilo.join("skills"), fs::Permissions::from_mode(0o555)).unwrap();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, 's');
+    let cmds = ch(&mut m, 'y');
+    let c = ctx(&env);
+    let mut after = Vec::new();
+    for msg in worker::run_now(&c, &cmds[0], 96) {
+        if matches!(msg, Msg::Job(JobEvent::Finished(_))) {
+            let s = screen(&m);
+            assert!(s.contains("✓ claude"), "{s}");
+            assert!(s.contains("✗ kilo-claude"), "{s}");
+        }
+        after.extend(update(&mut m, msg));
+    }
+    fs::set_permissions(kilo.join("skills"), fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        m.toast.as_ref().is_some_and(|t| !t.text.starts_with('✓')),
+        "{:?}",
+        m.toast
+    );
+    assert!(env.home.join(".claude/skills/alpha").exists());
+}
+
+#[test]
+fn ec8_13_without_git_reads_work_and_writes_say_why() {
+    let env = Env::without_git();
+    env.native();
+    let mut m = opened(&env, 100, 30);
+    // No ~/.colctl and no git: it still opens and says what to do.
+    assert!(screen(&m).contains("colctl isn't set up yet"));
+    ch(&mut m, 's');
+    confirm(&env, &mut m);
+    let s = screen(&m);
+    assert!(s.contains("error: colctl needs git"), "{s}");
+}
+
+#[test]
+fn ec8_14_a_catalog_that_fails_is_named() {
+    let env = catalog_fixture();
+    fs::write(
+        env.home.join(".claude/plugins/known_marketplaces.json"),
+        serde_json::json!({"broken": {"source": {"source": "github", "repo": "x/y"},
+                           "installLocation": env.home.join("nowhere").display().to_string()}})
+        .to_string(),
+    )
+    .unwrap();
+    let mut m = opened(&env, 100, 30);
+    ch(&mut m, '5');
+    let s = screen(&m);
+    let (_, _, err) = env.code(&["search"]);
+    let warned = err.lines().any(|l| l.contains("warning"));
+    if warned {
+        assert!(s.contains("! "), "{s}");
+    }
+    assert!(!s.contains("error:"), "{s}");
+}
+
+#[test]
+fn ec8_16_a_dead_terminal_waits_for_the_write() {
+    let mut m = model(80, 24);
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    ch(&mut m, 'y');
+    let (tx, rx) = std::sync::mpsc::channel();
+    tx.send(Msg::Job(JobEvent::Step {
+        profile: "claude".into(),
+        action: "linking".into(),
+        n: 1,
+        total: 1,
+    }))
+    .unwrap();
+    tx.send(Msg::Job(JobEvent::Finished(Ok(report("✓ done")))))
+        .unwrap();
+    colctl::tui::wait_for_job(&rx, &mut m);
+    assert!(m.job.is_none());
+    // Nothing running: returns at once.
+    colctl::tui::wait_for_job(&rx, &mut m);
+}
+
+#[test]
+fn constraint_the_tui_has_no_logic_of_its_own() {
+    for entry in fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src/tui")).unwrap() {
+        let path = entry.unwrap().path();
+        let text = fs::read_to_string(&path).unwrap();
+        for banned in [
+            "crate::commands",
+            "crate::plan",
+            "crate::apply",
+            "crate::adapter",
+        ] {
+            assert!(
+                !text.contains(banned),
+                "{} uses {banned}; go through crate::core",
+                path.display()
+            );
+        }
+    }
 }

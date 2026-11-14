@@ -430,3 +430,25 @@ mod review_and_discovery {
         assert_eq!(err.code, 2, "{err:?}");
     }
 }
+
+#[test]
+fn ac8_03_the_cli_prints_what_the_core_reports() {
+    use colctl::core::observer::Quiet;
+    use colctl::core::run::{Job, run};
+    let make = || {
+        let env = Env::new();
+        env.native();
+        env.ok(&["init"]);
+        env.source_skill("alpha");
+        env
+    };
+    let (a, b) = (make(), make());
+    let report = run(&ctx(&a), &Job::Sync(None), 80, Box::new(Quiet)).unwrap();
+    let (code, out, _) = b.code(&["sync", "--color", "never"]);
+    assert_eq!(report.exit, code);
+    let mask =
+        |s: &str, env: &Env| s.replace(&env.home.parent().unwrap().display().to_string(), "[ROOT]");
+    let cli: Vec<String> = out.lines().map(|l| mask(l, &b)).collect();
+    let ours: Vec<String> = report.lines.iter().map(|l| mask(l, &a)).collect();
+    assert_eq!(ours, cli);
+}
