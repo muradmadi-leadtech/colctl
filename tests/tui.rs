@@ -2209,3 +2209,41 @@ fn ac8_39_a_failed_run_says_why() {
         "{s}"
     );
 }
+
+#[test]
+fn ac8_36_the_summary_has_one_line_per_flagged_file() {
+    use colctl::core::quarantine::HeldSummary;
+    use colctl::risk::{Flag, FlagKind, recommend};
+    let flags = vec![
+        Flag {
+            kind: FlagKind::Executable,
+            path: "build.sh".into(),
+            reason: "changed executable file".into(),
+        },
+        Flag {
+            kind: FlagKind::Script,
+            path: "build.sh".into(),
+            reason: "changed script".into(),
+        },
+    ];
+    let h = HeldSummary {
+        name: "q".into(),
+        kind: "source".into(),
+        change: "a → b".into(),
+        size: "1 commit".into(),
+        flags: 2,
+        error: None,
+        files: 1,
+        recommendation: Some(recommend(&flags)),
+        flag_list: flags,
+    };
+    let lines = colctl::tui::tabs::held_summary(&h);
+    assert!(
+        lines.contains(&"Flagged (1 file)".to_string()),
+        "{lines:#?}"
+    );
+    assert!(
+        lines.contains(&"  build.sh  changed executable file; changed script".to_string()),
+        "{lines:#?}"
+    );
+}
