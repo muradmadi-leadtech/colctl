@@ -73,9 +73,6 @@ pub fn run(ctx: &Ctx, opts: Options) -> i32 {
 /// After the terminal stops working, a running write finishes before the app exits, so nothing is
 /// left half done (EC8-16).
 pub fn wait_for_job(rx: &std::sync::mpsc::Receiver<Msg>, m: &mut Model) {
-    if !m.quit {
-        return;
-    }
     while m.job.is_some() {
         match rx.recv() {
             Ok(msg) => {
