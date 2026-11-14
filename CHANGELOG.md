@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.4.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.3.0...v2.4.0) (2026-11-14)
+
+
+### Features
+
+* **search:** match plugin names fuzzily ([#102](https://github.com/muradmadi-leadtech/colctl/issues/102)) ([c2cdc7e](https://github.com/muradmadi-leadtech/colctl/commit/c2cdc7e3e84415316f3417d4fc30e6b572223b62))
+* **tui:** discover, show and add ([#108](https://github.com/muradmadi-leadtech/colctl/issues/108)) ([ad1ed6d](https://github.com/muradmadi-leadtech/colctl/commit/ad1ed6dff82f6c3848e26486c15cb80b2203d0bf))
+* **tui:** items across every profile ([#106](https://github.com/muradmadi-leadtech/colctl/issues/106)) ([d1fbc90](https://github.com/muradmadi-leadtech/colctl/commit/d1fbc903c740a2e10d9b277d78584c438df5dfce))
+* **tui:** motion ([#109](https://github.com/muradmadi-leadtech/colctl/issues/109)) ([4d7c5c3](https://github.com/muradmadi-leadtech/colctl/commit/4d7c5c31a265b64dcd771a284ba49e8e869ca3ea))
+* **tui:** overview and profiles, with sync ([#105](https://github.com/muradmadi-leadtech/colctl/issues/105)) ([e8d2931](https://github.com/muradmadi-leadtech/colctl/commit/e8d2931a78f2856d3c5bfc70e8d0211a0d8bbae3))
+* **tui:** parity with the CLI, every edge case, and the docs ([#110](https://github.com/muradmadi-leadtech/colctl/issues/110)) ([06233ea](https://github.com/muradmadi-leadtech/colctl/commit/06233ea557c7792eaf23d071604cdfcd91284423))
+* **tui:** review, approve and reject ([#107](https://github.com/muradmadi-leadtech/colctl/issues/107)) ([ee47cf2](https://github.com/muradmadi-leadtech/colctl/commit/ee47cf2f12270146d03d49d19fc3ec63355c67f9))
+* **tui:** the full-screen shell ([#104](https://github.com/muradmadi-leadtech/colctl/issues/104)) ([3ae7886](https://github.com/muradmadi-leadtech/colctl/commit/3ae78863ca46695f4503637aa1a1128065722eeb))
+
+
+### Bug Fixes
+
+* **tui:** say when it's loading, and smoke-test polish ([#111](https://github.com/muradmadi-leadtech/colctl/issues/111)) ([a100c5e](https://github.com/muradmadi-leadtech/colctl/commit/a100c5ee40d34342571313c96ba929a857fa0390))
+* **tui:** show a run's failure, not only its first verdict ([#112](https://github.com/muradmadi-leadtech/colctl/issues/112)) ([b05b60f](https://github.com/muradmadi-leadtech/colctl/commit/b05b60f2ed93bb8836fa7eee092440db6bacc5d3))
+
 ## [2.3.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.2.1...v2.3.0) (2026-11-13)
 
 
