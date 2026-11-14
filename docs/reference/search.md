@@ -21,11 +21,14 @@ are never cut before descriptions). Long lists are paged in a terminal.
 
 ## Matching
 
-- Every term must appear (case-insensitive) in the name, display name, keywords or tags, description, developer or
-  author.
+- Every term must match. A term matches when it appears (case-insensitive) in the name, display name, keywords or
+  tags, description, developer or author, or, since 2.4, when its letters appear in that order in the name, display
+  name or a keyword: `sprpw` finds `superpowers`. Descriptions match only as written, since almost any long text has
+  a term's letters somewhere in order.
 - Results rank by where the terms hit: exact name (100), name (50), keyword (30), description (10), developer or
-  author (5), summed over the terms; ties by name.
-- With no terms, everything is listed by name.
+  author (5), then letters in order (ranked by how closely they match, below every other hit), summed over the
+  terms; ties by name.
+- With no terms (or only spaces), everything is listed by name.
 
 ## Merging
 
