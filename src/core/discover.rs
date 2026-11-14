@@ -30,6 +30,12 @@ pub fn catalog(ctx: &Ctx) -> Result<Catalog, CliError> {
     })
 }
 
+/// The plugins matching `query`, ranked as `colctl search` ranks them (AC8-05), and how many
+/// matched in all.
+pub fn rank(plugins: &[Plugin], query: &search::Query) -> (Vec<Plugin>, usize) {
+    search::search(plugins, query)
+}
+
 /// `colctl show <id>` as plain lines at `width`.
 pub fn show(ctx: &Ctx, id: &str, width: usize) -> Result<Vec<String>, CliError> {
     let (out, sink) = Out::capture(width, Box::new(Quiet));

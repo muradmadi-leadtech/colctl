@@ -217,32 +217,81 @@ pub struct Query {
     pub limit: usize,
 }
 
-/// A term's best hit in a plugin, or `None` when it doesn't appear anywhere.
-fn term_score(p: &Plugin, term: &str) -> Option<u32> {
+/// Scores of the substring tiers (2.3's matching), times this, stay above every fuzzy hit.
+const TIER: u32 = 1000;
+
+/// A term's best hit in a plugin, or `None` when it doesn't appear anywhere: 2.3's substring
+/// tiers first, then (cycle 8, AC8-05) its letters in order in a name, display name or keyword.
+fn term_score(p: &Plugin, term: &str, fuzzy: &mut Fuzzy) -> Option<u32> {
     let has = |s: &str| s.to_lowercase().contains(term);
     let name = p.name.to_lowercase();
     let display = p.display_name.as_deref().unwrap_or_default().to_lowercase();
     if name == term || display == term {
-        return Some(100);
+        return Some(100 * TIER);
     }
     if name.contains(term) || display.contains(term) {
-        return Some(50);
+        return Some(50 * TIER);
     }
     if p.keywords.iter().any(|k| has(k)) {
-        return Some(30);
+        return Some(30 * TIER);
     }
     if has(&p.description) {
-        return Some(10);
+        return Some(10 * TIER);
     }
     if has(&p.developer) || p.author.as_deref().is_some_and(has) {
-        return Some(5);
+        return Some(5 * TIER);
     }
-    None
+    std::iter::once(p.name.as_str())
+        .chain(p.display_name.as_deref())
+        .chain(p.keywords.iter().map(String::as_str))
+        .filter_map(|text| fuzzy.score(term, text))
+        .max()
+        .map(|s| u32::from(s).min(TIER - 1))
+}
+
+/// nucleo's fuzzy matcher, set up once per search.
+pub struct Fuzzy {
+    matcher: nucleo_matcher::Matcher,
+    buf: Vec<char>,
+}
+
+impl Default for Fuzzy {
+    fn default() -> Self {
+        Fuzzy {
+            matcher: nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT),
+            buf: Vec::new(),
+        }
+    }
+}
+
+impl Fuzzy {
+    /// How well `term`'s letters, in order and ignoring case, match `text`; `None` when they don't.
+    fn score(&mut self, term: &str, text: &str) -> Option<u16> {
+        use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
+        let atom = Atom::new(
+            term,
+            CaseMatching::Ignore,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+            false,
+        );
+        atom.score(
+            nucleo_matcher::Utf32Str::new(text, &mut self.buf),
+            &mut self.matcher,
+        )
+    }
 }
 
 /// A plugin's score for all terms (every term must hit), or `None`.
 pub fn score(p: &Plugin, terms: &[String]) -> Option<u32> {
-    terms.iter().map(|t| term_score(p, &t.to_lowercase())).sum()
+    score_with(p, terms, &mut Fuzzy::default())
+}
+
+fn score_with(p: &Plugin, terms: &[String], fuzzy: &mut Fuzzy) -> Option<u32> {
+    terms
+        .iter()
+        .map(|t| term_score(p, &t.to_lowercase(), fuzzy))
+        .sum()
 }
 
 fn passes(p: &Plugin, q: &Query) -> bool {
@@ -260,10 +309,17 @@ fn passes(p: &Plugin, q: &Query) -> bool {
 
 /// The results for a query, ranked and limited, and how many matched in all (AC5-09, AC5-10).
 pub fn search(plugins: &[Plugin], q: &Query) -> (Vec<Plugin>, usize) {
+    let mut fuzzy = Fuzzy::default();
+    let terms: Vec<String> = q
+        .terms
+        .iter()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
     let mut hits: Vec<(u32, &Plugin)> = plugins
         .iter()
         .filter(|p| passes(p, q))
-        .filter_map(|p| score(p, &q.terms).map(|s| (s, p)))
+        .filter_map(|p| score_with(p, &terms, &mut fuzzy).map(|s| (s, p)))
         .collect();
     hits.sort_by(|(sa, a), (sb, b)| {
         sb.cmp(sa)
@@ -560,5 +616,79 @@ mod tests {
             vec![("obra", 2), ("alf", 1), ("zed", 1)]
         );
         assert_eq!(d[0].catalogs, vec!["m", "n"]);
+    }
+}
+
+#[cfg(test)]
+mod fuzzy_tests {
+    use super::*;
+
+    fn plugin(name: &str, description: &str, keywords: &[&str]) -> Plugin {
+        merge(&[Entry {
+            id: format!("{name}@m"),
+            name: name.into(),
+            catalog: "m".into(),
+            tool: "claude".into(),
+            kind: "plugin".into(),
+            description: description.into(),
+            keywords: keywords.iter().map(|k| k.to_string()).collect(),
+            ..Entry::default()
+        }])
+        .remove(0)
+    }
+
+    fn names(plugins: &[Plugin], terms: &[&str]) -> Vec<String> {
+        let q = Query {
+            terms: terms.iter().map(|t| t.to_string()).collect(),
+            ..Query::default()
+        };
+        search(plugins, &q).0.into_iter().map(|p| p.name).collect()
+    }
+
+    fn catalog() -> Vec<Plugin> {
+        vec![
+            plugin("superpowers", "Skills for planning and review", &["tdd"]),
+            plugin("superpowers-lab", "Experimental skills", &[]),
+            plugin("spr-pw-tools", "Sprint and power tools", &[]),
+            plugin("qdrant", "Vector search", &["embeddings"]),
+            plugin("planner", "Plans", &[]),
+        ]
+    }
+
+    #[test]
+    fn ac8_05_letters_in_order_match_names() {
+        let found = names(&catalog(), &["sprpw"]);
+        assert!(found.contains(&"superpowers".to_string()), "{found:?}");
+        assert!(found.contains(&"superpowers-lab".to_string()), "{found:?}");
+        assert!(!found.contains(&"qdrant".to_string()), "{found:?}");
+        // Keywords too.
+        assert_eq!(names(&catalog(), &["embdg"]), ["qdrant"]);
+    }
+
+    #[test]
+    fn ac8_05_what_matched_before_still_matches_first() {
+        // A substring hit anywhere (here a description) ranks above every fuzzy hit.
+        let found = names(&catalog(), &["plan"]);
+        assert_eq!(found[0], "planner", "{found:?}");
+        assert_eq!(found[1], "superpowers", "{found:?}");
+        // Exact name first, as in 2.3.
+        assert_eq!(names(&catalog(), &["superpowers"])[0], "superpowers");
+    }
+
+    #[test]
+    fn ac8_05_every_word_must_match() {
+        assert_eq!(names(&catalog(), &["sprpw", "lab"]), ["superpowers-lab"]);
+        assert!(names(&catalog(), &["sprpw", "zzz"]).is_empty());
+    }
+
+    #[test]
+    fn ac8_05_descriptions_never_match_fuzzily() {
+        // "vctr" is in order in "Vector search" but descriptions only match as substrings.
+        assert!(names(&catalog(), &["vctr"]).is_empty());
+    }
+
+    #[test]
+    fn ec8_26_no_terms_lists_everything() {
+        assert_eq!(names(&catalog(), &[]).len(), 5);
     }
 }

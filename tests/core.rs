@@ -384,6 +384,22 @@ mod review_and_discovery {
     }
 
     #[test]
+    fn ac8_05_colctl_search_matches_letters_in_order() {
+        let env = catalog_fixture();
+        // "tol" is in order in "tool"; nothing has it as written.
+        let out = stdout_lines(&env, &["search", "tol"]).join("\n");
+        assert!(out.contains("tool@official"), "{out}");
+        assert!(!out.contains("local@official"), "{out}");
+        let c = discover::catalog(&ctx(&env)).unwrap();
+        let q = colctl::search::Query {
+            terms: vec!["tol".into()],
+            ..Default::default()
+        };
+        let (hits, matched) = discover::rank(&c.plugins, &q);
+        assert_eq!((hits[0].name.as_str(), matched), ("tool", 1));
+    }
+
+    #[test]
     fn ac8_04_nothing_to_add_says_why() {
         let mut p = discover::catalog(&ctx(&catalog_fixture())).unwrap().plugins[0].clone();
         p.add = "already source plugin tool".into();
