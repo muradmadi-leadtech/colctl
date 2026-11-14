@@ -1,0 +1,588 @@
+//! Cycle 8: the TUI. The model is driven with keys and mouse events, drawn into ratatui's
+//! TestBackend with motion off, and compared as text. Named after AC8-NN / EC8-NN.
+
+use colctl::core::run::{Job, Report};
+use colctl::error::CliError;
+use colctl::tui::app::{self, Cmd, JobEvent, Load, Model, Msg, Options, Overlay, Tab, ask, update};
+use colctl::tui::{launch, view};
+use colctl::ui::term::{ColorChoice, Facts, Settings};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
+use ratatui::style::Color;
+
+const PLAIN: Options = Options {
+    color: false,
+    motion: false,
+};
+
+fn model(w: u16, h: u16) -> Model {
+    Model::new(PLAIN, w, h)
+}
+
+fn draw(m: &Model) -> Terminal<TestBackend> {
+    let mut t = Terminal::new(TestBackend::new(m.width, m.height)).unwrap();
+    t.draw(|f| view::draw(m, f)).unwrap();
+    t
+}
+
+fn screen(m: &Model) -> String {
+    view::text(draw(m).backend().buffer())
+}
+
+fn press(m: &mut Model, code: KeyCode) -> Vec<Cmd> {
+    update(m, Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)))
+}
+
+fn ch(m: &mut Model, c: char) -> Vec<Cmd> {
+    press(m, KeyCode::Char(c))
+}
+
+fn click(m: &mut Model, x: u16, y: u16) -> Vec<Cmd> {
+    update(
+        m,
+        Msg::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        }),
+    )
+}
+
+/// Where `text` first appears on screen: (x, y).
+fn find(m: &Model, text: &str) -> (u16, u16) {
+    for (y, line) in screen(m).lines().enumerate() {
+        if let Some(i) = line.find(text) {
+            let x = colctl::ui::render::width(&line[..i]);
+            return (x as u16, y as u16);
+        }
+    }
+    panic!("{text:?} not on screen:\n{}", screen(m));
+}
+
+fn tty() -> Facts {
+    Facts {
+        stdin_tty: true,
+        stdout_tty: true,
+        stderr_tty: true,
+        term: Some("xterm-256color".into()),
+        ..Facts::default()
+    }
+}
+
+// ── Launch (AC8-06, AC8-07, AC8-12, EC8-20, EC8-23 – 25) ────────────────────────────────────
+
+#[test]
+fn ac8_06_opens_only_in_an_interactive_terminal() {
+    let s = Settings::default();
+    assert!(launch(&s, &tty(), None).is_some());
+    for f in [
+        Facts {
+            stdout_tty: false,
+            ..tty()
+        },
+        Facts {
+            stdin_tty: false,
+            ..tty()
+        },
+        Facts {
+            term: Some("dumb".into()),
+            ..tty()
+        },
+        Facts {
+            ci: Some("true".into()),
+            ..tty()
+        },
+    ] {
+        assert!(launch(&s, &f, None).is_none(), "{f:?}");
+    }
+    // EC8-23: TERM unset still opens.
+    assert!(
+        launch(
+            &s,
+            &Facts {
+                term: None,
+                ..tty()
+            },
+            None
+        )
+        .is_some()
+    );
+}
+
+#[test]
+fn ac8_06_piped_colctl_is_the_welcome_help() {
+    let out = assert_cmd::Command::new(env!("CARGO_BIN_EXE_colctl"))
+        .env_clear()
+        .env("HOME", std::env::temp_dir())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Start here"), "{text}");
+}
+
+#[test]
+fn ac8_12_ec8_24_colour_follows_the_flags() {
+    let color = |s: Settings, f: Facts| launch(&s, &f, None).unwrap().color;
+    assert!(color(Settings::default(), tty()));
+    assert!(!color(
+        Settings::default(),
+        Facts {
+            no_color: Some("1".into()),
+            ..tty()
+        }
+    ));
+    let never = Settings {
+        color: ColorChoice::Never,
+        ..Settings::default()
+    };
+    assert!(!color(never, tty()));
+    let always = Settings {
+        color: ColorChoice::Always,
+        ..Settings::default()
+    };
+    assert!(color(
+        always,
+        Facts {
+            no_color: Some("1".into()),
+            ..tty()
+        }
+    ));
+    // EC8-25: -q and -v don't stop it opening.
+    let quiet = Settings {
+        quiet: true,
+        verbose: true,
+        ..Settings::default()
+    };
+    assert!(launch(&quiet, &tty(), None).is_some());
+}
+
+#[test]
+fn ac8_12_ec8_20_reduced_motion() {
+    let s = Settings::default();
+    let motion = |v: Option<&str>| launch(&s, &tty(), v).unwrap().motion;
+    assert!(motion(None));
+    assert!(motion(Some("")));
+    assert!(motion(Some("0")));
+    assert!(!motion(Some("1")));
+    assert!(!motion(Some("yes")));
+}
+
+#[test]
+fn ac8_07_restoring_twice_is_harmless() {
+    colctl::tui::terminal::restore();
+    colctl::tui::terminal::restore();
+}
+
+#[test]
+fn ac8_24_ticks_and_mouse_moves_never_hide_a_redraw() {
+    let mut m = model(80, 24);
+    assert!(m.dirty, "the first frame must be drawn");
+    update(&mut m, Msg::Tick(10));
+    assert!(m.dirty);
+    m.dirty = false;
+    update(&mut m, Msg::Tick(20));
+    assert!(!m.dirty, "idle ticks draw nothing");
+    update(
+        &mut m,
+        Msg::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 3,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        }),
+    );
+    assert!(!m.dirty, "mouse moves draw nothing");
+    ch(&mut m, '2');
+    assert!(m.dirty);
+}
+
+#[test]
+fn ac8_08_local_state_loads_first() {
+    let m = model(80, 24);
+    assert_eq!(
+        m.start(),
+        [
+            Cmd::Load(Load::Snapshot),
+            Cmd::Load(Load::Held),
+            Cmd::Load(Load::Catalog)
+        ]
+    );
+}
+
+// ── The shell (AC8-09 – 12) ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn ac8_09_tabs_by_key() {
+    let mut m = model(80, 24);
+    assert_eq!(m.tab, Tab::Overview);
+    press(&mut m, KeyCode::Tab);
+    assert_eq!(m.tab, Tab::Profiles);
+    press(&mut m, KeyCode::BackTab);
+    press(&mut m, KeyCode::BackTab);
+    assert_eq!(m.tab, Tab::Discover);
+    for (c, t) in [
+        ('1', Tab::Overview),
+        ('2', Tab::Profiles),
+        ('3', Tab::Items),
+        ('4', Tab::Review),
+        ('5', Tab::Discover),
+    ] {
+        ch(&mut m, c);
+        assert_eq!(m.tab, t);
+    }
+}
+
+#[test]
+fn ac8_09_the_tab_bar_and_key_bar() {
+    let mut m = model(80, 24);
+    let s = screen(&m);
+    let first = s.lines().next().unwrap();
+    assert!(
+        first.starts_with(" Overview  Profiles  Items  Review  Discover"),
+        "{s}"
+    );
+    assert!(first.ends_with(&format!("colctl {}", env!("CARGO_PKG_VERSION"))));
+    let keys = s.lines().last().unwrap();
+    assert!(keys.contains("s sync"), "{s}");
+    assert!(keys.ends_with("? keys · q quit"), "{s}");
+    ch(&mut m, '4');
+    let keys = screen(&m).lines().last().unwrap().to_string();
+    assert!(
+        keys.starts_with(" a approve · x reject · u check updates"),
+        "{keys}"
+    );
+}
+
+#[test]
+fn ac8_09_help_lists_every_key() {
+    let mut m = model(100, 40);
+    ch(&mut m, '?');
+    assert_eq!(m.overlay, Some(Overlay::Help));
+    let s = screen(&m);
+    for needle in ["Keys", "sync", "reload", "next tab", "quit", "ctrl-c", "1"] {
+        assert!(s.contains(needle), "{needle}:\n{s}");
+    }
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.overlay, None);
+    // At 80×24 it fits in two columns, nothing cut.
+    let mut m = model(80, 24);
+    ch(&mut m, '?');
+    let s = screen(&m);
+    for needle in ["go to a tab", "quit", "ctrl-c", "reload"] {
+        assert!(s.contains(needle), "{needle}:\n{s}");
+    }
+}
+
+#[test]
+fn ac8_09_quit() {
+    let mut m = model(80, 24);
+    assert_eq!(ch(&mut m, 'q'), [Cmd::Quit]);
+    assert!(m.quit);
+    let mut m = model(80, 24);
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert_eq!(update(&mut m, Msg::Key(ctrl_c)), [Cmd::Quit]);
+}
+
+#[test]
+fn ac8_10_mouse_on_tabs_and_keys() {
+    let mut m = model(80, 24);
+    let (x, y) = find(&m, "Items");
+    click(&mut m, x + 1, y);
+    assert_eq!(m.tab, Tab::Items);
+    let (x, y) = find(&m, "? keys");
+    click(&mut m, x, y);
+    assert_eq!(m.overlay, Some(Overlay::Help));
+    // A click outside an overlay closes it.
+    click(&mut m, 0, 5);
+    assert_eq!(m.overlay, None);
+    let (x, y) = find(&m, "q quit");
+    assert_eq!(click(&mut m, x, y), [Cmd::Quit]);
+}
+
+#[test]
+fn ac8_10_the_wheel_scrolls_a_detail() {
+    let mut m = model(80, 24);
+    m.overlay = Some(Overlay::Detail {
+        title: "x".into(),
+        lines: (0..100).map(|i| format!("line {i}")).collect(),
+        scroll: 0,
+        held: None,
+    });
+    let wheel = |m: &mut Model, kind| {
+        update(
+            m,
+            Msg::Mouse(MouseEvent {
+                kind,
+                column: 10,
+                row: 10,
+                modifiers: KeyModifiers::NONE,
+            }),
+        )
+    };
+    wheel(&mut m, MouseEventKind::ScrollDown);
+    wheel(&mut m, MouseEventKind::ScrollDown);
+    let scroll = |m: &Model| match &m.overlay {
+        Some(Overlay::Detail { scroll, .. }) => *scroll,
+        _ => usize::MAX,
+    };
+    assert_eq!(scroll(&m), 2);
+    wheel(&mut m, MouseEventKind::ScrollUp);
+    assert_eq!(scroll(&m), 1);
+    press(&mut m, KeyCode::Char('G'));
+    assert_eq!(scroll(&m), 99);
+    assert!(screen(&m).contains("line 99"));
+}
+
+#[test]
+fn ac8_11_too_small() {
+    for (w, h) in [(59, 24), (80, 19)] {
+        let m = model(w, h);
+        let s = screen(&m);
+        assert!(
+            s.contains(&format!("Make the window at least 60×20 (now {w}×{h})")),
+            "{s}"
+        );
+        assert!(!s.contains("Overview"), "{s}");
+    }
+    let mut m = model(59, 24);
+    ch(&mut m, '3');
+    update(&mut m, Msg::Resize(60, 20));
+    assert_eq!(m.tab, Tab::Items);
+    assert!(screen(&m).contains("Overview"));
+}
+
+#[test]
+fn ac8_12_no_colour_means_no_colour() {
+    let m = model(80, 24);
+    let t = draw(&m);
+    let buf = t.backend().buffer();
+    assert!(
+        buf.content()
+            .iter()
+            .all(|c| c.fg == Color::Reset && c.bg == Color::Reset),
+        "colour without colour"
+    );
+    let m = Model::new(
+        Options {
+            color: true,
+            motion: false,
+        },
+        80,
+        24,
+    );
+    let t = draw(&m);
+    let (x, y) = find(&m, "Overview");
+    assert_eq!(t.backend().buffer()[(x, y)].fg, Color::Cyan);
+}
+
+// ── Jobs, confirmations, errors (AC8-25 – 28, EC8-19) ───────────────────────────────────────
+
+fn report(verdict: &str) -> Report {
+    Report {
+        exit: 0,
+        lines: vec![verdict.into()],
+        errors: Vec::new(),
+    }
+}
+
+#[test]
+fn ac8_25_writes_ask_first() {
+    let mut m = model(80, 24);
+    assert!(
+        ask(
+            &mut m,
+            "Sync",
+            vec!["Every profile".into()],
+            Job::Sync(None)
+        )
+        .is_empty()
+    );
+    let s = screen(&m);
+    assert!(s.contains("Sync") && s.contains("y yes · n no"), "{s}");
+    // ⏎ alone does nothing; n changes nothing.
+    assert!(press(&mut m, KeyCode::Enter).is_empty());
+    assert!(m.overlay.is_some());
+    ch(&mut m, 'n');
+    assert_eq!(m.overlay, None);
+    assert!(m.job.is_none());
+    // y runs it.
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    assert_eq!(ch(&mut m, 'y'), [Cmd::Run(Job::Sync(None))]);
+    assert!(m.job.is_some());
+}
+
+#[test]
+fn ac8_26_one_job_at_a_time() {
+    let mut m = model(80, 24);
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    ch(&mut m, 'y');
+    assert!(ask(&mut m, "Update", vec![], Job::Update(vec![])).is_empty());
+    assert_eq!(m.overlay, None);
+    assert_eq!(
+        m.toast.as_ref().unwrap().text,
+        "Wait for colctl sync to finish"
+    );
+    // Reading still works.
+    ch(&mut m, '2');
+    assert_eq!(m.tab, Tab::Profiles);
+}
+
+#[test]
+fn ac8_15_progress_rows_then_the_verdict() {
+    let mut m = model(80, 24);
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    ch(&mut m, 'y');
+    let s = screen(&m);
+    assert!(s.contains("… colctl sync"), "{s}");
+    for e in [
+        JobEvent::Step {
+            profile: "claude".into(),
+            action: "linking alpha".into(),
+            n: 1,
+            total: 2,
+        },
+        JobEvent::Step {
+            profile: "codex".into(),
+            action: "installing x".into(),
+            n: 1,
+            total: 1,
+        },
+        JobEvent::Done {
+            profile: "codex".into(),
+            summary: "1 change".into(),
+            ok: true,
+        },
+    ] {
+        update(&mut m, Msg::Job(e));
+    }
+    let s = screen(&m);
+    assert!(s.contains("… claude  linking alpha  1/2"), "{s}");
+    assert!(s.contains("✓ codex   1 change"), "{s}");
+    let cmds = update(
+        &mut m,
+        Msg::Job(JobEvent::Finished(Ok(report("✓ Synced 2 profiles")))),
+    );
+    assert!(m.job.is_none());
+    assert!(cmds.contains(&Cmd::Load(Load::Snapshot)));
+    assert!(screen(&m).contains("✓ Synced 2 profiles"));
+    // The toast goes after 4 s.
+    let later = m.now + app::TOAST_MS;
+    update(&mut m, Msg::Tick(later));
+    assert!(m.toast.is_none());
+}
+
+#[test]
+fn ac8_27_errors_show_what_why_and_what_to_do() {
+    let mut m = model(80, 24);
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    ch(&mut m, 'y');
+    let err = CliError::refused("couldn't sync\nclaude failed").hint("run colctl status");
+    update(&mut m, Msg::Job(JobEvent::Finished(Err(err))));
+    let s = screen(&m);
+    assert!(s.contains("error: couldn't sync"), "{s}");
+    assert!(s.contains("claude failed"), "{s}");
+    assert!(s.contains("hint: run colctl status"), "{s}");
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.overlay, None);
+}
+
+#[test]
+fn ac8_28_quitting_waits_for_a_write() {
+    let mut m = model(80, 24);
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    ch(&mut m, 'y');
+    assert!(ch(&mut m, 'q').is_empty());
+    assert_eq!(m.overlay, Some(Overlay::ConfirmQuit));
+    assert!(screen(&m).contains("colctl sync is running. Quit when it finishes?"));
+    ch(&mut m, 'n');
+    assert!(!m.quit && !m.quit_after_job);
+    ch(&mut m, 'q');
+    ch(&mut m, 'y');
+    assert!(m.quit_after_job && !m.quit);
+    let cmds = update(&mut m, Msg::Job(JobEvent::Finished(Ok(report("✓ done")))));
+    assert_eq!(cmds, [Cmd::Quit]);
+    assert!(m.quit);
+}
+
+#[test]
+fn ec8_19_esc_stops_an_update_but_not_a_sync() {
+    let mut m = model(80, 24);
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    ch(&mut m, 'y');
+    assert!(press(&mut m, KeyCode::Esc).is_empty());
+    assert_eq!(
+        m.toast.as_ref().unwrap().text,
+        "Sync can't be stopped half way"
+    );
+    let mut m = model(80, 24);
+    ask(&mut m, "Update", vec![], Job::Update(vec![]));
+    ch(&mut m, 'y');
+    assert_eq!(press(&mut m, KeyCode::Esc), [Cmd::Cancel]);
+}
+
+#[test]
+fn ec8_08_resize_keeps_the_job_and_overlay() {
+    let mut m = model(80, 24);
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    update(&mut m, Msg::Resize(120, 40));
+    assert!(matches!(m.overlay, Some(Overlay::Confirm { .. })));
+    ch(&mut m, 'y');
+    update(&mut m, Msg::Resize(70, 22));
+    assert!(m.job.is_some());
+    assert!(screen(&m).contains("colctl sync"));
+}
+
+#[test]
+fn ac8_12_the_spinner_turns_only_with_motion() {
+    let mut m = Model::new(
+        Options {
+            color: false,
+            motion: true,
+        },
+        80,
+        24,
+    );
+    ask(&mut m, "Sync", vec![], Job::Sync(None));
+    ch(&mut m, 'y');
+    update(&mut m, Msg::Tick(80));
+    assert!(screen(&m).contains("⠙ colctl sync"), "{}", screen(&m));
+}
+
+#[test]
+fn ec8_17_a_paste_into_a_filter_is_one_change() {
+    let mut m = model(80, 24);
+    ch(&mut m, '3');
+    ch(&mut m, '/');
+    update(&mut m, Msg::Paste("tools\n".into()));
+    assert_eq!(m.filter().text, "tools");
+    press(&mut m, KeyCode::Backspace);
+    assert_eq!(m.filter().text, "tool");
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.filter().text, "");
+    assert!(!m.filter().focused);
+    // Outside a filter, a paste does nothing.
+    update(&mut m, Msg::Paste("x".into()));
+    assert_eq!(m.filter().text, "");
+}
+
+#[test]
+fn cursor_stays_in_range_and_on_screen() {
+    let mut c = app::Cursor::default();
+    c.move_by(5, 3, 10);
+    assert_eq!(c.selected, 2);
+    c.move_by(-10, 3, 10);
+    assert_eq!(c.selected, 0);
+    c.move_by(50, 100, 10);
+    assert_eq!((c.selected, c.offset), (50, 41));
+    c.move_by(-45, 100, 10);
+    assert_eq!((c.selected, c.offset), (5, 5));
+    c.fit(0, 10);
+    assert_eq!(c, app::Cursor::default());
+    c.move_by(1, 0, 10);
+    assert_eq!(c, app::Cursor::default());
+}
