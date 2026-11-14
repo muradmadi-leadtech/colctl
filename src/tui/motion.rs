@@ -83,9 +83,6 @@ impl Fx {
 
     /// Starts the effects for what changed since the last frame.
     pub fn observe(&mut self, m: &Model) {
-        if !m.quit {
-            return;
-        }
         let now = seen(m);
         let Some(before) = self.last.replace(now.clone()) else {
             return;
