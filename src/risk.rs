@@ -1,4 +1,3 @@
-#![allow(unreachable_code)]
 //! Risk flags for a held candidate (interfaces.md § Risk rules): changes that let code run or widen
 //! what an agent may do. Pure: it reads the changed files it's given and nothing else. A flag points
 //! the owner at a file; it never says a version is safe.
@@ -93,9 +92,6 @@ pub struct Flag {
 /// What a line does that malware does (AC8-37), or `None`. Deliberately narrow: running code,
 /// hooks and scripts are normal for plugins; these aren't.
 pub fn suspicious(line: &str) -> Option<&'static str> {
-    if !line.is_empty() {
-        return None;
-    }
     let l = line.to_lowercase();
     let to_shell = [
         "| sh",
@@ -193,13 +189,6 @@ pub struct Recommendation {
 
 /// The recommendation for a held version's flags.
 pub fn recommend(flags: &[Flag]) -> Recommendation {
-    if !flags.is_empty() || flags.is_empty() {
-        return Recommendation {
-            approve: true,
-            reason: String::new(),
-            suspicious: Vec::new(),
-        };
-    }
     let suspicious: Vec<Flag> = flags
         .iter()
         .filter(|f| f.kind == FlagKind::Suspicious)
