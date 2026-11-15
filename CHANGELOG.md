@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.6.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.5.1...v2.6.0) (2026-11-15)
+
+
+### Features
+
+* **core:** run rm, adopt, convert, refresh and marketplace refresh as core jobs ([#131](https://github.com/muradmadi-leadtech/colctl/issues/131)) ([5f2a790](https://github.com/muradmadi-leadtech/colctl/commit/5f2a790da2c6ed1d9d3eda1ca0c083b692b88a29))
+* **tui:** add a command palette over every action ([#133](https://github.com/muradmadi-leadtech/colctl/issues/133)) ([093d70a](https://github.com/muradmadi-leadtech/colctl/commit/093d70ad4c963229d30c5afc3339cea6fa6e00cb))
+* **tui:** open on the last saved status and refresh in the background ([#130](https://github.com/muradmadi-leadtech/colctl/issues/130)) ([d5a439c](https://github.com/muradmadi-leadtech/colctl/commit/d5a439c95e301b2b44a1f8cfbce81a352cae3a8f))
+* **tui:** screens for rm, adopt, convert, refresh, marketplaces, developers and connectors ([#132](https://github.com/muradmadi-leadtech/colctl/issues/132)) ([65d1501](https://github.com/muradmadi-leadtech/colctl/commit/65d1501b0ddc81869929c2c2903b51a6614cd192))
+
+
+### Bug Fixes
+
+* group allowed-tools flags, print -v paths from home, retry busy executables, and name sync's fix ([#134](https://github.com/muradmadi-leadtech/colctl/issues/134)) ([8c1f05e](https://github.com/muradmadi-leadtech/colctl/commit/8c1f05e7f856874e71fd8185e87a1abc829a7bbb))
+* **tui:** open a connector from what connectors found, and say when a Discover view is empty ([#135](https://github.com/muradmadi-leadtech/colctl/issues/135)) ([8851e20](https://github.com/muradmadi-leadtech/colctl/commit/8851e20d0bb26825b85370f0180db7f67822a7c0))
+
+
+### Performance Improvements
+
+* **review:** save each held version's check and read its files in one git process ([#128](https://github.com/muradmadi-leadtech/colctl/issues/128)) ([0016640](https://github.com/muradmadi-leadtech/colctl/commit/0016640a51911673da24f73875669be4e7b8f424))
+
 ## [2.5.1](https://github.com/muradmadi-leadtech/colctl/compare/v2.5.0...v2.5.1) (2026-11-15)
 
 
