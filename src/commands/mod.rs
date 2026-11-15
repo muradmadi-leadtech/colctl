@@ -137,12 +137,23 @@ fn prepare_sources(
                             codex_rev = rev;
                             target
                         }
-                        // AC7-13: a Claude-only source can be converted.
+                        // AC7-13: a Claude-only source can be converted, when Codex can use
+                        // something in it (ACH1-02).
                         ToolPackaging::Unsupported(why) if claude_ready => {
-                            SourceTarget::Unsupported(format!(
-                                "{why}; colctl convert {} packages it",
-                                s.name
-                            ))
+                            let usable = packaging::claude_folder(
+                                &vault.path(&s.name),
+                                &s.plugin,
+                                s.path.as_deref(),
+                            )
+                            .and_then(|f| crate::repackage::build(&f, &s.name).ok())
+                            .is_some_and(|p| !p.skills.is_empty() || !p.hooks.is_empty());
+                            SourceTarget::Unsupported(if usable {
+                                format!("{why}; colctl convert {} packages it", s.name)
+                            } else {
+                                format!(
+                                    "{why}, and there's nothing Codex can use in it (no skills, no hook Codex runs)"
+                                )
+                            })
                         }
                         other => source_target(other),
                     };

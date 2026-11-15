@@ -78,6 +78,11 @@ fn read_json(path: &Path) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|e| format!("{} doesn't parse: {e}", path.display()))
 }
 
+/// Marketplace names Claude only accepts from GitHub's anthropics organization: a local folder with
+/// one of these names is refused ("reserved for official Anthropic marketplaces").
+const RESERVED_CLAUDE_MARKETPLACES: &[&str] =
+    &["claude-plugins-official", "anthropic-plugin-directory"];
+
 /// What a repo offers one tool for a plugin, before anything is written.
 enum Plan {
     /// The repo's own marketplace lists the plugin inside the repo: use it as is.
@@ -155,6 +160,23 @@ fn plan(tool: &Tool, clone: &Path, plugin: &str, subpath: Option<&str>) -> Plan 
             )));
         };
         let source = entry.get("source").cloned().unwrap_or(Value::Null);
+        // ACH1-01: Claude refuses a reserved marketplace name from a local folder, so a plugin in
+        // such a repo is installed through colctl's own marketplace, from its folder in the clone.
+        if is_local(&source)
+            && tool.label == "Claude"
+            && RESERVED_CLAUDE_MARKETPLACES.contains(&market)
+        {
+            let path = source
+                .as_str()
+                .or_else(|| source.get("path").and_then(Value::as_str));
+            return match plugin_folder(tool, clone, &[path, subpath, None]) {
+                Some(folder) => wrap_plan(tool, folder, plugin),
+                None => Plan::Done(ToolPackaging::Unsupported(format!(
+                    "no {} plugin folder for {plugin} in the repo",
+                    tool.label
+                ))),
+            };
+        }
         if is_local(&source) {
             return Plan::Repo(Target {
                 marketplace_dir: clone.to_path_buf(),
