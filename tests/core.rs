@@ -600,3 +600,55 @@ mod recommendation {
         assert!(!rec.approve);
     }
 }
+
+mod reserved_marketplace {
+    use super::*;
+
+    /// A Claude-only plugin inside a repo whose marketplace is named like Anthropic's, as
+    /// typescript-lsp is in anthropics/claude-plugins-official, with only an LSP server.
+    fn fixture() -> Env {
+        let env = Env::new();
+        env.native();
+        env.codex();
+        env.ok(&["init"]);
+        let (repo, url, _) = env.upstream("tslsp", true, false, Some("claude-plugins-official"));
+        fs::write(
+            repo.join(".claude-plugin/plugin.json"),
+            serde_json::json!({"name": "tslsp", "version": "1.0.0",
+                "lspServers": {"ts": {"command": "typescript-language-server", "args": ["--stdio"]}}})
+            .to_string(),
+        )
+        .unwrap();
+        env.upstream_commit(&repo, "v2");
+        env.ok(&["add", "source", &url]);
+        env
+    }
+
+    #[test]
+    fn ach1_01_a_reserved_marketplace_name_installs_through_colctls_own() {
+        let env = fixture();
+        assert_eq!(env.code(&["sync"]).0, 0);
+        let installed = env.installed(&env.home.join(".claude"));
+        assert!(
+            installed.contains(&"tslsp@colctl-tslsp".to_string()),
+            "{installed:?}"
+        );
+        assert_eq!(
+            env.item_state("claude", "source", "tslsp").as_deref(),
+            Some("ok")
+        );
+    }
+
+    #[test]
+    fn ach1_02_codex_isnt_pointed_at_a_convert_that_refuses() {
+        let env = fixture();
+        let out = env.ok(&["status", "--all", "--color", "never"]);
+        let codex: Vec<&str> = out
+            .lines()
+            .filter(|l| l.contains("tslsp") && l.contains("unsupported"))
+            .collect();
+        assert!(!codex.is_empty(), "{out}");
+        assert!(!out.contains("colctl convert tslsp"), "{out}");
+        assert!(out.contains("nothing Codex can use"), "{out}");
+    }
+}
