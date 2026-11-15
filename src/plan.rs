@@ -875,8 +875,10 @@ impl Builder<'_> {
                         id: old.id.clone(),
                     });
                 }
+                // ECH2-04: a marketplace a list plugin still uses stays.
                 if old.marketplace != target.marketplace
                     && plugins.marketplaces.contains_key(&old.marketplace)
+                    && !list_markets.contains_key(&old.marketplace)
                 {
                     self.actions.push(Action::RemoveSourceMarketplace {
                         name: old.marketplace.clone(),

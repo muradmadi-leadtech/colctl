@@ -75,11 +75,11 @@ fn ac3_17_add_source() {
     );
     assert!(
         env.installed(&env.home.join(".claude"))
-            .contains(&"superpowers@superpowers-dev".to_string())
+            .contains(&"superpowers@colctl-superpowers".to_string())
     );
     assert_eq!(
         env.codex_installed(&env.home.join(".codex")),
-        vec!["superpowers@superpowers-dev"]
+        vec!["superpowers@colctl-superpowers"]
     );
 
     let (_, url2, _) = env.upstream("other", true, true, Some("other-m"));
@@ -121,13 +121,13 @@ fn ac3_13_rm_source() {
     assert!(sources(&env).is_empty());
     let claude = env.log_args();
     assert!(
-        claude.contains(&"plugin uninstall superpowers@superpowers-dev".to_string()),
+        claude.contains(&"plugin uninstall superpowers@colctl-superpowers".to_string()),
         "{claude:?}"
     );
-    assert!(claude.contains(&"plugin marketplace remove superpowers-dev".to_string()));
+    assert!(claude.contains(&"plugin marketplace remove colctl-superpowers".to_string()));
     assert!(
         env.codex_log_args()
-            .contains(&"plugin remove superpowers@superpowers-dev".to_string())
+            .contains(&"plugin remove superpowers@colctl-superpowers".to_string())
     );
     assert!(!env.source.join("plugins/superpowers").exists());
     assert!(env.codex_installed(&env.home.join(".codex")).is_empty());
@@ -181,7 +181,7 @@ fn ac3_15_update_moves_pins_and_every_harness() {
     );
     assert!(
         !env.log_args()
-            .contains(&"plugin update superpowers@superpowers-dev".to_string())
+            .contains(&"plugin update superpowers@colctl-superpowers".to_string())
     );
     let out = env.ok(&["update", "superpowers"]);
     assert!(out.contains("already held for review"), "{out}");
@@ -195,7 +195,7 @@ fn ac3_15_update_moves_pins_and_every_harness() {
     );
     assert!(
         env.log_args()
-            .contains(&"plugin update superpowers@superpowers-dev".to_string())
+            .contains(&"plugin update superpowers@colctl-superpowers".to_string())
     );
     let out = env.ok(&["update", "superpowers"]);
     assert!(out.contains("up to date"), "{out}");
@@ -283,14 +283,14 @@ fn ac3_18_adopt_a_plugin_directory_plugin_moves_it_to_its_source() {
     for profile in [native.clone(), env.home.join(KILO)] {
         let installed = env.installed(&profile);
         assert!(
-            installed.contains(&"superpowers@superpowers-dev".to_string()),
+            installed.contains(&"superpowers@colctl-superpowers".to_string()),
             "{installed:?}"
         );
         assert!(!installed.contains(&"superpowers@anthropic-plugin-directory".to_string()));
     }
     assert_eq!(
         env.codex_installed(&env.home.join(".codex")),
-        vec!["superpowers@superpowers-dev"]
+        vec!["superpowers@colctl-superpowers"]
     );
     assert_eq!(
         state(&env)["harnesses"]["codex"]["sources"]["superpowers"]["rev"],
@@ -508,7 +508,7 @@ fn ac3_29_adopt_converts_a_list_plugin_in_one_step() {
     for profile in [env.home.join(".claude"), env.home.join(KILO)] {
         let installed = env.installed(&profile);
         assert!(
-            installed.contains(&"superpowers@superpowers-dev".to_string()),
+            installed.contains(&"superpowers@colctl-superpowers".to_string()),
             "{installed:?}"
         );
         assert!(!installed.contains(&"superpowers@anthropic-plugin-directory".to_string()));
@@ -521,7 +521,7 @@ fn ac3_29_adopt_converts_a_list_plugin_in_one_step() {
     assert_eq!(uninstalls, 2, "once per harness");
     assert_eq!(
         env.codex_installed(&env.home.join(".codex")),
-        vec!["superpowers@superpowers-dev"]
+        vec!["superpowers@colctl-superpowers"]
     );
     env.ok(&["status"]);
 }

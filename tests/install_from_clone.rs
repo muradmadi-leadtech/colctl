@@ -123,12 +123,13 @@ fn ac6_31_a_repo_manifest_pointing_at_github_installs_from_the_clone() {
 #[test]
 fn ac6_32_installs_made_from_the_repo_manifest_move_to_the_clone() {
     let env = machine();
-    // 2.1 behaviour: a manifest pointing inside the repo is used as is.
+    // Since 2.6.1 a manifest pointing inside the repo installs through colctl's own marketplace
+    // too (ACH2-01), so the repo switching its manifests to GitHub changes nothing installed. The
+    // move of an install made under the repo's name is ACH2-02.
     let (repo, url) = dbx_repo(&env, false);
     env.ok(&["add", "source", &url, "--name", "dbx"]);
     let claude = env.home.join(".claude");
-    assert_eq!(env.installed(&claude), vec!["dbx@dbx-skills"]);
-    // The repo then switches its manifests to GitHub, and the owner approves that version.
+    assert_eq!(env.installed(&claude), vec!["dbx@colctl-dbx"]);
     manifests(&repo, true);
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-qm", "v2"]);
@@ -140,22 +141,21 @@ fn ac6_32_installs_made_from_the_repo_manifest_move_to_the_clone() {
         vec!["dbx@colctl-dbx"]
     );
     assert!(known_marketplaces(&claude).get("dbx-skills").is_none());
-    let log = env.log_args();
-    assert!(
-        log.contains(&"plugin uninstall dbx@dbx-skills".to_string()),
-        "{log:?}"
-    );
-    assert!(
-        log.contains(&"plugin marketplace remove dbx-skills".to_string()),
-        "{log:?}"
-    );
     env.ok(&["status"]);
 }
 
 #[test]
 fn ac6_33_a_source_that_does_not_converge_fails() {
     let env = machine();
-    let (_, url) = dbx_repo(&env, false);
+    let (repo, url) = dbx_repo(&env, false);
+    // Only a repo marketplace colctl uses as is (its entry points outside the clone, ECH2-02) can
+    // be checked against the clone's commit.
+    write(
+        &repo.join(".claude-plugin/marketplace.json"),
+        &json!({"name": "dbx-skills", "plugins": [{"name": "dbx", "source": "../elsewhere"}]}),
+    );
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-qm", "outside"]);
     // Claude records some other commit than the clone's, as it did for databricks.
     let env = env.var("FAKE_CLAUDE_SHA", &"d".repeat(40));
     let (code, out, _) = env.code(&["add", "source", &url, "--name", "dbx"]);

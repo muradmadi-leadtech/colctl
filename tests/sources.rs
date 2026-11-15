@@ -105,26 +105,31 @@ fn ac3_07_ac3_10_installs_from_the_clone_with_the_repo_ids() {
     let (_, url, v1) = env.upstream("superpowers", true, true, Some("superpowers-dev"));
     env.add_source_entry("superpowers", &url, &v1, "");
     env.ok(&["sync"]);
-    let clone = env.source.join("plugins/superpowers").display().to_string();
+    // ACH2-01: the repo's manifests find the plugin; colctl's own marketplace installs it.
+    let clone = env
+        .source
+        .join("plugins/.manifests/superpowers")
+        .display()
+        .to_string();
     assert_eq!(
         env.log_args(),
         vec![
             format!("plugin marketplace add {clone}"),
-            "plugin install superpowers@superpowers-dev".to_string(),
+            "plugin install superpowers@colctl-superpowers".to_string(),
             format!("plugin marketplace add {clone}"),
-            "plugin install superpowers@superpowers-dev".to_string(),
+            "plugin install superpowers@colctl-superpowers".to_string(),
         ]
     );
     assert_eq!(
         env.codex_log_args(),
         vec![
             format!("plugin marketplace add {clone}"),
-            "plugin add superpowers@superpowers-dev".to_string()
+            "plugin add superpowers@colctl-superpowers".to_string()
         ]
     );
     for h in ["claude", "kilo-claude", "codex"] {
         let s = &state(&env)["harnesses"][h]["sources"]["superpowers"];
-        assert_eq!(s["id"], "superpowers@superpowers-dev", "{h}");
+        assert_eq!(s["id"], "superpowers@colctl-superpowers", "{h}");
         assert_eq!(s["rev"], v1.as_str());
     }
     assert_eq!(
@@ -198,19 +203,19 @@ fn ac3_11_a_moved_pin_updates_every_harness() {
         // The plugin's version didn't change, so Claude keeps the old commit on update and colctl
         // reinstalls it (AC8-40).
         vec![
-            "plugin marketplace update superpowers-dev",
-            "plugin update superpowers@superpowers-dev",
-            "plugin uninstall superpowers@superpowers-dev",
-            "plugin install superpowers@superpowers-dev",
-            "plugin marketplace update superpowers-dev",
-            "plugin update superpowers@superpowers-dev",
-            "plugin uninstall superpowers@superpowers-dev",
-            "plugin install superpowers@superpowers-dev",
+            "plugin marketplace update colctl-superpowers",
+            "plugin update superpowers@colctl-superpowers",
+            "plugin uninstall superpowers@colctl-superpowers",
+            "plugin install superpowers@colctl-superpowers",
+            "plugin marketplace update colctl-superpowers",
+            "plugin update superpowers@colctl-superpowers",
+            "plugin uninstall superpowers@colctl-superpowers",
+            "plugin install superpowers@colctl-superpowers",
         ]
     );
     assert_eq!(
         env.codex_log_args()[codex_before..].to_vec(),
-        vec!["plugin add superpowers@superpowers-dev"]
+        vec!["plugin add superpowers@colctl-superpowers"]
     );
     assert_eq!(
         state(&env)["harnesses"]["codex"]["sources"]["superpowers"]["rev"],
@@ -230,7 +235,7 @@ fn ec3_13_a_failed_update_keeps_the_old_rev() {
     let env = env.var("FAKE_CODEX_FAIL", "plugin add");
     let out = env.expect(1, &["sync"]);
     assert!(
-        out.contains("codex plugin add superpowers@superpowers-dev exited 1"),
+        out.contains("codex plugin add superpowers@colctl-superpowers exited 1"),
         "{out}"
     );
     assert_eq!(
@@ -361,21 +366,22 @@ fn ec3_07_a_marketplace_name_taken_by_another_origin() {
     let env = machine();
     let native = env.home.join(".claude");
     fs::create_dir_all(native.join("plugins")).unwrap();
+    // colctl's own name for the source, already taken by something else in one profile.
     fs::write(
         native.join("plugins/known_marketplaces.json"),
-        r#"{"superpowers-dev":{"source":{"source":"github","repo":"obra/superpowers"},"installLocation":"/fake"}}"#,
+        r#"{"colctl-superpowers":{"source":{"source":"github","repo":"someone/else"},"installLocation":"/fake"}}"#,
     )
     .unwrap();
     let (_, url, v1) = env.upstream("superpowers", true, true, Some("superpowers-dev"));
     env.add_source_entry("superpowers", &url, &v1, "");
     let out = env.expect(1, &["sync"]);
     assert!(
-        out.contains("marketplace superpowers-dev already comes from"),
+        out.contains("marketplace colctl-superpowers already comes from"),
         "{out}"
     );
     assert!(
         env.installed(&env.home.join(KILO))
-            .contains(&"superpowers@superpowers-dev".to_string()),
+            .contains(&"superpowers@colctl-superpowers".to_string()),
         "other harnesses still get it"
     );
 }
@@ -389,16 +395,16 @@ fn ec3_12_a_source_id_that_is_also_a_list_plugin() {
         .config()
         .replace(
             "[marketplaces]\n",
-            "[marketplaces]\nsuperpowers-dev = \"github:obra/superpowers\"\n",
+            "[marketplaces]\ncolctl-superpowers = \"github:obra/superpowers\"\n",
         )
         .replace(
             "enabled = []",
-            "enabled = [\"superpowers@superpowers-dev\"]",
+            "enabled = [\"superpowers@colctl-superpowers\"]",
         );
     env.write_config(&config);
     let out = env.expect(1, &["sync"]);
     assert!(
-        out.contains("superpowers@superpowers-dev is both a source plugin and a list plugin"),
+        out.contains("superpowers@colctl-superpowers is both a source plugin and a list plugin"),
         "{out}"
     );
 }

@@ -5,6 +5,27 @@ expression: "normalise(&env, &out)"
 {
   "marketplaces": [
     {
+      "managed": true,
+      "name": "colctl-superpowers",
+      "plugins": 1,
+      "profiles": [
+        "claude",
+        "kilo-claude"
+      ],
+      "source": "[ROOT]/home/.colctl/plugins/.manifests/superpowers",
+      "tool": "claude"
+    },
+    {
+      "managed": true,
+      "name": "colctl-superpowers",
+      "plugins": 1,
+      "profiles": [
+        "codex"
+      ],
+      "source": "[ROOT]/home/.colctl/plugins/.manifests/superpowers",
+      "tool": "codex"
+    },
+    {
       "managed": false,
       "name": "official",
       "plugins": 1,
@@ -13,27 +34,6 @@ expression: "normalise(&env, &out)"
       ],
       "source": "github:o/official",
       "tool": "claude"
-    },
-    {
-      "managed": true,
-      "name": "superpowers-dev",
-      "plugins": 1,
-      "profiles": [
-        "claude",
-        "kilo-claude"
-      ],
-      "source": "[ROOT]/home/.colctl/plugins/superpowers",
-      "tool": "claude"
-    },
-    {
-      "managed": true,
-      "name": "superpowers-dev",
-      "plugins": 1,
-      "profiles": [
-        "codex"
-      ],
-      "source": "[ROOT]/home/.colctl/plugins/superpowers",
-      "tool": "codex"
     }
   ],
   "version": 1,

@@ -10,10 +10,13 @@ every Claude and Codex profile install the plugin from that clone.
 ## Why the repo's own manifests
 
 Many plugin repos ship packaging for several tools side by side (`.claude-plugin/`, `.codex-plugin/`,
-`.agents/plugins/marketplace.json`). colctl adds the clone itself as a local marketplace, so each tool installs exactly
-what the author published for it, under the author's id (`superpowers@superpowers-dev`). If a repo has only plugin
-manifests, colctl writes a one-plugin marketplace manifest next to the clone (in `plugins/.manifests/`, never in the
-clone). A tool the repo doesn't package for gets nothing; converting packaging between tools is a possible later
+`.agents/plugins/marketplace.json`). colctl reads them to find each tool's plugin folder and keeps every field the
+author wrote for it, so each tool installs exactly what the author published. The marketplace it installs from is
+always `colctl-<name>`, a one-plugin manifest colctl writes next to the clone (in `plugins/.manifests/`, never in the
+clone) that points at the plugin's folder: `superpowers@colctl-superpowers`. One name for every source tells you at a
+glance which marketplaces colctl manages, and it works where an author's name can't be used (Claude reserves
+`claude-plugins-official` for Anthropic). Until 2.6.1 a repo's own marketplace name was used when it had one; the next
+`colctl sync` moves such an install over once. A tool the repo doesn't package for gets nothing; converting packaging between tools is a possible later
 cycle.
 
 ## Why pins

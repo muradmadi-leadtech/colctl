@@ -828,7 +828,7 @@ fn ac4_23_approving_a_source_plugin() {
     }
     assert!(
         env.log_args()
-            .contains(&"plugin update superpowers@superpowers-dev".to_string())
+            .contains(&"plugin update superpowers@colctl-superpowers".to_string())
     );
     env.ok(&["status"]);
 }

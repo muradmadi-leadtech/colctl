@@ -75,5 +75,7 @@ convert = ["codex"]                                   # optional, written by col
 ```
 
 colctl clones each source into `~/.colctl/plugins/<name>` (git-ignored) at `rev`, and installs it in every claude and
-codex harness its repo packages for. Change `rev` with [`colctl update`](update.md) and [`colctl approve`](approve.md) rather than by hand. A claude or
+codex harness its repo packages for, always from colctl's own one-plugin marketplace `colctl-<name>` (in
+`~/.colctl/plugins/.manifests/<name>/`, pointing at the plugin's folder in the clone), so its id is
+`<plugin>@colctl-<name>`. Change `rev` with [`colctl update`](update.md) and [`colctl approve`](approve.md) rather than by hand. A claude or
 codex harness can opt out of one source with `exclude = ["sources/<name>"]`.
