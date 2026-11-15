@@ -73,6 +73,58 @@ impl Git {
         }
     }
 
+    /// Reads many blobs through one `git cat-file --batch` process (AC9-04): one process per file
+    /// made a 60-commit review take 14 s. Missing objects are left out of the map.
+    pub(crate) fn blobs(
+        &self,
+        dir: &Path,
+        shas: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>> {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let mut out = std::collections::HashMap::new();
+        if shas.is_empty() {
+            return Ok(out);
+        }
+        let mut cmd = std::process::Command::new(&self.program);
+        cmd.arg("-C").arg(dir).args(["cat-file", "--batch"]);
+        if let Some(home) = &self.home {
+            cmd.env("HOME", home);
+        }
+        let mut child = cmd
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        let mut stdin = child.stdin.take().expect("piped stdin");
+        let input: String = shas.iter().map(|s| format!("{s}\n")).collect();
+        let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
+        let mut reader = BufReader::new(child.stdout.take().expect("piped stdout"));
+        let mut header = String::new();
+        loop {
+            header.clear();
+            if reader.read_line(&mut header)? == 0 {
+                break;
+            }
+            let parts: Vec<&str> = header.split_whitespace().collect();
+            let [sha, _kind, size] = parts[..] else {
+                continue;
+            };
+            let size: usize = size.parse()?;
+            let mut body = vec![0; size + 1];
+            reader.read_exact(&mut body)?;
+            body.truncate(size);
+            out.insert(sha.to_string(), body);
+        }
+        writer
+            .join()
+            .map_err(|_| anyhow::anyhow!("writing to git cat-file failed"))??;
+        let status = child.wait()?;
+        if !status.success() {
+            bail!("git cat-file --batch failed in {}", dir.display());
+        }
+        Ok(out)
+    }
+
     pub fn is_repo(dir: &Path) -> bool {
         dir.join(".git").exists()
     }

@@ -255,7 +255,10 @@ pub fn save(source: &Path, state: &State) -> anyhow::Result<()> {
     state.prune();
     let mut text = serde_json::to_string_pretty(&state)?;
     text.push('\n');
-    fsx::atomic_write(&state_dir(source).join(STATE_FILE), text.as_bytes())
+    fsx::atomic_write(&state_dir(source).join(STATE_FILE), text.as_bytes())?;
+    // A saved check outlives its hold only until the hold changes (AC9-06).
+    crate::review_cache::prune_in(source, state.quarantine.keys());
+    Ok(())
 }
 
 /// Held while a command that changes something runs; released on drop (AC-29).

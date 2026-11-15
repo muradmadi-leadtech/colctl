@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use yaml_rust2::{Yaml, YamlLoader};
 
 /// How a file changed between the installed version and the candidate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Added,
@@ -47,7 +47,7 @@ pub struct Changed {
     pub new: Option<Content>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FlagKind {
     Hook,
@@ -82,7 +82,11 @@ impl FlagKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// Bumped whenever a flag, a pattern or the recommendation changes, so saved checks are redone
+/// (AC9-08).
+pub const RULES_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct Flag {
     pub kind: FlagKind,
     pub path: String,

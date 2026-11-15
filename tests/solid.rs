@@ -1,0 +1,344 @@
+//! Cycle 9: solid. Saved checks of held versions, the TUI's saved status, the remaining commands
+//! as core calls, and the carried follow-ups. Named after AC9-NN / EC9-NN.
+
+mod support;
+
+use serde_json::Value;
+use std::fs;
+use std::os::unix::fs::{PermissionsExt, symlink};
+use std::path::{Path, PathBuf};
+use support::Env;
+
+fn machine() -> Env {
+    let env = Env::new();
+    env.native();
+    env.kilo();
+    env.codex();
+    env.agents_dir();
+    env.ok(&["init"]);
+    env
+}
+
+/// Replaces the test PATH's git with a script that logs each call's arguments, then runs git.
+/// Written to a temporary name and renamed, so it's never executed half written.
+fn count_git(env: &Env) -> PathBuf {
+    let log = env.home.parent().unwrap().join("git.log");
+    let real = fs::canonicalize(env.bin.join("git")).unwrap();
+    let script = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nexec '{}' \"$@\"\n",
+        log.display(),
+        real.display()
+    );
+    let tmp = env.bin.join(".git.tmp");
+    fs::write(&tmp, script).unwrap();
+    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::remove_file(env.bin.join("git")).unwrap();
+    fs::rename(&tmp, env.bin.join("git")).unwrap();
+    log
+}
+
+fn calls(log: &Path, needle: &str) -> usize {
+    fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.contains(needle))
+        .count()
+}
+
+fn reset(log: &Path) {
+    let _ = fs::remove_file(log);
+}
+
+fn cache_dir(env: &Env) -> PathBuf {
+    env.source.join(".state/cache/reviews")
+}
+
+fn cached(env: &Env, key: &str) -> PathBuf {
+    cache_dir(env).join(format!("{}.json", key.replace('/', "__")))
+}
+
+/// A machine with superpowers added at v1 and a held update two commits ahead.
+fn held_source() -> (Env, PathBuf, String) {
+    let env = machine();
+    let (repo, url, _) = env.upstream("superpowers", true, true, Some("superpowers-dev"));
+    env.ok(&["add", "source", &url]);
+    let skills = repo.join("skills/tidy");
+    fs::create_dir_all(&skills).unwrap();
+    fs::write(skills.join("SKILL.md"), "---\nname: tidy\n---\nTidy up.\n").unwrap();
+    env.upstream_commit(&repo, "v2");
+    let v3 = env.upstream_commit(&repo, "v3");
+    (env, repo, v3)
+}
+
+/// A skill twg keeps in its own folder, taken over by colctl, with a change held by refresh.
+fn held_skill(env: &Env) -> PathBuf {
+    let origin = env.skill_dir(&env.home.join(".config/twg/skills"), "twg-jira", "v1");
+    let skills = env.home.join(".agents/skills");
+    fs::create_dir_all(&skills).unwrap();
+    symlink(&origin, skills.join("twg-jira")).unwrap();
+    env.ok(&["adopt", "agents", "skills/twg-jira"]);
+    fs::write(origin.join("SKILL.md"), "v2").unwrap();
+    env.ok(&["refresh"]);
+    origin
+}
+
+// ---------------------------------------------------------------- saved checks (T2)
+
+#[test]
+fn ac9_02_a_held_version_is_checked_once() {
+    let (env, _, _) = held_source();
+    let log = count_git(&env);
+    env.ok(&["update"]);
+    assert_eq!(calls(&log, "diff --raw"), 1, "update checks what it holds");
+    assert!(cached(&env, "sources/superpowers").is_file());
+    reset(&log);
+    env.expect(1, &["status"]);
+    env.run(&["review"]);
+    env.run(&["review", "superpowers", "--json"]);
+    env.expect(1, &["status", "--json"]);
+    assert_eq!(
+        calls(&log, "diff --raw"),
+        0,
+        "later commands read the saved check"
+    );
+}
+
+#[test]
+fn ac9_03_saved_and_fresh_checks_print_the_same() {
+    let (env, _, _) = held_source();
+    held_skill(&env);
+    env.ok(&["update"]);
+    let run = |args: &[&str]| env.code(args);
+    let commands: [&[&str]; 5] = [
+        &["status"],
+        &["status", "--json"],
+        &["review"],
+        &["review", "--json"],
+        &["review", "superpowers", "--json"],
+    ];
+    let warm: Vec<_> = commands.iter().map(|c| run(c)).collect();
+    for (args, before) in commands.iter().zip(&warm) {
+        fs::remove_dir_all(env.source.join(".state/cache")).unwrap();
+        assert_eq!(&run(args), before, "{args:?}");
+    }
+}
+
+#[test]
+fn ac9_04_many_changed_files_are_read_by_one_git_process() {
+    let (env, repo, _) = held_source();
+    for i in 0..300 {
+        let dir = repo.join(format!("skills/s{i}"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("SKILL.md"), format!("---\nname: s{i}\n---\n{i}\n")).unwrap();
+    }
+    env.upstream_commit(&repo, "v4");
+    let log = count_git(&env);
+    env.ok(&["update"]);
+    assert!(
+        calls(&log, "cat-file") <= 2,
+        "blobs are read in one batch, not one process per file: {} calls",
+        calls(&log, "cat-file")
+    );
+}
+
+#[test]
+#[ignore = "timing: run by the smoke test against a release build"]
+fn ac9_04_status_and_review_answer_in_under_a_second() {
+    let (env, repo, _) = held_source();
+    for c in 0..60 {
+        for i in 0..5 {
+            let dir = repo.join(format!("skills/s{c}-{i}"));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("SKILL.md"), format!("{c}{i}")).unwrap();
+        }
+        env.upstream_commit(&repo, &format!("c{c}"));
+    }
+    env.ok(&["update"]);
+    for args in [&["status"][..], &["review"][..]] {
+        let t = std::time::Instant::now();
+        env.run(args);
+        assert!(
+            t.elapsed().as_millis() < 1000,
+            "{args:?}: {:?}",
+            t.elapsed()
+        );
+    }
+}
+
+#[test]
+fn ac9_05_a_changed_hold_is_checked_again() {
+    let (env, repo, v3) = held_source();
+    env.ok(&["update"]);
+    let first: Value =
+        serde_json::from_str(&fs::read_to_string(cached(&env, "sources/superpowers")).unwrap())
+            .unwrap();
+    assert_eq!(first["identity"]["to"], v3.as_str());
+    let v4 = env.upstream_commit(&repo, "v4");
+    let log = count_git(&env);
+    env.ok(&["update"]);
+    let second: Value =
+        serde_json::from_str(&fs::read_to_string(cached(&env, "sources/superpowers")).unwrap())
+            .unwrap();
+    assert_eq!(second["identity"]["to"], v4.as_str());
+    assert_eq!(calls(&log, "diff --raw"), 1);
+    reset(&log);
+    env.run(&["review"]);
+    assert_eq!(calls(&log, "diff --raw"), 0);
+}
+
+#[test]
+fn ac9_06_approve_and_reject_remove_the_saved_check() {
+    let (env, _, _) = held_source();
+    held_skill(&env);
+    env.ok(&["update"]);
+    env.run(&["review"]);
+    assert!(cached(&env, "sources/superpowers").is_file());
+    assert!(cached(&env, "skills/twg-jira").is_file());
+    env.ok(&["approve", "superpowers", "-y"]);
+    env.ok(&["reject", "skills/twg-jira", "-y"]);
+    assert!(!cached(&env, "sources/superpowers").exists());
+    assert!(!cached(&env, "skills/twg-jira").exists());
+    let status = env.status_json();
+    assert_eq!(
+        status["quarantine"].as_array().map_or(0, Vec::len),
+        0,
+        "{status}"
+    );
+}
+
+#[test]
+fn ac9_07_a_changed_pin_is_never_served_from_the_cache() {
+    let (env, _, _) = held_source();
+    env.ok(&["update"]);
+    env.run(&["review"]);
+    let config = env.config();
+    let t: toml::Table = toml::from_str(&config).unwrap();
+    let rev = t["source"][0]["rev"].as_str().unwrap().to_string();
+    let other = "0123456789abcdef0123456789abcdef01234567";
+    env.write_config(&config.replace(&rev, other));
+    let (_, out, err) = env.code(&["review", "superpowers"]);
+    assert!(
+        format!("{out}{err}").contains("pin changed since it was held"),
+        "{out}{err}"
+    );
+}
+
+#[test]
+fn ac9_07_an_edited_held_copy_is_never_served_from_the_cache() {
+    let env = machine();
+    held_skill(&env);
+    env.run(&["review"]);
+    assert!(cached(&env, "skills/twg-jira").is_file());
+    let snap = env
+        .source
+        .join(".state/quarantine/skills/twg-jira/SKILL.md");
+    fs::write(snap, "edited").unwrap();
+    let (_, out, err) = env.code(&["review", "--json"]);
+    assert!(
+        format!("{out}{err}").contains("changed since it was held"),
+        "{out}{err}"
+    );
+}
+
+#[test]
+fn ac9_08_a_check_from_another_colctl_or_other_rules_is_redone() {
+    let (env, _, _) = held_source();
+    env.ok(&["update"]);
+    let path = cached(&env, "sources/superpowers");
+    let log = count_git(&env);
+    for field in ["colctl", "rules"] {
+        let mut v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        v[field] = if field == "colctl" {
+            Value::from("0.0.1")
+        } else {
+            Value::from(0)
+        };
+        fs::write(&path, v.to_string()).unwrap();
+        reset(&log);
+        env.run(&["review"]);
+        assert_eq!(calls(&log, "diff --raw"), 1, "{field}");
+        let again: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_ne!(
+            again[field], v[field],
+            "{field}: the new check replaced the old"
+        );
+    }
+}
+
+#[test]
+fn ac9_09_a_diff_is_never_saved() {
+    let (env, _, _) = held_source();
+    env.ok(&["update"]);
+    let out = String::from_utf8_lossy(&env.run(&["review", "superpowers"]).stdout).into_owned();
+    assert!(out.contains("Tidy up."), "the diff is shown: {out}");
+    for entry in fs::read_dir(cache_dir(&env)).unwrap().flatten() {
+        let text = fs::read_to_string(entry.path()).unwrap();
+        assert!(!text.contains("Tidy up."), "{}", entry.path().display());
+        assert!(!text.contains("\"diff\""), "{}", entry.path().display());
+    }
+}
+
+#[test]
+fn ac9_10_the_cache_is_never_committed() {
+    let (env, _, _) = held_source();
+    env.ok(&["update"]);
+    env.run(&["review"]);
+    env.ok(&["approve", "superpowers", "-y"]);
+    let tracked = env.git(&["ls-files"]);
+    assert!(!tracked.contains(".state"), "{tracked}");
+}
+
+#[test]
+fn ec9_01_02_03_a_missing_broken_or_misnamed_check_is_a_miss() {
+    let (env, _, _) = held_source();
+    env.ok(&["update"]);
+    let path = cached(&env, "sources/superpowers");
+    let good = fs::read_to_string(&path).unwrap();
+    let log = count_git(&env);
+    let mut misnamed: Value = serde_json::from_str(&good).unwrap();
+    misnamed["key"] = Value::from("sources/other");
+    for broken in [
+        "".to_string(),
+        "{not json".to_string(),
+        good[..good.len() / 2].to_string(),
+        misnamed.to_string(),
+    ] {
+        fs::write(&path, broken).unwrap();
+        reset(&log);
+        let (code, out, err) = env.code(&["review"]);
+        assert_eq!(code, 1, "held, as before: {out}{err}");
+        assert_eq!(calls(&log, "diff --raw"), 1);
+        assert_eq!(fs::read_to_string(&path).unwrap(), good, "rewritten");
+    }
+    fs::remove_dir_all(env.source.join(".state/cache")).unwrap();
+    reset(&log);
+    env.run(&["review"]);
+    assert_eq!(calls(&log, "diff --raw"), 1);
+    assert!(path.is_file());
+}
+
+#[test]
+fn ec9_04_an_unwritable_cache_only_costs_speed() {
+    let (env, _, _) = held_source();
+    let cache = env.source.join(".state/cache");
+    fs::create_dir_all(env.source.join(".state")).unwrap();
+    fs::write(&cache, "not a folder").unwrap();
+    let out = env.ok(&["update"]);
+    assert!(!out.contains("cache"), "{out}");
+    let (code, out, err) = env.code(&["review"]);
+    assert_eq!(code, 1, "held, as before");
+    assert!(!format!("{out}{err}").contains("cache"), "{out}{err}");
+    let (_, _, err) = env.code(&["review", "-v"]);
+    assert!(err.contains("cache"), "-v notes it: {err}");
+}
+
+#[test]
+fn ec9_09_checks_for_versions_no_longer_held_are_pruned() {
+    let (env, _, _) = held_source();
+    env.ok(&["update"]);
+    let stray = cached(&env, "sources/gone");
+    fs::write(&stray, "{}").unwrap();
+    env.run(&["review"]);
+    assert!(!stray.exists());
+    assert!(cached(&env, "sources/superpowers").is_file());
+}
