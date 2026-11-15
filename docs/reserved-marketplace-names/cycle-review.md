@@ -8,7 +8,7 @@ _After cycle 8 · Evaluate · 2026-11-15_
 | **Intent** | typescript-lsp failed in both Claude profiles on every sync and was installed nowhere |
 | **Released** | [v2.5.1](https://github.com/muradmadi-leadtech/colctl/releases/tag/v2.5.1) (#122, release #123) |
 | **Production impact** | None. Real profiles were only read; the smoke test ran on a copy |
-| **Disposition** | _Yours to decide_ |
+| **Disposition** | Accept (owner, 2026-11-15) |
 
 ## Cause
 
@@ -59,3 +59,5 @@ code intelligence, so it isn't the same thing.
 - [ ] `colctl sync`: claude and kilo-claude add `colctl-typescript-lsp` and install typescript-lsp
 - [ ] `colctl status` says all 5 profiles are in sync
 - [ ] Decide the disposition
+
+**Disposition: Accept** (owner, 2026-11-15).
