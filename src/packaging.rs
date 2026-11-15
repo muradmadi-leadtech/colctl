@@ -689,3 +689,59 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod colctl_names {
+    use super::*;
+
+    fn write(path: &Path, value: &Value) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, value.to_string()).unwrap();
+    }
+
+    #[test]
+    fn ech2_01_an_entry_that_defines_the_plugin_itself_is_wrapped() {
+        let t = tempfile::tempdir().unwrap();
+        let clone = t.path().join("plugins/q");
+        let manifests = t.path().join("plugins/.manifests/q");
+        write(
+            &clone.join(".claude-plugin/marketplace.json"),
+            &json!({"name": "qdrant", "plugins": [
+                {"name": "qdrant", "source": "./skills", "strict": false, "skills": ["./"]}]}),
+        );
+        fs::create_dir_all(clone.join("skills")).unwrap();
+        let p = inspect(&clone, &manifests, "q", "qdrant", None);
+        let ToolPackaging::Supported(t) = &p.claude else {
+            panic!("{:?}", p.claude);
+        };
+        assert_eq!(t.id, "qdrant@colctl-q");
+        let m: Value = serde_json::from_str(
+            &fs::read_to_string(manifests.join(".claude-plugin/marketplace.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(m["plugins"][0]["strict"], false);
+        assert_eq!(m["plugins"][0]["skills"], json!(["./"]));
+        assert_eq!(
+            fs::read_link(manifests.join("plugin")).unwrap(),
+            clone.join("skills")
+        );
+    }
+
+    #[test]
+    fn ech2_02_an_entry_outside_the_clone_is_never_wrapped() {
+        let t = tempfile::tempdir().unwrap();
+        let clone = t.path().join("plugins/q");
+        let manifests = t.path().join("plugins/.manifests/q");
+        fs::create_dir_all(t.path().join("plugins/outside")).unwrap();
+        write(
+            &clone.join(".claude-plugin/marketplace.json"),
+            &json!({"name": "qdrant", "plugins": [{"name": "qdrant", "source": "../outside"}]}),
+        );
+        let p = inspect(&clone, &manifests, "q", "qdrant", None);
+        let ToolPackaging::Supported(t) = &p.claude else {
+            panic!("{:?}", p.claude);
+        };
+        assert_eq!(t.id, "qdrant@qdrant", "the repo's own, as before");
+        assert!(!manifests.join("plugin").exists());
+    }
+}
