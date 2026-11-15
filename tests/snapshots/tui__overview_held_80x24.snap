@@ -11,6 +11,7 @@ expression: mask(&screen(&m))
    Review 1 held version      4
    Find a plugin              5
    Look through every item    3
+   All actions                :
 
    Profiles
    ! claude       ~/.claude            1 skill · 1 plugin · 1 missing
@@ -24,5 +25,4 @@ expression: mask(&screen(&m))
 
 
 
-
- ⏎ run · s sync · u check updates · r reload · ? keys · q quit
+ ⏎ run · s sync · u check updates · r reload · : all actions · ? keys · q quit

@@ -266,7 +266,7 @@ impl Default for Fuzzy {
 
 impl Fuzzy {
     /// How well `term`'s letters, in order and ignoring case, match `text`; `None` when they don't.
-    fn score(&mut self, term: &str, text: &str) -> Option<u16> {
+    pub fn score(&mut self, term: &str, text: &str) -> Option<u16> {
         use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
         let atom = Atom::new(
             term,

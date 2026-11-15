@@ -246,6 +246,9 @@ pub fn in_overlay(m: &Model, x: u16, y: u16) -> bool {
     x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
 
+/// How many actions the palette shows at once.
+const PALETTE_ROWS: usize = 12;
+
 fn overlay_height(m: &Model) -> u16 {
     match &m.overlay {
         Some(Overlay::Help) => {
@@ -260,6 +263,7 @@ fn overlay_height(m: &Model) -> u16 {
             3 + u16::from(cause.is_some()) + u16::from(hint.is_some()) + 1
         }
         Some(Overlay::Pick { items, .. }) => items.len() as u16 + 4,
+        Some(Overlay::Palette { .. }) => PALETTE_ROWS as u16 + 4,
         None => 0,
     }
 }
@@ -583,6 +587,48 @@ fn overlay(m: &Model, f: &mut Frame, o: &Overlay) {
                 l.push(Line::styled(format!("hint: {h}"), t.style(Token::Muted)));
             }
             ("Error".into(), l, "esc close".into())
+        }
+        Overlay::Palette { query, selected } => {
+            let all = super::palette::entries(m);
+            let mut l = vec![Line::from(vec![
+                Span::styled("› ", t.style(Token::Accent)),
+                Span::raw(query.clone()),
+                Span::styled("▏", t.style(Token::Accent)),
+            ])];
+            l.push(Line::default());
+            if all.is_empty() {
+                l.push(Line::styled(
+                    format!(
+                        "No actions match \"{}\"",
+                        crate::review::escape(query.trim())
+                    ),
+                    t.style(Token::Muted),
+                ));
+            }
+            let first = selected.saturating_sub(PALETTE_ROWS - 1);
+            for (i, e) in all.iter().enumerate().skip(first).take(PALETTE_ROWS) {
+                let mut text = format!(
+                    "{}  {}  {}",
+                    pad(e.tab.map_or("anywhere", Tab::title), 9),
+                    pad(e.key, 7),
+                    e.label
+                );
+                if let Some(why) = &e.why_not {
+                    text.push_str(&format!(" · {why}"));
+                }
+                l.push(if i == *selected {
+                    Line::raw(format!("› {text}")).style(t.style(Token::Selection))
+                } else if e.why_not.is_some() {
+                    Line::styled(format!("  {text}"), t.style(Token::Muted))
+                } else {
+                    Line::raw(format!("  {text}"))
+                });
+            }
+            (
+                "All actions".into(),
+                l,
+                "type to filter · ⏎ run · esc close".into(),
+            )
         }
         Overlay::Pick {
             title,

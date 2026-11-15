@@ -23,7 +23,7 @@ Ctrl-C, after an error, or after a bug.
 
 | Tab | Shows | Actions |
 |---|---|---|
-| **Overview** | `colctl status`'s verdict; a menu (sync every profile, check for updates, review what's held, find a plugin, look through every item); one line per profile with what it has; and **Needs you**: each problem with its fix | ⏎ runs the focused menu entry or fix (a review opens it; sync and update ask first; anything else says which command to run); `s` sync, `u` check for updates |
+| **Overview** | `colctl status`'s verdict; a menu (sync every profile, check for updates, review what's held, find a plugin, look through every item, all actions); one line per profile with what it has; and **Needs you**: each problem with its fix | ⏎ runs the focused menu entry or fix (a review opens it; sync and update ask first; anything else says which command to run); `s` sync, `u` check for updates |
 | **Profiles** | Every profile with its path and what it has | ⏎ lists a profile's items, like `status --harness <name> --all`; `s` syncs only that profile; `a` lists what `colctl adopt <profile>` would take, all ticked (space unticks, ⏎ asks, then adopts the ticked ones); `/` filters |
 | **Items** | Every instructions file, skill, agent, plugin and source plugin once, with its state in each profile (numbered columns; the legend is above) | ⏎ shows each profile's state, where the item lives there, and its fix; `x` removes it everywhere (`colctl rm`, after asking); `c` on a source converts it for Codex after showing what the package would carry, or undoes a conversion; `f` on a taken-over skill or agent holds what changed where it came from (`colctl refresh`); `/` filters |
 | **Review** | What's held for review, as `colctl review` lists it; the count is on the tab | ⏎ shows a held version at a glance: what changed, the recommendation, anything suspicious, what runs code; `d` shows everything `colctl review <name>` prints, diff included; `a` approve, `x` reject, `A` approve all, `u` check for updates |
@@ -44,6 +44,7 @@ held.
 | / | Profiles, Items | filter; ⏎ or ↓ leaves the line, Esc clears it |
 | type | Discover | search; Esc clears it; ←→ still switch tabs and ctrl-c quits |
 | r | everywhere | reload from disk |
+| :, ctrl-k | everywhere (only ctrl-k in Discover, where `:` searches) | all actions: every key's action, typed words filter them, the ones that work here first, ones that can't run now last with the reason; ⏎ runs one, switching tab first |
 | s | Overview, Profiles | sync |
 | x | Items | remove |
 | c | Items | convert a source for Codex, or undo it |

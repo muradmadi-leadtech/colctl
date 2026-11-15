@@ -31,4 +31,4 @@ expression: mask(&s)
 
 
 
- a approve · x reject · d full review · esc close · r reload · ? keys · q quit
+ a approve · x reject · d full review · esc close · r reload · : all actions · ? keys · q quit

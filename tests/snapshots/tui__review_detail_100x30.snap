@@ -31,4 +31,4 @@ expression: mask(&s)
           │                                                                              │
           │ → colctl approve superpowers   or   colctl reject superpowers                │
           ╰ a approve · x reject · ] next file · esc close ──────────────────────────────╯
- a approve · x reject · ] next file · esc close · r reload · ? keys · q quit
+ a approve · x reject · ] next file · esc close · r reload · : all actions · ? keys · q quit
