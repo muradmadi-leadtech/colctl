@@ -475,7 +475,7 @@ fn status_json(
 pub fn status(ctx: &Ctx, filter: Option<&str>, as_json: bool, all: bool) -> Result<i32, CliError> {
     let snap = crate::core::status::snapshot(ctx, filter)?;
     if as_json {
-        let i = &snap.inner;
+        let i = snap.inner.as_ref().expect("a fresh snapshot");
         let mut text = serde_json::to_string_pretty(&status_json(
             ctx,
             &i.ws,

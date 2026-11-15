@@ -1482,8 +1482,13 @@ fn state_of(env: &Env) -> Vec<String> {
         for e in entries.flatten() {
             let path = e.path();
             let rel = path.strip_prefix(base).unwrap().display().to_string();
-            // Git's own files and colctl's lock and temp files aren't state.
-            if rel.ends_with("/.git") || rel == ".colctl/.git" || rel.contains(".lock") {
+            // Git's own files, colctl's lock and temp files, and its cache (derived data, AC9-11)
+            // aren't state.
+            if rel.ends_with("/.git")
+                || rel == ".colctl/.git"
+                || rel.contains(".lock")
+                || rel.starts_with(".colctl/.state/cache")
+            {
                 continue;
             }
             let meta = fs::symlink_metadata(&path).unwrap();

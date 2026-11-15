@@ -267,6 +267,9 @@ pub struct Model {
     pub now: u64,
     pub tab: Tab,
     pub snapshot: Data<Snapshot>,
+    /// Set while `snapshot` is the saved status, not a fresh one (AC9-11): its age in seconds,
+    /// `None` inside when it's from ahead of now.
+    pub saved: Option<Option<u64>>,
     pub held: Data<Vec<HeldSummary>>,
     pub catalog: Data<Catalog>,
     pub cursors: [Cursor; 5],
@@ -315,6 +318,7 @@ impl Model {
             now: 0,
             tab: Tab::Overview,
             snapshot: Data::Loading,
+            saved: None,
             held: Data::Loading,
             catalog: Data::Loading,
             cursors: [Cursor::default(); 5],
@@ -332,6 +336,17 @@ impl Model {
             catalog_loads: 0,
             discover_cache: std::cell::RefCell::new(None),
         }
+    }
+
+    /// Shows a saved status until the fresh one arrives (AC9-11).
+    pub fn show_saved(&mut self, snapshot: Snapshot, age_secs: u64) {
+        self.show_saved_at(snapshot, Some(age_secs));
+    }
+
+    /// Like [`Model::show_saved`], with no age when the saved status is from ahead of now.
+    pub fn show_saved_at(&mut self, snapshot: Snapshot, age_secs: Option<u64>) {
+        self.snapshot = Data::Ready(snapshot);
+        self.saved = Some(age_secs);
     }
 
     /// What to load when the app opens: local state first; the catalog after (AC8-08).
@@ -491,6 +506,7 @@ fn loaded(m: &mut Model, l: Loaded) -> Vec<Cmd> {
     match l {
         Loaded::Snapshot(r) => {
             m.loads += 1;
+            m.saved = None;
             m.snapshot = match *r {
                 Ok(s) => Data::Ready(s),
                 Err(e) => Data::Failed(e),

@@ -62,7 +62,11 @@ fn guarded<T>(f: impl FnOnce() -> Result<T, CliError>) -> Result<T, CliError> {
 /// Does one load.
 pub fn load(ctx: &Ctx, what: &Load, width: usize) -> Loaded {
     match what {
-        Load::Snapshot => Loaded::Snapshot(Box::new(guarded(|| status::snapshot(ctx, None)))),
+        Load::Snapshot => Loaded::Snapshot(Box::new(guarded(|| {
+            let snap = status::snapshot(ctx, None)?;
+            status::save(ctx, &snap);
+            Ok(snap)
+        }))),
         Load::Held => Loaded::Held(guarded(|| quarantine::held(ctx))),
         Load::Catalog => Loaded::Catalog(guarded(|| discover::catalog(ctx))),
         Load::Review(name) => Loaded::Detail {

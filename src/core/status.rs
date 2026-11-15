@@ -14,7 +14,7 @@ use crate::vault;
 use std::path::PathBuf;
 
 /// How a line reads: the state tokens of the output system (`ui::style::Token`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tone {
     Ok,
@@ -24,7 +24,7 @@ pub enum Tone {
 }
 
 /// The first line: what state things are in.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Verdict {
     pub tone: Tone,
     pub text: String,
@@ -32,7 +32,7 @@ pub struct Verdict {
 }
 
 /// One item in one profile.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ItemRow {
     pub kind: String,
     pub name: String,
@@ -44,7 +44,7 @@ pub struct ItemRow {
 }
 
 /// One registered profile.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Profile {
     pub name: String,
     pub kind: Kind,
@@ -63,7 +63,7 @@ pub struct Profile {
 }
 
 /// Something that needs the person, with its fix.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Attention {
     /// A profile name, the source folder, or `held`.
     pub place: String,
@@ -75,7 +75,7 @@ pub struct Attention {
 }
 
 /// A version held for review.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Held {
     pub name: String,
     pub kind: String,
@@ -84,6 +84,7 @@ pub struct Held {
 }
 
 /// Everything `colctl status` knows, at one moment.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Snapshot {
     pub verdict: Verdict,
     pub profiles: Vec<Profile>,
@@ -93,8 +94,10 @@ pub struct Snapshot {
     pub sources: usize,
     /// `colctl status`'s exit code for this state.
     pub exit: i32,
-    /// What it was built from, for `status --json` (byte-identical to 2.3).
-    pub(crate) inner: Inner,
+    /// What it was built from, for `status --json` (byte-identical to 2.3). `None` for a saved
+    /// status read back (AC9-11): only fresh snapshots are printed.
+    #[serde(skip)]
+    pub(crate) inner: Option<Inner>,
 }
 
 impl std::fmt::Debug for Snapshot {
@@ -116,7 +119,21 @@ pub(crate) struct Inner {
     pub(crate) held: Vec<View>,
 }
 
-/// Reads the source and every profile (or only `filter`). Never writes.
+/// The status saved by the last full snapshot, and how many seconds old it is (`None` when it's
+/// from ahead of now). `None` when there's none this colctl can read (AC9-12).
+pub fn last(ctx: &Ctx) -> Option<(Snapshot, Option<u64>)> {
+    let text = std::fs::read_to_string(saved_path(ctx)).ok()?;
+    let saved: Saved = serde_json::from_str(&text).ok()?;
+    if saved.colctl != env!("CARGO_PKG_VERSION") {
+        return None;
+    }
+    let now = unix_now();
+    let age = (saved.saved_at <= now).then(|| now - saved.saved_at);
+    Some((saved.snapshot, age))
+}
+
+/// Reads the source and every profile (or only `filter`). Never writes, except saved checks of held
+/// versions (derived data in `.state/cache`).
 pub fn snapshot(ctx: &Ctx, filter: Option<&str>) -> Result<Snapshot, CliError> {
     let ws = commands::load(ctx)?;
     let planned = commands::plan_all(ctx, &ws, filter)?;
@@ -137,7 +154,7 @@ pub fn snapshot(ctx: &Ctx, filter: Option<&str>) -> Result<Snapshot, CliError> {
     let sources = ws.config.sources.len();
     let verdict = verdict(profiles.len(), attention.len() + unusable, sources);
     let held = held_views.iter().map(|v| held_of(ctx, v)).collect();
-    Ok(Snapshot {
+    let snap = Snapshot {
         verdict,
         profiles,
         attention,
@@ -148,13 +165,51 @@ pub fn snapshot(ctx: &Ctx, filter: Option<&str>) -> Result<Snapshot, CliError> {
         } else {
             EXIT_DRIFT
         },
-        inner: Inner {
+        inner: Some(Inner {
             ws,
             planned,
             uncommitted,
             held: held_views,
-        },
-    })
+        }),
+    };
+    Ok(snap)
+}
+
+/// Where the last full snapshot is kept, for the TUI to open on.
+fn saved_path(ctx: &Ctx) -> PathBuf {
+    ctx.source.join(".state/cache/status.json")
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Saved {
+    colctl: String,
+    saved_at: u64,
+    snapshot: Snapshot,
+}
+
+/// Saves a snapshot for the TUI to open on next time (AC9-11). Only the TUI calls it, so
+/// `colctl status` still writes nothing. Only an optimisation, so a failure is ignored (EC9-04).
+pub fn save(ctx: &Ctx, snap: &Snapshot) {
+    #[derive(serde::Serialize)]
+    struct SavedRef<'a> {
+        colctl: &'a str,
+        saved_at: u64,
+        snapshot: &'a Snapshot,
+    }
+    let saved = SavedRef {
+        colctl: env!("CARGO_PKG_VERSION"),
+        saved_at: unix_now(),
+        snapshot: snap,
+    };
+    if let Ok(bytes) = serde_json::to_vec(&saved) {
+        let _ = crate::fsx::atomic_write(&saved_path(ctx), &bytes);
+    }
 }
 
 fn verdict(profiles: usize, problems: usize, sources: usize) -> Verdict {
