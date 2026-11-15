@@ -11,14 +11,14 @@
 
 ---
 
-<!-- FORGE_PHASE:Refine:Active -->
+<!-- FORGE_PHASE:Refine:Complete -->
 ## Phase 1: Refine
 
 **Purpose**: Define exactly what "done" looks like for this change.
 
 ### Required Outputs
 - [x] Acceptance criteria in Given-When-Then format
-- [ ] Interface changes documented (if any)
+- [x] Interface changes documented (if any)
 - [x] Edge cases enumerated
 - [x] Constraints vs criteria documented
 
@@ -32,7 +32,7 @@
 
 ---
 
-<!-- FORGE_PHASE:Generate:Pending -->
+<!-- FORGE_PHASE:Generate:Complete -->
 ## Phase 2: Generate
 
 **Purpose**: Implement the change following TDD.
@@ -51,7 +51,7 @@
 
 ---
 
-<!-- FORGE_PHASE:Evaluate:Pending -->
+<!-- FORGE_PHASE:Evaluate:Active -->
 ## Phase 3: Evaluate
 
 **Purpose**: Verify output matches intent.
