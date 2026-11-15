@@ -94,6 +94,13 @@ pub struct Snapshot {
     pub sources: usize,
     /// `colctl status`'s exit code for this state.
     pub exit: i32,
+    /// Sources converted for Codex (`convert = ["codex"]`), for `convert`'s undo (AC9-18).
+    #[serde(default)]
+    pub converted: Vec<String>,
+    /// Taken-over skills and agents (`skills/<name>`, `agents/<name>.md`), which `refresh`
+    /// refreshes (AC9-19).
+    #[serde(default)]
+    pub taken_over: Vec<String>,
     /// What it was built from, for `status --json` (byte-identical to 2.3). `None` for a saved
     /// status read back (AC9-11): only fresh snapshots are printed.
     #[serde(skip)]
@@ -154,7 +161,17 @@ pub fn snapshot(ctx: &Ctx, filter: Option<&str>) -> Result<Snapshot, CliError> {
     let sources = ws.config.sources.len();
     let verdict = verdict(profiles.len(), attention.len() + unusable, sources);
     let held = held_views.iter().map(|v| held_of(ctx, v)).collect();
+    let converted = ws
+        .config
+        .sources
+        .iter()
+        .filter(|s| s.convert.contains(&crate::tool::Tool::Codex))
+        .map(|s| s.name.clone())
+        .collect();
+    let taken_over = ws.state.origins.keys().cloned().collect();
     let snap = Snapshot {
+        converted,
+        taken_over,
         verdict,
         profiles,
         attention,

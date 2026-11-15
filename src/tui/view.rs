@@ -259,6 +259,7 @@ fn overlay_height(m: &Model) -> u16 {
         Some(Overlay::Error { cause, hint, .. }) => {
             3 + u16::from(cause.is_some()) + u16::from(hint.is_some()) + 1
         }
+        Some(Overlay::Pick { items, .. }) => items.len() as u16 + 4,
         None => 0,
     }
 }
@@ -582,6 +583,44 @@ fn overlay(m: &Model, f: &mut Frame, o: &Overlay) {
                 l.push(Line::styled(format!("hint: {h}"), t.style(Token::Muted)));
             }
             ("Error".into(), l, "esc close".into())
+        }
+        Overlay::Pick {
+            title,
+            items,
+            selected,
+            ..
+        } => {
+            let w = items
+                .iter()
+                .map(|(c, _)| text_width(&c.address))
+                .max()
+                .unwrap_or(0);
+            let mut l = vec![Line::styled(
+                "colctl adopt moves these into ~/.colctl, then syncs:",
+                t.style(Token::Muted),
+            )];
+            l.push(Line::default());
+            for (i, (c, on)) in items.iter().enumerate() {
+                let mut text = format!(
+                    "{} {}  {}",
+                    if *on { "[x]" } else { "[ ]" },
+                    pad(&crate::review::escape(&c.address), w),
+                    c.action
+                );
+                if let Some(from) = &c.from {
+                    text.push_str(&format!(" from {}", crate::review::escape(from)));
+                }
+                l.push(if i == *selected {
+                    Line::raw(format!("› {text}")).style(t.style(Token::Selection))
+                } else {
+                    Line::raw(format!("  {text}"))
+                });
+            }
+            (
+                title.clone(),
+                l,
+                "space tick · ⏎ adopt ticked · esc close".into(),
+            )
         }
     };
     f.render_widget(Clear, rect);

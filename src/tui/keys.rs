@@ -13,6 +13,8 @@ pub enum Scope {
     Detail,
     /// Inside a confirmation.
     Confirm,
+    /// Inside a pick list (adopt's checklist).
+    Pick,
 }
 
 /// What a key does.
@@ -44,6 +46,18 @@ pub enum Action {
     Quit,
     Yes,
     No,
+    /// `colctl rm` the focused item (AC9-17).
+    Remove,
+    /// `colctl convert` the focused source, or undo it (AC9-18).
+    Convert,
+    /// `colctl refresh` the focused taken-over item (AC9-19).
+    Refresh,
+    /// Pick what to `colctl adopt` from the focused profile (AC9-20).
+    Adopt,
+    /// Tick or untick in a pick list.
+    Toggle,
+    /// Discover's next view: plugins, developers, marketplaces, connectors (AC9-21).
+    NextView,
 }
 
 /// One key.

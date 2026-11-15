@@ -2252,3 +2252,374 @@ fn ac8_36_the_summary_has_one_line_per_flagged_file() {
         "{lines:#?}"
     );
 }
+
+// ── Cycle 9: the rest of the commands (AC9-17 – 22) ─────────────────────────────────────────
+
+mod rest {
+    use super::*;
+    use colctl::tui::app::DiscoverView;
+
+    fn ctrl(m: &mut Model, c: char) -> Vec<Cmd> {
+        update(
+            m,
+            Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)),
+        )
+    }
+
+    fn machine() -> Env {
+        let env = Env::new();
+        env.native();
+        env.kilo();
+        env.codex();
+        env.ok(&["init"]);
+        env
+    }
+
+    fn with_skill() -> Env {
+        let env = machine();
+        env.source_skill("alpha");
+        env.ok(&["sync"]);
+        env
+    }
+
+    fn write(path: &std::path::Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    /// A Claude-only source; with `skills`, one Codex can use once converted.
+    fn claude_only(skills: bool) -> Env {
+        let env = machine();
+        let repo = env.home.parent().unwrap().join("upstreams").join("cli");
+        if skills {
+            write(&repo.join("skills/edge/SKILL.md"), "---\nname: edge\n---\n");
+        }
+        let (_, url, head) = env.upstream("cli", true, false, Some("cli"));
+        env.add_source_entry("cli", &url, &head, "");
+        env.ok(&["sync"]);
+        env
+    }
+
+    fn taken_over() -> Env {
+        let env = with_skill();
+        let origin = env.skill_dir(&env.home.join(".config/twg/skills"), "twg-jira", "v1");
+        let skills = env.home.join(".agents/skills");
+        fs::create_dir_all(&skills).unwrap();
+        std::os::unix::fs::symlink(&origin, skills.join("twg-jira")).unwrap();
+        env.ok(&["adopt", "agents", "skills/twg-jira"]);
+        fs::write(origin.join("SKILL.md"), "v2").unwrap();
+        env
+    }
+
+    fn with_foreign() -> Env {
+        let env = machine();
+        env.skill_dir(&env.home.join(".claude/skills"), "mine", "mine");
+        env.skill_dir(&env.home.join(".claude/skills"), "yours", "yours");
+        env
+    }
+
+    fn items_at(env: &Env, name: &str) -> Model {
+        let mut m = opened(env, 110, 32);
+        ch(&mut m, '3');
+        m.cursor_mut().selected = row_of(&m, name);
+        m
+    }
+
+    #[test]
+    fn ac9_17_remove_from_items() {
+        let (tui, cli) = (with_skill(), with_skill());
+        let mut m = items_at(&tui, "alpha");
+        ch(&mut m, 'x');
+        let Some(Overlay::Confirm { job, .. }) = &m.overlay else {
+            panic!("{:?}", m.overlay);
+        };
+        assert_eq!(
+            *job,
+            Job::Rm {
+                kind: "skill".into(),
+                name: "alpha".into(),
+                codex: false
+            }
+        );
+        assert!(screen(&m).contains("Remove skill alpha"), "{}", screen(&m));
+        ch(&mut m, 'n');
+        assert!(m.overlay.is_none());
+        assert!(
+            tui.source.join("skills/alpha").exists(),
+            "n changes nothing"
+        );
+        ch(&mut m, 'x');
+        confirm(&tui, &mut m);
+        cli.ok(&["rm", "skill", "alpha", "-y"]);
+        same_state(&tui, &cli);
+    }
+
+    #[test]
+    fn ac9_18_convert_and_undo_from_items() {
+        let (tui, cli) = (claude_only(true), claude_only(true));
+        let mut m = items_at(&tui, "cli");
+        let cmds = ch(&mut m, 'c');
+        assert_eq!(cmds, vec![Cmd::Load(Load::ConvertPlan("cli".into()))]);
+        drive(&tui, &mut m, cmds);
+        let Some(Overlay::Confirm { job, body, .. }) = &m.overlay else {
+            panic!("{:?}\n{}", m.overlay, screen(&m));
+        };
+        assert_eq!(*job, Job::Convert("cli".into()));
+        assert!(body.join("\n").contains("edge"), "{body:#?}");
+        confirm(&tui, &mut m);
+        cli.ok(&["convert", "cli"]);
+        same_state(&tui, &cli);
+        m.cursor_mut().selected = row_of(&m, "cli");
+        ch(&mut m, 'c');
+        let Some(Overlay::Confirm { job, .. }) = &m.overlay else {
+            panic!("{:?}", m.overlay);
+        };
+        assert_eq!(*job, Job::ConvertUndo("cli".into()));
+        confirm(&tui, &mut m);
+        cli.ok(&["convert", "cli", "--undo"]);
+        same_state(&tui, &cli);
+    }
+
+    #[test]
+    fn ac9_18_nothing_codex_can_use_says_why() {
+        let env = claude_only(false);
+        let mut m = items_at(&env, "cli");
+        let cmds = ch(&mut m, 'c');
+        drive(&env, &mut m, cmds);
+        assert!(
+            !matches!(m.overlay, Some(Overlay::Confirm { .. })),
+            "nothing to run: {:?}",
+            m.overlay
+        );
+        assert!(
+            screen(&m).contains("nothing Codex can use"),
+            "{}",
+            screen(&m)
+        );
+    }
+
+    #[test]
+    fn ac9_19_refresh_from_items() {
+        let env = taken_over();
+        let mut m = items_at(&env, "twg-jira");
+        let cmds = ch(&mut m, 'f');
+        assert_eq!(
+            cmds,
+            vec![Cmd::Run(Job::Refresh(vec!["skills/twg-jira".into()]))]
+        );
+        drive(&env, &mut m, cmds);
+        assert_eq!(m.held.ready().map(Vec::len), Some(1), "held for review");
+        m.cursor_mut().selected = row_of(&m, "alpha");
+        assert!(ch(&mut m, 'f').is_empty());
+        assert!(
+            screen(&m).contains("alpha isn't taken over"),
+            "{}",
+            screen(&m)
+        );
+    }
+
+    #[test]
+    fn ac9_20_adopt_from_profiles() {
+        let (tui, cli) = (with_foreign(), with_foreign());
+        let mut m = opened(&tui, 110, 32);
+        ch(&mut m, '2');
+        m.cursor_mut().selected = row_of(&m, "~/.claude");
+        let cmds = ch(&mut m, 'a');
+        assert_eq!(cmds, vec![Cmd::Load(Load::Adopt("claude".into()))]);
+        drive(&tui, &mut m, cmds);
+        let Some(Overlay::Pick { items, .. }) = &m.overlay else {
+            panic!("{:?}", m.overlay);
+        };
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|(_, on)| *on), "all ticked");
+        assert!(screen(&m).contains("skills/yours"), "{}", screen(&m));
+        press(&mut m, KeyCode::Down);
+        ch(&mut m, ' ');
+        press(&mut m, KeyCode::Enter);
+        let Some(Overlay::Confirm { job, .. }) = &m.overlay else {
+            panic!("{:?}", m.overlay);
+        };
+        assert_eq!(
+            *job,
+            Job::Adopt {
+                profile: "claude".into(),
+                items: vec!["skills/mine".into()]
+            }
+        );
+        confirm(&tui, &mut m);
+        cli.ok(&["adopt", "claude", "skills/mine"]);
+        same_state(&tui, &cli);
+    }
+
+    #[test]
+    fn ac9_20_nothing_to_adopt_says_so() {
+        let env = machine();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '2');
+        m.cursor_mut().selected = row_of(&m, "kilo-claude");
+        let cmds = ch(&mut m, 'a');
+        drive(&env, &mut m, cmds);
+        assert!(m.overlay.is_none(), "{:?}", m.overlay);
+        assert!(
+            screen(&m).contains("Nothing in kilo-claude that colctl doesn't already have"),
+            "{}",
+            screen(&m)
+        );
+    }
+
+    #[test]
+    fn ac9_21_discover_cycles_its_views() {
+        let env = local_catalog_fixture();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '5');
+        assert_eq!(m.discover_view, DiscoverView::Plugins);
+        let cmds = ctrl(&mut m, 'v');
+        drive(&env, &mut m, cmds);
+        assert_eq!(m.discover_view, DiscoverView::Developers);
+        assert!(screen(&m).contains("Developers"), "{}", screen(&m));
+        let dev = m.catalog.ready().unwrap().plugins[0].developer.clone();
+        m.cursor_mut().selected = row_of(&m, &dev);
+        press(&mut m, KeyCode::Enter);
+        assert_eq!(m.discover_view, DiscoverView::Plugins);
+        assert!(screen(&m).contains("helper"), "{}", screen(&m));
+        ctrl(&mut m, 'v');
+        let cmds = ctrl(&mut m, 'v');
+        drive(&env, &mut m, cmds);
+        assert_eq!(m.discover_view, DiscoverView::Marketplaces);
+        assert!(screen(&m).contains("local"), "{}", screen(&m));
+        m.cursor_mut().selected = row_of(&m, "local");
+        press(&mut m, KeyCode::Enter);
+        let Some(Overlay::Confirm { job, .. }) = &m.overlay else {
+            panic!("{:?}", m.overlay);
+        };
+        assert_eq!(*job, Job::MarketplaceRefresh);
+        press(&mut m, KeyCode::Esc);
+        let cmds = ctrl(&mut m, 'v');
+        drive(&env, &mut m, cmds);
+        assert_eq!(m.discover_view, DiscoverView::Connectors);
+        ctrl(&mut m, 'v');
+        assert_eq!(m.discover_view, DiscoverView::Plugins);
+    }
+
+    #[test]
+    fn ac9_21_typing_filters_the_view_showing() {
+        let env = local_catalog_fixture();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '5');
+        let cmds = ctrl(&mut m, 'v');
+        drive(&env, &mut m, cmds);
+        ctrl(&mut m, 'v');
+        let cmds = ctrl(&mut m, 'v');
+        drive(&env, &mut m, cmds);
+        assert_eq!(m.discover_view, DiscoverView::Marketplaces);
+        for c in "zzz".chars() {
+            ch(&mut m, c);
+        }
+        assert!(!screen(&m).contains("local "), "{}", screen(&m));
+        assert!(
+            screen(&m).contains("No marketplaces match"),
+            "{}",
+            screen(&m)
+        );
+    }
+
+    #[test]
+    fn ac9_22_every_command_is_reachable() {
+        use colctl::tui::keys::{Action, KEYMAP, Scope};
+        let has = |scope: Scope, action: Action| {
+            KEYMAP
+                .iter()
+                .any(|b| b.scope == scope && b.action == action)
+        };
+        // Each command, and the key that runs it.
+        let table: &[(&str, Scope, Action)] = &[
+            ("status", Scope::Global, Action::Reload),
+            ("sync", Scope::Tab(Tab::Overview), Action::Sync),
+            ("add", Scope::Tab(Tab::Discover), Action::Open),
+            ("rm", Scope::Tab(Tab::Items), Action::Remove),
+            ("adopt", Scope::Tab(Tab::Profiles), Action::Adopt),
+            ("convert", Scope::Tab(Tab::Items), Action::Convert),
+            ("update", Scope::Tab(Tab::Review), Action::Update),
+            ("refresh", Scope::Tab(Tab::Items), Action::Refresh),
+            ("review", Scope::Tab(Tab::Review), Action::Open),
+            ("approve", Scope::Tab(Tab::Review), Action::Approve),
+            ("reject", Scope::Tab(Tab::Review), Action::Reject),
+            ("search", Scope::Tab(Tab::Discover), Action::Filter),
+            ("show", Scope::Tab(Tab::Discover), Action::Open),
+            ("developers", Scope::Tab(Tab::Discover), Action::NextView),
+            ("marketplace", Scope::Tab(Tab::Discover), Action::NextView),
+            ("connectors", Scope::Tab(Tab::Discover), Action::NextView),
+        ];
+        let help = Env::new().ok(&["--help"]);
+        let commands: Vec<&str> = help
+            .lines()
+            .filter(|l| l.starts_with("  ") && !l.trim_start().starts_with('-'))
+            .filter_map(|l| {
+                let w: Vec<&str> = l.split_whitespace().collect();
+                match w.as_slice() {
+                    ["colctl", c, ..] => Some(*c),
+                    [c, ..] => Some(*c),
+                    _ => None,
+                }
+            })
+            .filter(|c| !["init", "completions", "version", "help"].contains(c))
+            .collect();
+        assert!(commands.len() >= 16, "{commands:?}");
+        for c in commands {
+            let Some((_, scope, action)) = table.iter().find(|(n, ..)| *n == c) else {
+                panic!("no TUI key for colctl {c}");
+            };
+            assert!(
+                has(*scope, *action),
+                "colctl {c}: no {action:?} in {scope:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ec9_12_connectors_without_a_codex_profile() {
+        let env = Env::without_codex();
+        env.native();
+        env.ok(&["init"]);
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '5');
+        for _ in 0..3 {
+            let cmds = ctrl(&mut m, 'v');
+            drive(&env, &mut m, cmds);
+        }
+        assert_eq!(m.discover_view, DiscoverView::Connectors);
+        assert!(screen(&m).contains("codex"), "{}", screen(&m));
+    }
+
+    #[test]
+    fn ec9_16_a_write_waits_for_the_running_one() {
+        let env = taken_over();
+        let mut m = items_at(&env, "twg-jira");
+        m.job = Some(app::Running {
+            job: Job::Sync(None),
+            rows: Vec::new(),
+            started: 0,
+        });
+        assert!(ch(&mut m, 'f').is_empty());
+        assert!(
+            screen(&m).contains("Wait for colctl sync to finish"),
+            "{}",
+            screen(&m)
+        );
+    }
+
+    #[test]
+    fn ec9_17_remove_refuses_what_colctl_doesnt_own() {
+        let env = with_foreign();
+        let mut m = items_at(&env, "mine");
+        ch(&mut m, 'x');
+        confirm(&env, &mut m);
+        assert!(
+            matches!(m.overlay, Some(Overlay::Error { .. })),
+            "{:?}",
+            m.overlay
+        );
+        assert!(screen(&m).contains("no managed skill"), "{}", screen(&m));
+        assert!(env.home.join(".claude/skills/mine").exists());
+    }
+}
