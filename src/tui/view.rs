@@ -306,16 +306,39 @@ fn status_lines(m: &Model) -> Vec<Line<'static>> {
         Some(toast) => styled_verdict(t, &toast.text),
         None => Line::default(),
     };
+    // AC9-11: a saved status says how old it is until the fresh one replaces it.
+    if let Some(age) = m.saved {
+        if !line.spans.is_empty() {
+            line.spans.push(Span::raw("   "));
+        }
+        line.spans.push(Span::styled(
+            format!("as of {} ·", age_text(age)),
+            t.style(Token::Muted),
+        ));
+    }
     // AC8-38: what runs is always shown the same way: a spinner and its command.
     if let Some(load) = m.pending.first() {
         if !line.spans.is_empty() {
-            line.spans.push(Span::raw("   "));
+            line.spans
+                .push(Span::raw(if m.saved.is_some() { " " } else { "   " }));
         }
         line.spans
             .push(Span::styled(spinner(m), t.style(Token::Accent)));
         line.spans.push(Span::raw(format!(" {}", load.command())));
     }
     vec![line]
+}
+
+/// How old a saved status is, in words (AC9-11, EC9-07).
+fn age_text(age: Option<u64>) -> String {
+    match age {
+        None => "earlier".into(),
+        Some(s) if s < 60 => "just now".into(),
+        Some(s) if s < 3600 => format!("{} min ago", s / 60),
+        Some(s) if s < 86400 => format!("{} h ago", s / 3600),
+        Some(s) if s < 2 * 86400 => "1 day ago".into(),
+        Some(s) => format!("{} days ago", s / 86400),
+    }
 }
 
 fn spinner(m: &Model) -> String {

@@ -110,6 +110,9 @@ fn run_loop(ctx: &Ctx, opts: Options) -> std::io::Result<()> {
     let mut term = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
     let size = term.size()?;
     let mut model = Model::new(opts, size.width, size.height);
+    if let Some((saved, age)) = crate::core::status::last(ctx) {
+        model.show_saved_at(saved, age);
+    }
     let (tx, rx) = std::sync::mpsc::channel();
     let mut worker = worker::Worker::new(ctx.clone(), tx);
     let result = frames(&mut term, &mut model, &rx, &mut worker);

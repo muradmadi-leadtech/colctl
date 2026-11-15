@@ -17,7 +17,7 @@ pub const CONFIG_FILE: &str = "config.toml";
 pub const PLUGIN_DIRECTORY: &str = "anthropic-plugin-directory";
 
 /// A harness kind; only Claude Code profiles exist in cycle 1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     Claude,
