@@ -233,7 +233,7 @@ fn ac9_07_an_edited_held_copy_is_never_served_from_the_cache() {
         .source
         .join(".state/quarantine/skills/twg-jira/SKILL.md");
     fs::write(snap, "edited").unwrap();
-    let (_, out, err) = env.code(&["review"]);
+    let (_, out, err) = env.code(&["review", "--json"]);
     assert!(
         format!("{out}{err}").contains("changed since it was held"),
         "{out}{err}"

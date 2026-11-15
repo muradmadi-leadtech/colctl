@@ -20,6 +20,7 @@ pub mod packaging;
 pub mod plan;
 pub mod repackage;
 pub mod review;
+pub mod review_cache;
 pub mod risk;
 pub mod runner;
 pub mod search;

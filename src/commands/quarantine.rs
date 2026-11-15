@@ -11,6 +11,7 @@ use crate::error::CliError;
 use crate::fsx;
 use crate::git::Git;
 use crate::review::{self, Direction, Review, escape, escape_body};
+use crate::review_cache;
 use crate::state::{self, Candidate, HeldCommit, HeldCopy, Lock, State};
 use crate::ui::style::Token;
 use crate::vault::{self, CloneState, Vault};
@@ -224,6 +225,9 @@ pub fn update(
             }
             Found::UpToDate => {}
         }
+    }
+    if !held.is_empty() {
+        warm(ctx, &git);
     }
     finish(&mut current, &said);
     // AC6-21: a verdict, a line per source, and what to run next.
@@ -441,6 +445,9 @@ pub fn refresh(ctx: &Ctx, items: &[String], dry_run: bool) -> Result<i32, CliErr
         }
     }
     state::save(&ctx.source, &st).map_err(|e| CliError::usage(format!("{e:#}")))?;
+    if let Ok(git) = Git::for_ctx(ctx) {
+        warm(ctx, &git);
+    }
     // AC6-21: a verdict, a line per item, and what to run next.
     let (tone, verdict) = match (held.len(), refused) {
         (_, r) if r > 0 => (
@@ -563,6 +570,38 @@ fn inspect_conversion(
     review::copies(git, &ctx.source, &installed, &held, true, with_diff)
 }
 
+/// Checks every held version now and saves the checks, so later commands don't (AC9-02).
+fn warm(ctx: &Ctx, git: &Git) {
+    if let Ok(ws) = load(ctx) {
+        held_views(ctx, &ws, Some(git));
+    }
+}
+
+/// A held source's review: the saved check when there is one for exactly this hold (AC9-02), with
+/// the diff read fresh when it's wanted (AC9-09); otherwise read from git and saved.
+fn source_review(
+    ctx: &Ctx,
+    git: &Git,
+    key: &str,
+    clone: &Path,
+    c: &HeldCommit,
+    with_diff: bool,
+) -> Result<Review, String> {
+    let ident = review_cache::Identity::Source {
+        from: c.from.clone(),
+        to: c.to.clone(),
+    };
+    if let Some(mut r) = review_cache::get(ctx, key, &ident) {
+        if with_diff {
+            r.diff = Some(review::diff(git, clone, &c.from, &c.to)?);
+        }
+        return Ok(r);
+    }
+    let r = review::commits(git, clone, &c.from, &c.to, with_diff)?;
+    review_cache::put(ctx, key, &ident, &r);
+    Ok(r)
+}
+
 /// Reads one candidate: checks it's intact, and gathers its review (with the diff when asked).
 pub(super) fn inspect(
     ctx: &Ctx,
@@ -603,7 +642,7 @@ pub(super) fn inspect(
                     "the held commit for {name} is missing; run colctl update {name}"
                 ))
             } else {
-                let r = review::commits(git, &vault.path(&name), &c.from, &c.to, with_diff);
+                let r = source_review(ctx, git, key, &vault.path(&name), c, with_diff);
                 if let (Ok(_), Some(s)) = (
                     &r,
                     declared.filter(|s| s.convert.contains(&crate::tool::Tool::Codex)),
@@ -624,14 +663,26 @@ pub(super) fn inspect(
                     "the held copy of {key} changed since it was held; reject it and refresh again"
                 ))
             } else {
-                review::copies(
-                    git,
-                    &ctx.source,
-                    &ctx.source.join(key),
-                    &held,
-                    is_dir,
-                    with_diff,
-                )
+                let ident = review_cache::Identity::Copy {
+                    hash: c.hash.clone(),
+                };
+                match review_cache::get(ctx, key, &ident).filter(|_| !with_diff) {
+                    Some(r) => Ok(r),
+                    None => {
+                        let r = review::copies(
+                            git,
+                            &ctx.source,
+                            &ctx.source.join(key),
+                            &held,
+                            is_dir,
+                            with_diff,
+                        );
+                        if let Ok(r) = &r {
+                            review_cache::put(ctx, key, &ident, r);
+                        }
+                        r
+                    }
+                }
             }
         }
         Candidate::Conversion(c) => inspect_conversion(ctx, ws, git, key, c, with_diff, &mut view),
@@ -1102,6 +1153,9 @@ pub(crate) fn view_json(v: &View, full: bool) -> Value {
 
 /// Every held candidate, for `status` (no diff). Without git, candidates are listed unchecked.
 pub(crate) fn held_views(ctx: &Ctx, ws: &Workspace, git: Option<&Git>) -> Vec<View> {
+    if git.is_some() {
+        review_cache::prune_in(&ctx.source, ws.state.quarantine.keys());
+    }
     ws.state
         .quarantine
         .iter()
@@ -1133,6 +1187,7 @@ pub(crate) fn status_entry(v: &View) -> Value {
 pub fn review(ctx: &Ctx, name: Option<&str>, pick: bool, as_json: bool) -> Result<i32, CliError> {
     let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
+    review_cache::prune_in(&ctx.source, ws.state.quarantine.keys());
     // AC6-19: `review -i` picks one held version in a terminal.
     let picked;
     let name = match name {

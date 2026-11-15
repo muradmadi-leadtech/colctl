@@ -4,12 +4,12 @@
 
 use crate::git::Git;
 use crate::risk::{self, Changed, Content, Flag, Status};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Commit {
     pub rev: String,
     pub subject: String,
@@ -17,7 +17,7 @@ pub struct Commit {
     pub date: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileChange {
     pub path: String,
     pub status: Status,
@@ -26,7 +26,7 @@ pub struct FileChange {
     pub symlink: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Direction {
     Forward,
@@ -94,9 +94,17 @@ pub fn commits(
             &[0],
         )
         .map_err(|e| format!("{e:#}"))?;
-    let changed = parse_raw(&raw, |sha, mode| blob(git, clone, sha, mode))?;
+    let mut wanted = Vec::new();
+    parse_raw(&raw, |sha, mode| {
+        if wants_blob(sha, mode) {
+            wanted.push(sha.to_string());
+        }
+        Ok(None)
+    })?;
+    let mut blobs = git.blobs(clone, &wanted).map_err(|e| format!("{e:#}"))?;
+    let changed = parse_raw(&raw, |sha, mode| Ok(content(sha, mode, &mut blobs)))?;
     let diff = if with_diff {
-        Some(git_text(git, clone, &["diff", "-M", from, to])?)
+        Some(diff(git, clone, from, to)?)
     } else {
         None
     };
@@ -138,25 +146,37 @@ fn finish(
     }
 }
 
-/// One side of a raw diff entry: the blob's content, read by its mode.
-fn blob(git: &Git, clone: &Path, sha: &str, mode: &str) -> Result<Option<Content>, String> {
+/// The unified diff between two commits of a clone (never saved: AC9-09).
+pub fn diff(git: &Git, clone: &Path, from: &str, to: &str) -> Result<String, String> {
+    git_text(git, clone, &["diff", "-M", from, to])
+}
+
+/// Whether one side of a raw diff entry has a blob to read: not absent, not a submodule.
+fn wants_blob(sha: &str, mode: &str) -> bool {
+    !(sha.bytes().all(|b| b == b'0') || mode == "000000" || mode == "160000")
+}
+
+/// One side of a raw diff entry, from the blobs read in one batch.
+fn content(
+    sha: &str,
+    mode: &str,
+    blobs: &mut std::collections::HashMap<String, Vec<u8>>,
+) -> Option<Content> {
     if sha.bytes().all(|b| b == b'0') || mode == "000000" {
-        return Ok(None);
+        return None;
     }
     if mode == "160000" {
-        return Ok(Some(Content::Link(format!("submodule {sha}"))));
+        return Some(Content::Link(format!("submodule {sha}")));
     }
-    let bytes = git
-        .bytes(clone, &["cat-file", "blob", sha], &[0])
-        .map_err(|e| format!("{e:#}"))?;
-    Ok(Some(if mode == "120000" {
+    let bytes = blobs.get(sha).cloned().unwrap_or_default();
+    Some(if mode == "120000" {
         Content::Link(String::from_utf8_lossy(&bytes).into_owned())
     } else {
         Content::File {
             bytes,
             executable: mode == "100755",
         }
-    }))
+    })
 }
 
 /// Parses `git diff --raw -z` output: `:<old mode> <new mode> <old sha> <new sha> <status>\0<path>\0`
