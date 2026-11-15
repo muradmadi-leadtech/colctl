@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.1](https://github.com/muradmadi-leadtech/colctl/compare/v2.5.0...v2.5.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **sync:** install plugins from a reserved marketplace through colctl's own ([#122](https://github.com/muradmadi-leadtech/colctl/issues/122)) ([dcc3301](https://github.com/muradmadi-leadtech/colctl/commit/dcc3301d4dd84f76be23b9310e66b5575656d9e1))
+
 ## [2.5.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.4.0...v2.5.0) (2026-11-14)
 
 
