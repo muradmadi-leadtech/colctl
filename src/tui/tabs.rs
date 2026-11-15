@@ -1676,24 +1676,29 @@ pub fn held_summary(h: &crate::core::quarantine::HeldSummary) -> Vec<String> {
         }
         None => out.push("· No review available".into()),
     }
-    // One line per file, its reasons joined.
+    // One line per file, its reasons joined; files that only declare allowed-tools together (AC9-25).
+    let grouped = crate::risk::allowed_tools_only(&h.flag_list);
     let mut code: Vec<(String, Vec<String>)> = Vec::new();
     for f in h
         .flag_list
         .iter()
-        .filter(|f| f.kind != crate::risk::FlagKind::Suspicious)
+        .filter(|f| f.kind != crate::risk::FlagKind::Suspicious && !grouped.contains(&f.path))
     {
         match code.iter_mut().find(|(p, _)| *p == f.path) {
             Some((_, reasons)) => reasons.push(f.reason.clone()),
             None => code.push((f.path.clone(), vec![f.reason.clone()])),
         }
     }
+    let files = code.len() + grouped.len();
+    if !grouped.is_empty() {
+        let (what, why) = crate::risk::allowed_tools_line(&h.flag_list, &grouped);
+        code.push((what, vec![why.replace("-v lists them", "d lists them")]));
+    }
     if !code.is_empty() {
         out.push(String::new());
         out.push(format!(
-            "Flagged ({} file{})",
-            code.len(),
-            if code.len() == 1 { "" } else { "s" }
+            "Flagged ({files} file{})",
+            if files == 1 { "" } else { "s" }
         ));
         for (path, reasons) in code.iter().take(8) {
             out.push(format!(

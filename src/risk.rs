@@ -93,6 +93,42 @@ pub struct Flag {
     pub reason: String,
 }
 
+/// Files whose only flags say they declare allowed-tools, when there's more than one (AC9-25):
+/// shown as one line, since a plugin's skills each saying which tools they use is normal.
+pub fn allowed_tools_only(flags: &[Flag]) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    for f in flags.iter().filter(|f| f.kind == FlagKind::AllowedTools) {
+        let only = flags
+            .iter()
+            .filter(|g| g.path == f.path)
+            .all(|g| g.kind == FlagKind::AllowedTools);
+        if only && !paths.contains(&f.path) {
+            paths.push(f.path.clone());
+        }
+    }
+    if paths.len() > 1 { paths } else { Vec::new() }
+}
+
+/// The one line those files get: how many, and the first few tools they grant.
+pub fn allowed_tools_line(flags: &[Flag], paths: &[String]) -> (String, String) {
+    let mut tools: Vec<String> = Vec::new();
+    for f in flags
+        .iter()
+        .filter(|f| f.kind == FlagKind::AllowedTools && paths.contains(&f.path))
+    {
+        let t = f.reason.trim_start_matches("grants ").to_string();
+        if !tools.contains(&t) {
+            tools.push(t);
+        }
+    }
+    let shown = tools.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+    let more = if tools.len() > 3 { "; …" } else { "" };
+    (
+        format!("{} files", paths.len()),
+        format!("declare allowed-tools ({shown}{more}); -v lists them"),
+    )
+}
+
 /// What a line does that malware does (AC8-37), or `None`. Deliberately narrow: running code,
 /// hooks and scripts are normal for plugins; these aren't.
 pub fn suspicious(line: &str) -> Option<&'static str> {
