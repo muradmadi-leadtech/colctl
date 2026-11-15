@@ -57,16 +57,22 @@ pub fn add_words(plugin: &Plugin) -> Result<Vec<String>, String> {
 }
 
 /// Every marketplace any profile knows, as `colctl marketplace list` lists them.
-pub fn marketplaces(_ctx: &Ctx) -> Result<Vec<catalog::Marketplace>, CliError> {
-    Ok(Vec::new())
+pub fn marketplaces(ctx: &Ctx) -> Result<Vec<catalog::Marketplace>, CliError> {
+    let ws = commands::load(ctx)?;
+    Ok(catalog::build(&ws.config, &ctx.source).marketplaces)
 }
 
 /// Who publishes what, as `colctl developers` lists them.
-pub fn developers(_catalog: &Catalog) -> Vec<search::Developer> {
-    Vec::new()
+pub fn developers(catalog: &Catalog) -> Vec<search::Developer> {
+    search::developers(&catalog.plugins)
 }
 
 /// Codex's app connectors, as `colctl connectors` finds them.
-pub fn connectors(_ctx: &Ctx) -> Result<Vec<Plugin>, CliError> {
-    Ok(Vec::new())
+pub fn connectors(ctx: &Ctx) -> Result<Vec<Plugin>, CliError> {
+    let (all, _) = commands::discovery::connector_plugins(ctx)?;
+    let everything = search::Query {
+        limit: 0,
+        ..search::Query::default()
+    };
+    Ok(search::search(&all, &everything).0)
 }

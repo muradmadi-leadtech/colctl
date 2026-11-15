@@ -500,6 +500,8 @@ mod core_calls {
         Ctx::from_vars(&[
             ("HOME".into(), OsString::from(&env.home)),
             ("PATH".into(), env.path.clone()),
+            ("FAKE_CLAUDE_LOG".into(), OsString::from(&env.log)),
+            ("FAKE_CODEX_LOG".into(), OsString::from(&env.codex_log)),
         ])
         .unwrap()
     }
@@ -509,8 +511,8 @@ mod core_calls {
         fs::write(path, text).unwrap();
     }
 
-    /// Everything that matters after a write: config, the source tree, history, what each
-    /// profile has, and what the tools were asked to do.
+    /// Everything that matters after a write: config, the source tree, history and what each
+    /// profile has. (The fake tools log only for the CLI's processes, not in-process runs.)
     fn digest(env: &Env) -> Vec<String> {
         fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
             let Ok(list) = fs::read_dir(dir) else { return };
@@ -544,17 +546,17 @@ mod core_calls {
             .collect();
         out.extend(subjects);
         let home = env.home.parent().unwrap().display().to_string();
-        out.extend(
-            env.log_args()
-                .into_iter()
-                .map(|a| a.replace(&home, "[ROOT]")),
-        );
-        out.extend(
-            env.codex_log_args()
-                .into_iter()
-                .map(|a| a.replace(&home, "[ROOT]")),
-        );
-        out
+        // Commit ids and temp folders differ between two homes built the same way.
+        let sha = |w: &str| w.len() == 40 && w.chars().all(|c| c.is_ascii_hexdigit());
+        out.into_iter()
+            .map(|l| {
+                l.replace(&home, "[ROOT]")
+                    .split(['"', ' ', '\n'])
+                    .map(|w| if sha(w) { "[SHA]" } else { w })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect()
     }
 
     fn run_job(env: &Env, job: &Job) -> run::Report {
@@ -566,7 +568,13 @@ mod core_calls {
         let report = run_job(&tui, &job);
         assert!(!report.lines.is_empty(), "{job:?} reports");
         cli.run(args);
-        assert_eq!(digest(&tui), digest(&cli), "{job:?} vs {args:?}");
+        let (a, b) = (digest(&tui), digest(&cli));
+        let only_core: Vec<&String> = a.iter().filter(|l| !b.contains(l)).collect();
+        let only_cli: Vec<&String> = b.iter().filter(|l| !a.contains(l)).collect();
+        assert!(
+            only_core.is_empty() && only_cli.is_empty(),
+            "{job:?} vs {args:?}\ncore only: {only_core:#?}\nCLI only: {only_cli:#?}"
+        );
         let words: Vec<&str> = args.iter().copied().filter(|a| *a != "-y").collect();
         assert_eq!(job.command(), format!("colctl {}", words.join(" ")));
     }

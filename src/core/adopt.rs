@@ -16,6 +16,18 @@ pub struct AdoptCandidate {
 }
 
 /// What `colctl adopt <profile>` would take, without taking it.
-pub fn candidates(_ctx: &Ctx, _profile: &str) -> Result<Vec<AdoptCandidate>, CliError> {
-    Ok(Vec::new())
+pub fn candidates(ctx: &Ctx, profile: &str) -> Result<Vec<AdoptCandidate>, CliError> {
+    let ws = crate::commands::load(ctx)?;
+    crate::commands::check_harness(&ws.config, Some(profile))?;
+    let mut list: Vec<AdoptCandidate> =
+        crate::commands::adoptable(ctx, &ws, Some(profile), &|_| true)?
+            .into_iter()
+            .map(|a| AdoptCandidate {
+                address: a.address,
+                action: a.action.to_string(),
+                from: a.from.map(|f| ctx.tilde(std::path::Path::new(&f))),
+            })
+            .collect();
+    list.sort_by(|a, b| a.address.cmp(&b.address));
+    Ok(list)
 }

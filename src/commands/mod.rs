@@ -20,7 +20,7 @@ use crate::vault::{self, CloneState, Vault};
 use std::collections::BTreeMap;
 
 pub(crate) mod convert;
-mod discovery;
+pub(crate) mod discovery;
 pub(crate) mod quarantine;
 mod run_view;
 mod status_view;
@@ -297,7 +297,7 @@ pub(crate) struct Planned {
     pub(crate) plan: HarnessPlan,
 }
 
-fn check_harness(config: &Config, filter: Option<&str>) -> Result<(), CliError> {
+pub(crate) fn check_harness(config: &Config, filter: Option<&str>) -> Result<(), CliError> {
     match filter {
         Some(name) if config.harness(name).is_none() => {
             let known: Vec<&str> = config.harnesses.iter().map(|h| h.name.as_str()).collect();
@@ -1531,6 +1531,48 @@ fn parse_item(words: &[String]) -> Result<Option<String>, CliError> {
 }
 
 /// `colctl adopt` (AC-24 … AC-28).
+/// One thing `adopt` would take: from which profile, what, how, and where a link points.
+pub(crate) struct Adoptable {
+    pub harness: String,
+    pub address: String,
+    /// `adopt`, `move` or `take over`.
+    pub action: &'static str,
+    pub from: Option<String>,
+}
+
+/// What `adopt` would take from each profile (or only `harness`), without taking it. Shared by
+/// `adopt --dry-run` and the TUI's adopt list (AC9-16).
+pub(crate) fn adoptable(
+    ctx: &Ctx,
+    ws: &Workspace,
+    harness: Option<&str>,
+    matches: &dyn Fn(&Item) -> bool,
+) -> Result<Vec<Adoptable>, CliError> {
+    let mut out = Vec::new();
+    for p in plan_all(ctx, ws, harness)? {
+        for i in p.plan.items.iter().filter(|i| matches(i)) {
+            let (action, from) = match i.state {
+                ItemState::Foreign | ItemState::FromAggregator => ("adopt", None),
+                ItemState::Unreviewed if i.kind == ItemKind::Plugin && i.target.is_some() => {
+                    ("move", None)
+                }
+                ItemState::ForeignLink if i.can_take_over() => (
+                    "take over",
+                    i.target.as_ref().map(|t| t.display().to_string()),
+                ),
+                _ => continue,
+            };
+            out.push(Adoptable {
+                harness: p.harness.name.clone(),
+                address: i.address(),
+                action,
+                from,
+            });
+        }
+    }
+    Ok(out)
+}
+
 pub fn adopt(
     ctx: &Ctx,
     harness: Option<&str>,
@@ -1549,38 +1591,20 @@ pub fn adopt(
     let matches = |i: &Item| wanted.as_ref().is_none_or(|w| *w == i.address());
     let mut said: Vec<(Token, String)> = Vec::new();
     if dry_run {
-        for p in plan_all(ctx, &ws, harness)? {
-            for i in p.plan.items.iter().filter(|i| matches(i)) {
-                match i.state {
-                    ItemState::Foreign | ItemState::FromAggregator => said.push((
-                        Token::Info,
-                        format!("would adopt {} from {}", i.address(), p.harness.name),
-                    )),
-                    ItemState::Unreviewed if i.kind == ItemKind::Plugin && i.target.is_some() => {
-                        said.push((
-                            Token::Info,
-                            format!(
-                                "would move {} in {} to its source",
-                                i.address(),
-                                p.harness.name
-                            ),
-                        ))
-                    }
-                    ItemState::ForeignLink if i.can_take_over() => said.push((
-                        Token::Info,
-                        format!(
-                            "would take over {} in {} from {}",
-                            i.address(),
-                            p.harness.name,
-                            i.target
-                                .as_ref()
-                                .map(|t| t.display().to_string())
-                                .unwrap_or_default()
-                        ),
-                    )),
-                    _ => {}
-                }
-            }
+        for a in adoptable(ctx, &ws, harness, &matches)? {
+            said.push((
+                Token::Info,
+                match a.action {
+                    "move" => format!("would move {} in {} to its source", a.address, a.harness),
+                    "take over" => format!(
+                        "would take over {} in {} from {}",
+                        a.address,
+                        a.harness,
+                        a.from.unwrap_or_default()
+                    ),
+                    _ => format!("would adopt {} from {}", a.address, a.harness),
+                },
+            ));
         }
         let verdict = if said.is_empty() {
             "Nothing to adopt".to_string()
