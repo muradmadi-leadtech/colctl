@@ -8,7 +8,7 @@ _HIL cycle after cycle 9 · Evaluate · 2026-11-15_
 | **Asked for** | The owner, at cycle 9's accept: Discover listed `qdrant` (Claude) and `colctl-qdrant-skills` (Codex) for one source; every source should be `colctl-<source>` |
 | **Scope delivered** | ACH2-01 – 03, ECH2-01 – 04, each with a named test |
 | **Released** | v2.6.1 |
-| **PRs** | #137 (RED, then GREEN), release PR |
+| **PRs** | #137 (RED, then GREEN), #138 release |
 | **Disposition** | _Yours_ |
 
 ## What was going on
@@ -55,6 +55,14 @@ their point:
 | AC6-33 (no convergence) | uses an entry outside the clone, the one case where colctl can still compare commits |
 | AC8-40, EC8-28 (same version) | check the reinstall happens and status is in sync, not the recorded commit |
 | Catalog AC5-04 | a leftover repo-named marketplace from a clone adds no second entry |
+
+## Smoke test (a fresh copy of your profiles, release build, real `claude` and `codex`)
+
+One `sync` in 9 s: in both Claude profiles it uninstalled superpowers and qdrant, removed `superpowers-dev` and
+`qdrant`, added `colctl-superpowers` and `colctl-qdrant-skills`, and installed both again. Both Codex profiles did
+the same for superpowers. Afterwards `status` said `✓ All 5 profiles in sync`, and a second `sync` said
+`Everything was already in sync`. Claude's caches hold the same skills as before (qdrant 15, superpowers 15). The
+copy was deleted afterwards.
 
 ## What you'll see on your machine
 
