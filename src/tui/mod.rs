@@ -4,6 +4,7 @@
 pub mod app;
 pub mod keys;
 pub mod motion;
+pub mod palette;
 pub mod tabs;
 pub mod terminal;
 pub mod theme;

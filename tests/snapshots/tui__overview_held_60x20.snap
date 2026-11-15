@@ -11,6 +11,7 @@ expression: mask(&screen(&m))
    Review 1 held version      4
    Find a plugin              5
    Look through every item    3
+   All actions                :
 
    Profiles
    ! claude       ~/.claude           1 skill · 1 missing
@@ -19,6 +20,5 @@ expression: mask(&screen(&m))
 
    Needs you
    ! claude  skill   alpha        missing   → colctl sync
-   ! held    source  superpowers  [SHORT]…  → colctl review
-
+                                                       1/15
  ⏎ run · s sync · u check updates · ? keys · q quit

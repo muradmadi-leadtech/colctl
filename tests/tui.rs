@@ -2052,13 +2052,13 @@ fn ac8_33_overview_offers_a_menu() {
     press(&mut m, KeyCode::Esc);
     press(&mut m, KeyCode::Right);
     assert_eq!(m.tab, Tab::Overview);
-    // ↓ from the last entry skips the profiles and lands on what needs you.
-    m.cursor_mut().selected = 4;
+    // ↓ from the last entry (All actions, AC9-24) skips the profiles and lands on what needs you.
+    m.cursor_mut().selected = 5;
     ch(&mut m, 'j');
     let at = view::rows(&m)[m.cursor().selected].to_string();
     assert!(at.starts_with("! "), "{at:?}");
     ch(&mut m, 'k');
-    assert_eq!(m.cursor().selected, 4);
+    assert_eq!(m.cursor().selected, 5);
     // u checks for updates from Overview too.
     ch(&mut m, 'u');
     assert!(matches!(
@@ -2631,5 +2631,132 @@ mod rest {
         );
         assert!(screen(&m).contains("no managed skill"), "{}", screen(&m));
         assert!(env.home.join(".claude/skills/mine").exists());
+    }
+}
+
+// ── Cycle 9: the command palette (AC9-23, AC9-24) ───────────────────────────────────────────
+
+mod palette {
+    use super::*;
+    use colctl::tui::palette;
+
+    fn ctrl(m: &mut Model, c: char) -> Vec<Cmd> {
+        update(
+            m,
+            Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)),
+        )
+    }
+
+    fn typed(m: &mut Model, text: &str) {
+        for c in text.chars() {
+            ch(m, c);
+        }
+    }
+
+    #[test]
+    fn ac9_23_the_palette_lists_every_action_valid_ones_first() {
+        let env = held_fixture();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '3');
+        ch(&mut m, ':');
+        assert!(
+            matches!(m.overlay, Some(Overlay::Palette { .. })),
+            "{:?}",
+            m.overlay
+        );
+        let all = palette::entries(&m);
+        assert!(all.iter().any(|e| e.label == "remove" && e.key == "x"));
+        assert!(all.iter().any(|e| e.label == "approve all"));
+        assert!(all.iter().any(|e| e.label == "views"));
+        assert_eq!(
+            all[0].tab,
+            Some(Tab::Items),
+            "this tab's first: {:?}",
+            all[0]
+        );
+        assert!(screen(&m).contains("remove"), "{}", screen(&m));
+        press(&mut m, KeyCode::Esc);
+        assert!(m.overlay.is_none());
+        assert_eq!(m.tab, Tab::Items, "Esc runs nothing");
+    }
+
+    #[test]
+    fn ac9_23_typing_filters_and_enter_runs_it_where_it_lives() {
+        let env = held_fixture();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '3');
+        ctrl(&mut m, 'k');
+        typed(&mut m, "check upd");
+        let first = palette::entries(&m)[0].clone();
+        assert_eq!(first.label, "check updates", "{first:?}");
+        press(&mut m, KeyCode::Enter);
+        let Some(Overlay::Confirm { job, .. }) = &m.overlay else {
+            panic!("{:?}", m.overlay);
+        };
+        assert_eq!(*job, Job::Update(Vec::new()));
+    }
+
+    #[test]
+    fn ac9_23_ctrl_k_opens_it_in_discover_where_colon_searches() {
+        let env = held_fixture();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '5');
+        ch(&mut m, ':');
+        assert!(m.overlay.is_none(), "':' searches in Discover");
+        ctrl(&mut m, 'k');
+        assert!(matches!(m.overlay, Some(Overlay::Palette { .. })));
+    }
+
+    #[test]
+    fn ac9_24_the_overview_menu_ends_with_all_actions() {
+        let env = held_fixture();
+        let mut m = opened(&env, 110, 32);
+        let row = row_of(&m, "All actions");
+        assert!(view::rows(&m)[row].to_string().contains(':'));
+        m.cursor_mut().selected = row;
+        press(&mut m, KeyCode::Enter);
+        assert!(matches!(m.overlay, Some(Overlay::Palette { .. })));
+    }
+
+    #[test]
+    fn ec9_14_a_query_matching_nothing() {
+        let env = held_fixture();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, ':');
+        typed(&mut m, "zzzz");
+        assert!(palette::entries(&m).is_empty());
+        assert!(
+            screen(&m).contains("No actions match \"zzzz\""),
+            "{}",
+            screen(&m)
+        );
+        press(&mut m, KeyCode::Esc);
+        assert!(m.overlay.is_none());
+    }
+
+    #[test]
+    fn ec9_15_an_action_not_valid_now_is_last_and_says_why() {
+        let env = with_nothing_held();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, ':');
+        let all = palette::entries(&m);
+        let at = all.iter().position(|e| e.label == "approve all").unwrap();
+        assert!(all[at].why_not.is_some());
+        assert!(
+            all[at..].iter().all(|e| e.why_not.is_some()),
+            "unusable ones last: {all:#?}"
+        );
+        typed(&mut m, "approve all");
+        let cmds = press(&mut m, KeyCode::Enter);
+        assert!(cmds.is_empty());
+        let toast = m.toast.as_ref().map(|t| t.text.clone()).unwrap_or_default();
+        assert!(toast.contains("Nothing held for review"), "{toast}");
+    }
+
+    fn with_nothing_held() -> Env {
+        let env = Env::new();
+        env.native();
+        env.ok(&["init"]);
+        env
     }
 }

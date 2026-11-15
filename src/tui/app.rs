@@ -289,6 +289,11 @@ pub enum Overlay {
         cause: Option<String>,
         hint: Option<String>,
     },
+    /// The command palette (AC9-23): what's typed, and the focused entry.
+    Palette {
+        query: String,
+        selected: usize,
+    },
     /// A checklist: what to adopt from `profile` (AC9-20).
     Pick {
         title: String,
@@ -469,6 +474,8 @@ impl Model {
             Some(Overlay::Detail { .. }) => vec![Scope::Detail, Scope::Global],
             Some(Overlay::Help | Overlay::Error { .. }) => vec![Scope::Global],
             Some(Overlay::Pick { .. }) => vec![Scope::Pick, Scope::Global],
+            // The palette reads every key itself.
+            Some(Overlay::Palette { .. }) => Vec::new(),
             None => vec![Scope::Tab(self.tab), Scope::Global],
         }
     }
@@ -765,6 +772,9 @@ fn key(m: &mut Model, ev: KeyEvent) -> Vec<Cmd> {
     if m.toast.as_ref().is_some_and(|t| t.until.is_none()) {
         m.toast = None;
     }
+    if matches!(m.overlay, Some(Overlay::Palette { .. })) {
+        return palette_key(m, ev);
+    }
     if m.overlay.is_none()
         && (m.filter().focused || m.tab == Tab::Discover)
         && let Some(cmds) = input_key(m, ev)
@@ -818,6 +828,49 @@ fn input_key(m: &mut Model, ev: KeyEvent) -> Option<Vec<Cmd>> {
     }
 }
 
+/// Keys in the palette: typing filters, ↑↓ move, ⏎ runs, Esc closes (AC9-23).
+fn palette_key(m: &mut Model, ev: KeyEvent) -> Vec<Cmd> {
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+    let n = super::palette::entries(m).len();
+    let Some(Overlay::Palette { query, selected }) = &mut m.overlay else {
+        return Vec::new();
+    };
+    match ev.code {
+        KeyCode::Esc => m.overlay = None,
+        KeyCode::Up => *selected = selected.saturating_sub(1),
+        KeyCode::Down => *selected = (*selected + 1).min(n.saturating_sub(1)),
+        KeyCode::Backspace => {
+            query.pop();
+            *selected = 0;
+        }
+        KeyCode::Char(c)
+            if !ev
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            query.push(c);
+            *selected = 0;
+        }
+        KeyCode::Enter => {
+            let at = *selected;
+            let Some(e) = super::palette::entries(m).into_iter().nth(at) else {
+                return Vec::new();
+            };
+            m.overlay = None;
+            if let Some(why) = e.why_not {
+                m.toast(format!("· {why}"), false);
+                return Vec::new();
+            }
+            if let Some(t) = e.tab {
+                m.go(t);
+            }
+            return act(m, e.action);
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
 fn quit(m: &mut Model) -> Vec<Cmd> {
     if m.job.is_some() {
         m.overlay = Some(Overlay::ConfirmQuit);
@@ -833,6 +886,7 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
     match action {
         Action::Quit => return quit(m),
         Action::Help => m.overlay = Some(Overlay::Help),
+        Action::Palette => {}
         Action::NextTab if m.overlay.is_none() => m.go(m.tab.step(1)),
         Action::PrevTab if m.overlay.is_none() => m.go(m.tab.step(-1)),
         Action::NextTab | Action::PrevTab => {}

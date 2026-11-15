@@ -579,6 +579,7 @@ enum MenuItem {
     Review,
     Find,
     Items,
+    Palette,
 }
 
 fn menu(m: &Model) -> Vec<(MenuItem, String, &'static str)> {
@@ -594,6 +595,7 @@ fn menu(m: &Model) -> Vec<(MenuItem, String, &'static str)> {
         (MenuItem::Review, review, "4"),
         (MenuItem::Find, "Find a plugin".into(), "5"),
         (MenuItem::Items, "Look through every item".into(), "3"),
+        (MenuItem::Palette, "All actions".into(), ":"),
     ]
 }
 
@@ -636,6 +638,7 @@ fn run_menu(m: &mut Model, item: MenuItem) -> Vec<Cmd> {
         MenuItem::Review => go(m, Tab::Review),
         MenuItem::Find => go(m, Tab::Discover),
         MenuItem::Items => go(m, Tab::Items),
+        MenuItem::Palette => app::act(m, Action::Palette),
     }
 }
 

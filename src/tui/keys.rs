@@ -58,6 +58,8 @@ pub enum Action {
     Toggle,
     /// Discover's next view: plugins, developers, marketplaces, connectors (AC9-21).
     NextView,
+    /// The command palette (AC9-23).
+    Palette,
 }
 
 /// One key.
@@ -173,7 +175,7 @@ pub const KEYMAP: &[Binding] = &[
     b("⏎", K::Enter, S::Tab(Tab::Discover), A::Open, "details", true),
     b("esc", K::Esc, S::Tab(Tab::Discover), A::Back, "clear", true),
     b("←→", K::Null, S::Tab(Tab::Discover), A::NextTab, "tabs", true),
-    bm("ctrl-v", K::Char('v'), KeyModifiers::CONTROL, S::Tab(Tab::Discover), A::NextView, "view", true),
+    bm("ctrl-v", K::Char('v'), KeyModifiers::CONTROL, S::Tab(Tab::Discover), A::NextView, "views", true),
     b("ctrl-c", K::Null, S::Tab(Tab::Discover), A::Quit, "quit", true),
     // Everywhere.
     b("→", K::Right, S::Global, A::NextTab, "next tab", false),
@@ -239,6 +241,8 @@ pub const KEYMAP: &[Binding] = &[
     b("end", K::End, S::Global, A::Bottom, "bottom", false),
     b("esc", K::Esc, S::Global, A::Back, "back", false),
     b("r", K::Char('r'), S::Global, A::Reload, "reload", true),
+    b(":", K::Char(':'), S::Global, A::Palette, "all actions", true),
+    bm("ctrl-k", K::Char('k'), KeyModifiers::CONTROL, S::Global, A::Palette, "all actions", false),
     b("?", K::Char('?'), S::Global, A::Help, "keys", true),
     b("q", K::Char('q'), S::Global, A::Quit, "quit", true),
 ];
