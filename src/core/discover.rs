@@ -55,3 +55,18 @@ pub fn add_words(plugin: &Plugin) -> Result<Vec<String>, String> {
         _ => Err(plugin.add.clone()),
     }
 }
+
+/// Every marketplace any profile knows, as `colctl marketplace list` lists them.
+pub fn marketplaces(_ctx: &Ctx) -> Result<Vec<catalog::Marketplace>, CliError> {
+    Ok(Vec::new())
+}
+
+/// Who publishes what, as `colctl developers` lists them.
+pub fn developers(_catalog: &Catalog) -> Vec<search::Developer> {
+    Vec::new()
+}
+
+/// Codex's app connectors, as `colctl connectors` finds them.
+pub fn connectors(_ctx: &Ctx) -> Result<Vec<Plugin>, CliError> {
+    Ok(Vec::new())
+}

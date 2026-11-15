@@ -485,3 +485,261 @@ mod saved_status {
         assert!(screen(&m).contains("as of earlier"), "{}", screen(&m));
     }
 }
+
+// ---------------------------------------------------------------- core calls for the rest (T4)
+
+mod core_calls {
+    use super::*;
+    use colctl::core::observer::Quiet;
+    use colctl::core::run::{self, Job};
+    use colctl::core::{adopt, discover};
+    use colctl::ctx::Ctx;
+    use std::ffi::OsString;
+
+    fn ctx(env: &Env) -> Ctx {
+        Ctx::from_vars(&[
+            ("HOME".into(), OsString::from(&env.home)),
+            ("PATH".into(), env.path.clone()),
+        ])
+        .unwrap()
+    }
+
+    fn write(path: &Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    /// Everything that matters after a write: config, the source tree, history, what each
+    /// profile has, and what the tools were asked to do.
+    fn digest(env: &Env) -> Vec<String> {
+        fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
+            let Ok(list) = fs::read_dir(dir) else { return };
+            for e in list.flatten() {
+                let p = e.path();
+                let rel = p.strip_prefix(base).unwrap().display().to_string();
+                if rel.contains(".git") || rel.contains(".state") || rel.contains(".lock") {
+                    continue;
+                }
+                let meta = fs::symlink_metadata(&p).unwrap();
+                if meta.file_type().is_symlink() {
+                    let to = fs::read_link(&p).unwrap().display().to_string();
+                    out.push(format!(
+                        "{rel} -> {}",
+                        to.replace(&base.display().to_string(), "~")
+                    ));
+                } else if meta.is_dir() {
+                    walk(&p, base, out);
+                } else {
+                    out.push(rel);
+                }
+            }
+        }
+        let mut out = vec![env.config()];
+        walk(&env.home, &env.home, &mut out);
+        out.sort();
+        let subjects: Vec<String> = env
+            .git(&["log", "--format=%s"])
+            .lines()
+            .map(String::from)
+            .collect();
+        out.extend(subjects);
+        let home = env.home.parent().unwrap().display().to_string();
+        out.extend(
+            env.log_args()
+                .into_iter()
+                .map(|a| a.replace(&home, "[ROOT]")),
+        );
+        out.extend(
+            env.codex_log_args()
+                .into_iter()
+                .map(|a| a.replace(&home, "[ROOT]")),
+        );
+        out
+    }
+
+    fn run_job(env: &Env, job: &Job) -> run::Report {
+        run::run(&ctx(env), job, 100, Box::new(Quiet)).unwrap()
+    }
+
+    fn parity(make: impl Fn() -> Env, job: Job, args: &[&str]) {
+        let (tui, cli) = (make(), make());
+        let report = run_job(&tui, &job);
+        assert!(!report.lines.is_empty(), "{job:?} reports");
+        cli.run(args);
+        assert_eq!(digest(&tui), digest(&cli), "{job:?} vs {args:?}");
+        let words: Vec<&str> = args.iter().copied().filter(|a| *a != "-y").collect();
+        assert_eq!(job.command(), format!("colctl {}", words.join(" ")));
+    }
+
+    fn with_skill() -> Env {
+        let env = machine();
+        env.source_skill("alpha");
+        env.ok(&["sync"]);
+        env
+    }
+
+    fn with_foreign() -> Env {
+        let env = machine();
+        env.skill_dir(&env.home.join(".claude/skills"), "mine", "mine");
+        env.skill_dir(&env.home.join(".claude/skills"), "yours", "yours");
+        env
+    }
+
+    fn claude_only() -> Env {
+        let env = machine();
+        let repo = env.home.parent().unwrap().join("upstreams").join("cli");
+        write(&repo.join("skills/edge/SKILL.md"), "---\nname: edge\n---\n");
+        let (_, url, head) = env.upstream("cli", true, false, Some("cli"));
+        env.add_source_entry("cli", &url, &head, "");
+        env.ok(&["sync"]);
+        env
+    }
+
+    fn converted() -> Env {
+        let env = claude_only();
+        env.ok(&["convert", "cli"]);
+        env
+    }
+
+    fn taken_over() -> Env {
+        let env = machine();
+        held_skill(&env);
+        env.ok(&["reject", "--all"]);
+        let origin = env.home.join(".config/twg/skills/twg-jira");
+        fs::write(origin.join("SKILL.md"), "v3").unwrap();
+        env
+    }
+
+    #[test]
+    fn ac9_14_rm_matches_the_cli() {
+        parity(
+            with_skill,
+            Job::Rm {
+                kind: "skill".into(),
+                name: "alpha".into(),
+                codex: false,
+            },
+            &["rm", "skill", "alpha", "-y"],
+        );
+    }
+
+    #[test]
+    fn ac9_14_adopt_matches_the_cli() {
+        parity(
+            with_foreign,
+            Job::Adopt {
+                profile: "claude".into(),
+                items: Vec::new(),
+            },
+            &["adopt", "claude"],
+        );
+        parity(
+            with_foreign,
+            Job::Adopt {
+                profile: "claude".into(),
+                items: vec!["skills/mine".into()],
+            },
+            &["adopt", "claude", "skills/mine"],
+        );
+    }
+
+    #[test]
+    fn ac9_14_convert_and_undo_match_the_cli() {
+        parity(claude_only, Job::Convert("cli".into()), &["convert", "cli"]);
+        parity(
+            converted,
+            Job::ConvertUndo("cli".into()),
+            &["convert", "cli", "--undo"],
+        );
+    }
+
+    #[test]
+    fn ac9_14_refresh_matches_the_cli() {
+        parity(taken_over, Job::Refresh(Vec::new()), &["refresh"]);
+        parity(
+            taken_over,
+            Job::Refresh(vec!["skills/twg-jira".into()]),
+            &["refresh", "skills/twg-jira"],
+        );
+    }
+
+    #[test]
+    fn ac9_14_marketplace_refresh_matches_the_cli() {
+        parity(
+            machine,
+            Job::MarketplaceRefresh,
+            &["marketplace", "refresh"],
+        );
+    }
+
+    fn json(env: &Env, args: &[&str]) -> Value {
+        serde_json::from_slice(&env.run(args).stdout).unwrap()
+    }
+
+    #[test]
+    fn ac9_15_reads_return_what_json_prints() {
+        let env = claude_only();
+        let c = ctx(&env);
+        let markets = serde_json::to_value(discover::marketplaces(&c).unwrap()).unwrap();
+        assert_eq!(
+            markets,
+            json(&env, &["marketplace", "list", "--json"])["marketplaces"]
+        );
+        let catalog = discover::catalog(&c).unwrap();
+        let devs = serde_json::to_value(discover::developers(&catalog)).unwrap();
+        assert_eq!(devs, json(&env, &["developers", "--json"])["developers"]);
+        let conns = discover::connectors(&c).unwrap();
+        let cli = json(&env, &["connectors", "--json", "--limit", "0"]);
+        let ids: Vec<String> = conns.iter().map(|p| p.ids[0].clone()).collect();
+        let cli_ids: Vec<String> = cli["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["ids"][0].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, cli_ids);
+    }
+
+    #[test]
+    fn ac9_16_adopt_says_what_it_would_take_first() {
+        let env = with_foreign();
+        let before = digest(&env);
+        let list = adopt::candidates(&ctx(&env), "claude").unwrap();
+        let keys: Vec<&str> = list.iter().map(|c| c.address.as_str()).collect();
+        assert_eq!(keys, ["skills/mine", "skills/yours"]);
+        assert!(list.iter().all(|c| c.action == "adopt"), "{list:?}");
+        assert_eq!(digest(&env), before, "changes nothing");
+        assert!(adopt::candidates(&ctx(&env), "nope").is_err());
+    }
+
+    #[test]
+    fn ec9_11_an_item_gone_before_adopt_is_skipped_with_the_reason() {
+        let env = with_foreign();
+        fs::remove_dir_all(env.home.join(".claude/skills/yours")).unwrap();
+        let report = run_job(
+            &env,
+            &Job::Adopt {
+                profile: "claude".into(),
+                items: vec!["skills/yours".into(), "skills/mine".into()],
+            },
+        );
+        let text = report.lines.join("\n");
+        assert!(text.contains("skills/yours"), "{text}");
+        assert!(
+            env.source.join("skills/mine").is_dir(),
+            "the rest is adopted"
+        );
+    }
+
+    #[test]
+    fn ec9_13_marketplace_refresh_reports_each_tool() {
+        let env = Env::without_claude();
+        env.native();
+        env.codex();
+        env.ok(&["init"]);
+        let report = run_job(&env, &Job::MarketplaceRefresh);
+        let text = report.lines.join("\n");
+        assert!(text.contains("claude"), "{text}");
+        assert!(text.contains("codex"), "{text}");
+    }
+}

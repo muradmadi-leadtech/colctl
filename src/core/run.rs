@@ -65,6 +65,22 @@ pub enum Job {
     /// `colctl add …`: what a catalog entry says to run (`colctl add plugin <id>`, `colctl add
     /// source <id>`), without the leading `colctl`.
     Add(Vec<String>),
+    /// `colctl rm <kind> <name> [--codex]`
+    Rm {
+        kind: String,
+        name: String,
+        codex: bool,
+    },
+    /// `colctl adopt <profile> [<item>]`, once per item; everything when `items` is empty.
+    Adopt { profile: String, items: Vec<String> },
+    /// `colctl convert <source>`
+    Convert(String),
+    /// `colctl convert <source> --undo`
+    ConvertUndo(String),
+    /// `colctl refresh [<items>]`
+    Refresh(Vec<String>),
+    /// `colctl marketplace refresh`
+    MarketplaceRefresh,
 }
 
 impl Job {
@@ -85,6 +101,7 @@ impl Job {
             Job::Approve(n) => format!("colctl approve{}", names(n)),
             Job::Reject(n) => format!("colctl reject{}", names(n)),
             Job::Add(words) => format!("colctl {}", words.join(" ")),
+            _ => String::new(),
         }
     }
 }
@@ -113,6 +130,7 @@ pub fn run(
             "\"{}\" isn't an add command",
             words.join(" ")
         ))),
+        _ => Err(CliError::usage("not built yet")),
     }?;
     Ok(Report {
         exit,
