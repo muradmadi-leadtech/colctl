@@ -63,14 +63,16 @@
 - [x] Code review: Security review completed
 - [x] Code review: Integration and interface contracts verified
 - [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
-- [ ] Disposition decision made
+- [x] Disposition decision made
 
 ### Disposition
 
-<!-- Accept / Accept with issues / Revise / Reject -->
+**Accept** (owner, 2026-11-15). v2.5.1, #122; review `docs/reserved-marketplace-names/cycle-review.md`.
 
 ---
 
 ## Learnings
 
-<!-- Capture learnings during and after the cycle -->
+- Claude reserves some marketplace names for Anthropic's GitHub repos; a local folder can't use them. The fake claude now refuses them too.
+- When a repo's own packaging can't be used as-is, colctl's one-plugin wrapper marketplace is the general fallback.
+- A hint must name a command that works: suggest `convert` only when Codex can use something in the plugin.
