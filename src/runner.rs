@@ -126,6 +126,12 @@ fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<S
 }
 
 /// Finds an executable called `name` on `path_var`.
+/// Runs `spawn`, again after a moment when the executable is busy (ETXTBSY, AC9-27): on Linux a
+/// program just written can't run while another thread's fork still holds it open. Stub.
+pub fn spawn_retrying<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    spawn()
+}
+
 pub fn find_program(name: &str, path_var: &OsStr) -> Option<PathBuf> {
     std::env::split_paths(path_var)
         .map(|dir| dir.join(name))

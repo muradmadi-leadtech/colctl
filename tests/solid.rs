@@ -751,3 +751,146 @@ mod core_calls {
         assert!(text.contains("codex"), "{text}");
     }
 }
+
+// ---------------------------------------------------------------- follow-ups (T7)
+
+mod follow_ups {
+    use super::*;
+
+    /// A held update where 12 skills each declare allowed-tools, and one adds a hook.
+    fn noisy() -> Env {
+        let env = machine();
+        let (repo, url, _) = env.upstream("superpowers", true, true, Some("superpowers-dev"));
+        env.ok(&["add", "source", &url]);
+        for i in 0..12 {
+            let dir = repo.join(format!("skills/s{i:02}"));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("SKILL.md"),
+                format!("---\nname: s{i:02}\nallowed-tools: Read, Grep\n---\nDo {i}.\n"),
+            )
+            .unwrap();
+        }
+        let hooks = repo.join("hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        fs::write(hooks.join("hooks.json"), r#"{"hooks": {}}"#).unwrap();
+        env.upstream_commit(&repo, "v2");
+        env.ok(&["update"]);
+        env
+    }
+
+    #[test]
+    fn ac9_25_allowed_tools_flags_are_grouped() {
+        let env = noisy();
+        let out = String::from_utf8_lossy(&env.run(&["review", "superpowers"]).stdout).into_owned();
+        let flags: String = out
+            .split("Risk flags")
+            .nth(1)
+            .unwrap_or_default()
+            .lines()
+            .take_while(|l| !l.trim().is_empty() || l.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            Env::words(&out).contains("12 files declare allowed-tools"),
+            "{out}"
+        );
+        assert!(
+            !flags.contains("skills/s03/SKILL.md"),
+            "one line, not twelve: {flags}"
+        );
+        assert!(
+            flags.contains("hooks.json"),
+            "other flags stay per file: {flags}"
+        );
+        // -v names them all; --json keeps a flag per file.
+        let verbose =
+            String::from_utf8_lossy(&env.run(&["review", "superpowers", "-v"]).stdout).into_owned();
+        assert!(verbose.contains("skills/s03/SKILL.md"), "{verbose}");
+        let json: Value =
+            serde_json::from_slice(&env.run(&["review", "superpowers", "--json"]).stdout).unwrap();
+        let n = json.to_string().matches("\"allowed-tools\"").count();
+        assert!(n >= 12, "a flag per file in --json: {n}");
+    }
+
+    #[test]
+    fn ac9_25_grouping_leaves_the_recommendation_alone() {
+        let env = noisy();
+        let json: Value = serde_json::from_slice(&env.run(&["review", "--json"]).stdout).unwrap();
+        let before = json.to_string();
+        assert!(before.contains("recommendation"), "{before}");
+        let text =
+            String::from_utf8_lossy(&env.run(&["review", "superpowers"]).stdout).into_owned();
+        assert!(
+            text.contains("Look before approving") || text.contains("approve"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn ac9_26_verbose_paths_start_from_home() {
+        let env = machine();
+        let (_, url, _) = env.upstream("superpowers", true, true, Some("superpowers-dev"));
+        env.ok(&["add", "source", &url]);
+        let home = env.home.display().to_string();
+        fs::remove_dir_all(env.home.join(".claude/plugins")).ok();
+        let (_, out, err) = env.code(&["sync", "-v"]);
+        let calls: Vec<&str> = out
+            .lines()
+            .chain(err.lines())
+            .filter(|l| l.contains("plugin marketplace add") || l.contains("plugin install"))
+            .collect();
+        assert!(!calls.is_empty(), "{out}{err}");
+        for l in calls {
+            assert!(!l.contains(&home), "{l}");
+        }
+        assert!(out.contains("~/.colctl/plugins/superpowers"), "{out}");
+    }
+
+    #[test]
+    fn ac9_27_a_busy_executable_is_retried() {
+        use colctl::runner::spawn_retrying;
+        let mut tries = 0;
+        let r: std::io::Result<u8> = spawn_retrying(|| {
+            tries += 1;
+            if tries < 3 {
+                Err(std::io::Error::from_raw_os_error(26))
+            } else {
+                Ok(7)
+            }
+        });
+        assert_eq!(r.unwrap(), 7);
+        assert_eq!(tries, 3);
+        let mut tries = 0;
+        let r: std::io::Result<u8> = spawn_retrying(|| {
+            tries += 1;
+            Err(std::io::Error::from_raw_os_error(2))
+        });
+        assert!(r.is_err());
+        assert_eq!(tries, 1, "only ETXTBSY is retried");
+    }
+
+    #[test]
+    fn ac9_29_sync_says_what_is_wrong_and_the_fix() {
+        let env = machine();
+        env.skill_dir(&env.home.join(".claude/skills"), "mine", "mine");
+        let (_, out, _) = env.code(&["sync"]);
+        let first = out.lines().next().unwrap_or_default();
+        assert!(!first.contains("attention"), "{first}");
+        assert!(first.contains("mine"), "names it: {first}");
+        assert!(
+            first.contains("colctl adopt claude skills/mine"),
+            "and its fix: {first}"
+        );
+    }
+
+    #[test]
+    fn ac9_31_marketplace_alone_prints_its_help() {
+        let env = machine();
+        let (code, out, err) = env.code(&["marketplace"]);
+        assert_eq!(code, 2);
+        let all = format!("{out}{err}");
+        assert!(all.contains("colctl marketplace list"), "{all}");
+        assert!(!all.contains("error: \n"), "{all}");
+    }
+}
