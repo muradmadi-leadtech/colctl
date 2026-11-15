@@ -886,7 +886,12 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
     match action {
         Action::Quit => return quit(m),
         Action::Help => m.overlay = Some(Overlay::Help),
-        Action::Palette => {}
+        Action::Palette => {
+            m.overlay = Some(Overlay::Palette {
+                query: String::new(),
+                selected: 0,
+            });
+        }
         Action::NextTab if m.overlay.is_none() => m.go(m.tab.step(1)),
         Action::PrevTab if m.overlay.is_none() => m.go(m.tab.step(-1)),
         Action::NextTab | Action::PrevTab => {}

@@ -69,9 +69,6 @@ fn query(m: &Model) -> &str {
 /// What the palette lists now: matching the typed words, usable ones first (this tab's, then
 /// everywhere's, then other tabs'), unusable ones last.
 pub fn entries(m: &Model) -> Vec<Entry> {
-    if m.width > 0 {
-        return Vec::new();
-    }
     let mut all: Vec<Entry> = Vec::new();
     for b in KEYMAP {
         let tab = match b.scope {
