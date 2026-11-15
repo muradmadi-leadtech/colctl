@@ -11,7 +11,7 @@ _Cycle 8 · Evaluate · 2026-11-14_
 | **Released** | [v2.4.0](https://github.com/muradmadi-leadtech/colctl/releases/tag/v2.4.0) |
 | **PRs** | #96 focus · #97 orchestrate · #98 refine · #99 T1 · #100 T2 · #101 T3 · #102 T4 · #104 T5 · #105 T6 · #106 T7 · #107 T8 · #108 T9 · #109 T10 · #110 T11 · #111, #112 smoke fixes · #103 release. Before the cycle: #94 (a snapshot held the test day's date), #95 (cycle 7 closed) |
 | **Production impact** | None on this machine. Real profiles were only read; the smoke test ran on copies with credentials and sessions removed |
-| **Disposition** | Revise (owner, 2026-11-14), fixed in 2.5.0 (#114, #116, #117, #118). Now _yours to decide_ again |
+| **Disposition** | Accept (owner, 2026-11-15), after one Revise fixed in 2.5.0 (#114, #116, #117, #118) |
 
 ## Revise (owner, 2026-11-14), fixed in 2.5.0
 
@@ -187,3 +187,5 @@ pty smoke test covered.
 - [ ] Decide the disposition
 
 See `docs/tasks/tui.md` (T1–T12), `docs/tui/design-spec.md`, `docs/reference/tui.md`.
+
+**Disposition: Accept** (owner, 2026-11-15).
