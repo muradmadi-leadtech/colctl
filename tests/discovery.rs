@@ -676,7 +676,7 @@ fn ac5_23_add_source_from_a_result() {
     );
     assert!(
         env.installed(&env.home.join(".claude"))
-            .contains(&"superpowers@superpowers-dev".to_string())
+            .contains(&"superpowers@colctl-superpowers".to_string())
     );
     // --rev wins over the catalog's commit.
     let env2 = machine();
@@ -847,7 +847,10 @@ fn ec5_22_a_catalog_name_that_differs_from_the_plugins_own() {
     let s = &sources(&env)[0];
     assert_eq!(s["name"].as_str(), Some("acme-developer-tools"));
     assert_eq!(s["plugin"].as_str(), Some("onepw"), "the plugin's own name");
-    assert!(env.installed(&native).contains(&"onepw@acme".to_string()));
+    assert!(
+        env.installed(&native)
+            .contains(&"onepw@colctl-acme-developer-tools".to_string())
+    );
     // The directory listing and the source are now one result.
     let (code, _, err) = env.code(&[
         "add",

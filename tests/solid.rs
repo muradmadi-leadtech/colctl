@@ -936,7 +936,10 @@ mod follow_ups {
         for l in calls {
             assert!(!l.contains(&home), "{l}");
         }
-        assert!(out.contains("~/.colctl/plugins/superpowers"), "{out}");
+        assert!(
+            out.contains("~/.colctl/plugins/.manifests/superpowers"),
+            "{out}"
+        );
     }
 
     #[test]

@@ -91,6 +91,8 @@ enum Plan {
     Wrap {
         folder: PathBuf,
         plugin_name: String,
+        /// The repo's own entry for the plugin, whose fields the wrapper keeps (ACH2-01).
+        entry: Option<Value>,
     },
     Done(ToolPackaging),
 }
@@ -119,6 +121,18 @@ fn plugin_folder(tool: &Tool, clone: &Path, candidates: &[Option<&str>]) -> Opti
         .find(|folder| folder.join(tool.plugin).is_file())
 }
 
+/// The folder a local marketplace entry points at, when it's a folder inside the clone.
+fn local_folder(clone: &Path, source: &Value) -> Option<PathBuf> {
+    let rel = source
+        .as_str()
+        .or_else(|| source.get("path").and_then(Value::as_str))
+        .or_else(|| source.get("url").and_then(Value::as_str))?;
+    let folder = clone.join(rel);
+    let real = fs::canonicalize(&folder).ok()?;
+    let root = fs::canonicalize(clone).ok()?;
+    (real.is_dir() && real.starts_with(&root)).then(|| fsx::normalize(&folder))
+}
+
 fn wrap_plan(tool: &Tool, folder: PathBuf, plugin: &str) -> Plan {
     match read_json(&folder.join(tool.plugin)) {
         Ok(v) => Plan::Wrap {
@@ -128,6 +142,7 @@ fn wrap_plan(tool: &Tool, folder: PathBuf, plugin: &str) -> Plan {
                 .unwrap_or(plugin)
                 .to_string(),
             folder,
+            entry: None,
         },
         Err(e) => Plan::Done(ToolPackaging::Invalid(e)),
     }
@@ -177,6 +192,18 @@ fn plan(tool: &Tool, clone: &Path, plugin: &str, subpath: Option<&str>) -> Plan 
                 ))),
             };
         }
+        // ACH2-01: a plugin the repo lists from inside itself installs through colctl's own
+        // marketplace too, so every source's marketplace is `colctl-<source>`. Never from outside
+        // the clone (ECH2-02): then the repo's own is used, as before.
+        if is_local(&source)
+            && let Some(folder) = local_folder(clone, &source)
+        {
+            return Plan::Wrap {
+                folder,
+                plugin_name: plugin.to_string(),
+                entry: Some(entry.clone()),
+            };
+        }
         if is_local(&source) {
             return Plan::Repo(Target {
                 marketplace_dir: clone.to_path_buf(),
@@ -221,6 +248,7 @@ pub fn wrap_converted(
         package,
         plugin_name,
         CONVERTED_LINK,
+        None,
     )
 }
 
@@ -269,6 +297,7 @@ pub fn claude_folder(clone: &Path, plugin: &str, subpath: Option<&str>) -> Optio
 
 /// Writes (or, without `write`, only describes) colctl's one-plugin marketplace for `tool`, whose plugin
 /// entry points at `./<link>`, a symlink to `folder`.
+#[allow(clippy::too_many_arguments)]
 fn wrap(
     write: bool,
     tool: &Tool,
@@ -277,9 +306,21 @@ fn wrap(
     folder: &Path,
     plugin_name: &str,
     link: &str,
+    entry: Option<&Value>,
 ) -> ToolPackaging {
     let market = format!("colctl-{name}");
-    let mut body = json!({"name": market, "plugins": [(tool.entry)(plugin_name, link)]});
+    let mut plugin = (tool.entry)(plugin_name, link);
+    // Keep the repo's own entry (description, `strict`, component paths…), pointed at the link.
+    if let (Some(Value::Object(theirs)), Value::Object(ours)) = (entry, &plugin) {
+        let mut merged = theirs.clone();
+        for (k, v) in ours {
+            if k == "name" || k == "source" || !merged.contains_key(k) {
+                merged.insert(k.clone(), v.clone());
+            }
+        }
+        plugin = Value::Object(merged);
+    }
+    let mut body = json!({"name": market, "plugins": [plugin]});
     if tool.label == "Claude" {
         body["owner"] = json!({"name": "colctl"});
     }
@@ -321,7 +362,17 @@ fn finish(
         Plan::Wrap {
             folder,
             plugin_name,
-        } => wrap(write, tool, manifests, name, &folder, &plugin_name, link),
+            entry,
+        } => wrap(
+            write,
+            tool,
+            manifests,
+            name,
+            &folder,
+            &plugin_name,
+            link,
+            entry.as_ref(),
+        ),
         Plan::Done(p) => p,
     }
 }
@@ -451,7 +502,7 @@ mod tests {
             fs::read_link(f.manifests.join("plugin")).unwrap(),
             f.clone.join("plugins/typescript-lsp")
         );
-        // Any other name is used as the repo has it.
+        // Any other name gets colctl's own too (ACH2-01).
         let g = fixture();
         write(
             &g.clone.join(".claude-plugin/marketplace.json"),
@@ -463,7 +514,7 @@ mod tests {
         );
         assert_eq!(
             supported(&inspect(&g.clone, &g.manifests, "x", "x", None).claude).id,
-            "x@mine"
+            "x@colctl-x"
         );
     }
 
@@ -522,13 +573,17 @@ mod tests {
             &json!({"name": "dbx-skills", "plugins": [{"name": "dbx", "source": "./plugins/dbx/claude"}]}),
         );
         let p = inspect(&f.clone, &f.manifests, "dbx", "dbx", None);
-        assert_eq!(supported(&p.claude).id, "dbx@dbx-skills");
-        assert_eq!(supported(&p.claude).marketplace_dir, f.clone);
+        assert_eq!(supported(&p.claude).id, "dbx@colctl-dbx");
+        assert_eq!(supported(&p.claude).marketplace_dir, f.manifests);
         assert_eq!(supported(&p.codex).id, "dbx@colctl-dbx");
         assert_eq!(
             fs::read_link(f.manifests.join("plugin")).unwrap(),
+            f.clone.join("plugins/dbx/claude")
+        );
+        assert_eq!(
+            fs::read_link(f.manifests.join("plugin-codex")).unwrap(),
             f.clone.join("plugins/dbx/codex"),
-            "one wrapped tool keeps the plain link name"
+            "each tool's own folder"
         );
         assert!(is_local(&json!({"source": "local", "path": "x"})));
         assert!(!is_local(&json!("https://x/y")));
@@ -547,16 +602,18 @@ mod tests {
             &json!({"name": "superpowers-dev", "plugins": [{"name": "superpowers", "source": {"source": "url", "url": "./"}}]}),
         );
         let p = inspect(&f.clone, &f.manifests, "superpowers", "superpowers", None);
+        // ACH2-01: the repo's manifests find the plugin; colctl's own marketplace installs it.
         for tool in [&p.claude, &p.codex] {
             let t = supported(tool);
-            assert_eq!(t.marketplace_dir, f.clone);
-            assert_eq!(t.marketplace, "superpowers-dev");
-            assert_eq!(t.id, "superpowers@superpowers-dev");
+            assert_eq!(t.marketplace_dir, f.manifests);
+            assert_eq!(t.marketplace, "colctl-superpowers");
+            assert_eq!(t.id, "superpowers@colctl-superpowers");
         }
         assert!(p.any_supported());
+        assert_eq!(fs::read_link(f.manifests.join("plugin")).unwrap(), f.clone);
         assert!(
-            !f.manifests.exists(),
-            "nothing written when the repo has its own manifests"
+            !f.manifests.join("plugin-codex").exists(),
+            "one folder, one link"
         );
     }
 

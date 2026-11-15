@@ -30,18 +30,18 @@
 
 ---
 
-<!-- FORGE_PHASE:Generate:Active -->
+<!-- FORGE_PHASE:Generate:Complete -->
 ## Phase 2: Generate
 
 **Purpose**: Implement the change following TDD.
 
 ### Process
-- [ ] RED: Write failing tests
-- [ ] GREEN: Minimal code to pass
-- [ ] REFACTOR: Improve while green
-- [ ] Code review: Linter and type checks pass
-- [ ] Code review: TDD compliance verified
-- [ ] Code review: Acceptance criteria alignment checked
+- [x] RED: Write failing tests
+- [x] GREEN: Minimal code to pass
+- [x] REFACTOR: Improve while green
+- [x] Code review: Linter and type checks pass
+- [x] Code review: TDD compliance verified
+- [x] Code review: Acceptance criteria alignment checked
 
 ### Implementation Notes
 
@@ -49,7 +49,7 @@
 
 ---
 
-<!-- FORGE_PHASE:Evaluate:Pending -->
+<!-- FORGE_PHASE:Evaluate:Active -->
 ## Phase 3: Evaluate
 
 **Purpose**: Verify output matches intent.

@@ -25,7 +25,7 @@ expression: "normalise(&env, &out)"
       "display_name": null,
       "homepage": null,
       "ids": [
-        "superpowers@superpowers-dev"
+        "superpowers@colctl-superpowers"
       ],
       "installed": [
         "claude",

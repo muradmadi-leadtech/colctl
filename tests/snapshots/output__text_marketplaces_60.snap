@@ -5,7 +5,7 @@ expression: "normalise(&env, &text)"
 exit 0
 --- stdout
 NAME        TOOL    SOURCE    PLUGINS  PROFILES
+colctl-su…  claude  ~/.colc…  1        claude, k…  ✓ managed
+colctl-su…  codex   ~/.colc…  1        codex       ✓ managed
 official    claude  github:…  1        claude
-superpowe…  claude  ~/.colc…  1        claude, k…  ✓ managed
-superpowe…  codex   ~/.colc…  1        codex       ✓ managed
 --- stderr

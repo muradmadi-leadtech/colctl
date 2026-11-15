@@ -399,6 +399,20 @@ impl Builder {
                 e.source_plugin = source_ids.get(&e.id).cloned();
             }
         }
+        // A marketplace colctl added from a clone in ~/.colctl/plugins lists only what a source
+        // installs: an entry from it that no source claims is a leftover (a repo's own name from
+        // before 2.6.1, ACH2-02), so the source's own entry stands alone.
+        let clones = source_dir.join("plugins");
+        let colctl_markets: std::collections::BTreeSet<(String, String)> = self
+            .marketplaces
+            .values()
+            .filter(|m| Path::new(&m.source).starts_with(&clones))
+            .map(|m| (m.tool.clone(), m.name.clone()))
+            .collect();
+        entries.retain(|e| {
+            e.source_plugin.is_some()
+                || !colctl_markets.contains(&(e.tool.clone(), e.catalog.clone()))
+        });
         let mut marketplaces: Vec<Marketplace> = self.marketplaces.into_values().collect();
         for m in &mut marketplaces {
             let declared = match m.tool.as_str() {
@@ -408,7 +422,6 @@ impl Builder {
             m.managed = declared.contains_key(&m.name);
         }
         // Marketplaces colctl added for its sources (folders in ~/.colctl/plugins) are managed too.
-        let clones = source_dir.join("plugins");
         for m in &mut marketplaces {
             if Path::new(&m.source).starts_with(&clones) {
                 m.managed = true;
@@ -765,7 +778,7 @@ mod tests {
             convert: Vec::new(),
         });
         let c = f.build();
-        let e = find(&c, "superpowers@superpowers-dev");
+        let e = find(&c, "superpowers@colctl-superpowers");
         assert_eq!(e.catalog, COLCTL);
         assert_eq!(e.source_plugin.as_deref(), Some("superpowers"));
         assert_eq!(
@@ -937,11 +950,18 @@ mod tests {
             convert: Vec::new(),
         });
         let c = f.build();
-        let e = find(&c, "superpowers@superpowers-dev");
+        // ACH2-01: a source is always colctl-<name>; the clone's own marketplace, left over from
+        // before 2.6.1, adds no second entry.
+        let e = find(&c, "superpowers@colctl-superpowers");
         assert_eq!(e.catalog, COLCTL);
         assert_eq!(
             e.repo.as_deref(),
             Some("https://github.com/obra/superpowers.git")
+        );
+        assert!(
+            !c.entries
+                .iter()
+                .any(|e| e.id == "superpowers@superpowers-dev")
         );
         assert!(
             c.marketplaces

@@ -274,12 +274,14 @@ pub fn apply_observed(
                 } else {
                     let mut outcome = run(action);
                     // AC8-40: Claude keeps a plugin by its version, so a new commit at the same
-                    // version is "already at the latest version". Reinstalling picks it up.
+                    // version is "already at the latest version". Reinstalling picks it up. From
+                    // colctl's own marketplace Claude records ~/.colctl's commit, not the plugin's,
+                    // so there's no telling: a moved pin always reinstalls (ACH2-01).
                     if outcome.is_done()
                         && tool == Some(Tool::Claude)
                         && matches!(action, Action::UpdateSource { .. })
-                        && !marketplace.starts_with("colctl-")
-                        && claude_rev(harness, id).is_some_and(|at| at != *rev)
+                        && (marketplace.starts_with("colctl-")
+                            || claude_rev(harness, id).is_some_and(|at| at != *rev))
                     {
                         outcome = run(&Action::Uninstall { id: id.clone() });
                         if outcome.is_done() {

@@ -510,30 +510,25 @@ mod same_version {
         (env, new)
     }
 
-    fn installed_sha(env: &Env) -> String {
-        let v: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(env.home.join(".claude/plugins/installed_plugins.json")).unwrap(),
-        )
-        .unwrap();
-        v["plugins"]["superpowers@superpowers-dev"][0]["gitCommitSha"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string()
-    }
-
     #[test]
     fn ac8_40_a_new_commit_at_the_same_version_still_installs() {
-        let (env, new) = fixture();
+        let (env, _) = fixture();
+        let before = env.log().len();
         let (code, out, err) = env.code(&["approve", "superpowers", "--color", "never"]);
         assert_eq!(code, 0, "{out}{err}");
-        assert_eq!(installed_sha(&env), new);
-        let calls = env.log_args().join("\n");
+        // From colctl's own marketplace Claude records ~/.colctl's commit, not the plugin's, so a
+        // moved pin always reinstalls (ACH2-01).
+        let calls = env.log_args()[before..].join("\n");
         assert!(
-            calls.contains("plugin update superpowers@superpowers-dev"),
+            calls.contains("plugin install superpowers@colctl-superpowers"),
             "{calls}"
         );
         assert!(
-            calls.contains("plugin uninstall superpowers@superpowers-dev"),
+            calls.contains("plugin update superpowers@colctl-superpowers"),
+            "{calls}"
+        );
+        assert!(
+            calls.contains("plugin uninstall superpowers@colctl-superpowers"),
             "{calls}"
         );
         assert_eq!(env.code(&["status"]).0, 0);
@@ -541,14 +536,18 @@ mod same_version {
 
     #[test]
     fn ec8_28_a_reinstall_that_fails_is_retried_by_the_next_sync() {
-        let (env, new) = fixture();
+        let (env, _) = fixture();
         let mut env = env.var("FAKE_CLAUDE_FAIL", "plugin install");
         let (code, out, _) = env.code(&["approve", "superpowers", "--color", "never"]);
         assert_eq!(code, 1, "{out}");
         assert!(out.contains("plugin install"), "{out}");
         env.vars.clear();
         env.ok(&["sync"]);
-        assert_eq!(installed_sha(&env), new);
+        assert!(
+            env.installed(&env.home.join(".claude"))
+                .contains(&"superpowers@colctl-superpowers".to_string())
+        );
+        assert_eq!(env.code(&["status"]).0, 0);
     }
 }
 

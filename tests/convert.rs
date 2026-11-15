@@ -386,7 +386,7 @@ fn ac7_09_approve_installs_it_in_codex() {
     assert_eq!(env.codex_installed(&codex), vec!["qdrant@colctl-qdrant"]);
     assert_eq!(
         env.installed(&env.home.join(".claude")),
-        vec!["qdrant@qdrant"]
+        vec!["qdrant@colctl-qdrant"]
     );
     let package = env.source.join("plugins/.converted/qdrant");
     assert!(package.join(".codex-plugin/plugin.json").is_file());
@@ -523,7 +523,7 @@ fn ac7_15_native_packaging_wins() {
     );
     assert_eq!(
         env.codex_installed(&env.home.join(".codex")),
-        vec!["qdrant@qdrant"]
+        vec!["qdrant@colctl-qdrant"]
     );
     assert!(!env.source.join("plugins/.converted/qdrant").exists());
     assert!(!env.config().contains("convert"), "{}", env.config());

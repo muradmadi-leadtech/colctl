@@ -139,13 +139,23 @@ fn ach2_03_the_docs_say_so() {
 #[test]
 fn ech2_03_a_list_plugin_keeps_the_repos_marketplace() {
     let env = machine();
-    let config = env.config().replace(
-        "[plugins]\nenabled = []",
-        "[plugins]\nenabled = [\"other@superpowers-dev\"]",
-    );
+    let clone = env.source.join("plugins/superpowers");
+    let config = env
+        .config()
+        .replace(
+            "[plugins]\nenabled = []",
+            "[plugins]\nenabled = [\"other@superpowers-dev\"]",
+        )
+        .replace(
+            "[marketplaces]\n",
+            &format!(
+                "[marketplaces]\nsuperpowers-dev = \"{}\"\n",
+                clone.display()
+            ),
+        );
     env.write_config(&config);
-    let (_, out, _) = env.code(&["status", "--all", "--color", "never"]);
-    assert!(out.contains("other@superpowers-dev"), "{out}");
+    let (_, out, err) = env.code(&["status", "--all", "--color", "never"]);
+    assert!(out.contains("other@superpowers-dev"), "{out}{err}");
 }
 
 #[test]
