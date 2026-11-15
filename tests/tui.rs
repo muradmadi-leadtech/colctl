@@ -2516,6 +2516,29 @@ mod rest {
     }
 
     #[test]
+    fn ac9_21_a_connector_opens_from_what_connectors_found() {
+        let env = local_catalog_fixture();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '5');
+        let mut conn = m.catalog.ready().unwrap().plugins[0].clone();
+        conn.name = "gmail".into();
+        conn.ids = vec!["gmail@openai-curated-remote".into()];
+        conn.kind = "connector".into();
+        m.connectors = app::Data::Ready(vec![conn]);
+        m.discover_view = DiscoverView::Connectors;
+        let cmds = press(&mut m, KeyCode::Enter);
+        assert!(cmds.is_empty(), "no colctl show for a connector: {cmds:?}");
+        let Some(Overlay::Detail { title, lines, .. }) = &m.overlay else {
+            panic!("{:?}", m.overlay);
+        };
+        assert_eq!(title, "gmail");
+        assert!(
+            lines[0].contains("gmail@openai-curated-remote"),
+            "{lines:#?}"
+        );
+    }
+
+    #[test]
     fn ac9_21_typing_filters_the_view_showing() {
         let env = local_catalog_fixture();
         let mut m = opened(&env, 110, 32);

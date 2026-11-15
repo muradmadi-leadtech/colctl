@@ -19,6 +19,11 @@ Exit codes: **0** when you quit (the TUI isn't a check; use `colctl status` for 
 reported on the normal screen with how to report it. The terminal is always restored, whether you quit with `q` or
 Ctrl-C, after an error, or after a bug.
 
+It opens on what it showed last time: each fresh status the TUI loads is saved to `~/.colctl/.state/cache/status.json`,
+and the next start draws it at once with `as of 3 min ago ·` on the status line while `colctl status` runs. When the
+fresh one arrives it replaces the saved one. With nothing saved (or a file from another version) it loads as before.
+Nothing is ever written from the saved status: a key that writes acts on what's on disk.
+
 ## Tabs
 
 | Tab | Shows | Actions |

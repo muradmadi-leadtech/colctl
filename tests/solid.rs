@@ -289,7 +289,7 @@ fn ac9_10_the_cache_is_never_committed() {
 }
 
 #[test]
-fn ec9_01_02_03_a_missing_broken_or_misnamed_check_is_a_miss() {
+fn ec9_01_ec9_02_ec9_03_a_missing_broken_or_misnamed_check_is_a_miss() {
     let (env, _, _) = held_source();
     env.ok(&["update"]);
     let path = cached(&env, "sources/superpowers");
@@ -315,6 +315,77 @@ fn ec9_01_02_03_a_missing_broken_or_misnamed_check_is_a_miss() {
     env.run(&["review"]);
     assert_eq!(calls(&log, "diff --raw"), 1);
     assert!(path.is_file());
+}
+
+#[test]
+fn ec9_05_processes_checking_at_once_never_read_half_a_file() {
+    let (env, _, _) = held_source();
+    env.ok(&["update"]);
+    let path = cached(&env, "sources/superpowers");
+    for _ in 0..3 {
+        fs::remove_dir_all(env.source.join(".state/cache")).unwrap();
+        let children: Vec<_> = (0..4)
+            .map(|_| {
+                let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_colctl"));
+                c.env_clear()
+                    .env("HOME", &env.home)
+                    .env("PATH", &env.path)
+                    .current_dir(&env.home)
+                    .arg("review")
+                    .stdout(std::process::Stdio::null());
+                for key in [
+                    "LLVM_PROFILE_FILE",
+                    "CARGO_LLVM_COV",
+                    "CARGO_LLVM_COV_TARGET_DIR",
+                ] {
+                    if let Some(v) = std::env::var_os(key) {
+                        c.env(key, v);
+                    }
+                }
+                c.spawn().unwrap()
+            })
+            .collect();
+        for mut c in children {
+            assert_eq!(c.wait().unwrap().code(), Some(1), "held, as always");
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        serde_json::from_str::<Value>(&text).expect("a whole entry");
+    }
+}
+
+#[test]
+fn ec9_08_a_hold_that_goes_back_is_saved_and_served() {
+    let env = machine();
+    let (repo, url, v1) = env.upstream("superpowers", true, true, Some("superpowers-dev"));
+    env.upstream_commit(&repo, "v2");
+    env.upstream_commit(&repo, "v3");
+    env.ok(&["add", "source", &url]);
+    env.ok(&["update", "superpowers", "--rev", &v1]);
+    let first = String::from_utf8_lossy(&env.run(&["review"]).stdout).into_owned();
+    assert!(first.contains("goes back 2 commits"), "{first}");
+    let log = count_git(&env);
+    let again = String::from_utf8_lossy(&env.run(&["review"]).stdout).into_owned();
+    assert_eq!(again, first);
+    assert_eq!(calls(&log, "diff --raw"), 0, "served from the saved check");
+}
+
+#[test]
+fn ec9_10_a_missing_held_commit_is_an_error_not_a_saved_check() {
+    let (env, _, _) = held_source();
+    env.ok(&["update"]);
+    assert!(cached(&env, "sources/superpowers").is_file());
+    let clone = env.source.join("plugins/superpowers");
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&clone)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    git(&["update-ref", "-d", "refs/colctl/candidate"]);
+    let (_, out, err) = env.code(&["review", "--json"]);
+    assert!(format!("{out}{err}").contains("is missing"), "{out}{err}");
 }
 
 #[test]
@@ -466,6 +537,27 @@ mod saved_status {
             !screen.contains("as of") || screen.contains("colctl status"),
             "{screen}"
         );
+    }
+
+    #[test]
+    fn ec9_06_an_update_while_the_tui_shows_a_saved_status() {
+        let (env, _, _) = held_source();
+        let c = ctx(&env);
+        status::save(&c, &status::snapshot(&c, None).unwrap());
+        let (saved, _) = status::last(&c).unwrap();
+        assert!(saved.held.is_empty());
+        let mut m = Model::new(PLAIN, 100, 30);
+        m.show_saved(saved, 60);
+        let start = m.start();
+        env.ok(&["update"]);
+        for cmd in start {
+            for msg in colctl::tui::worker::run_now(&c, &cmd, 80) {
+                update(&mut m, msg);
+            }
+        }
+        assert!(m.saved.is_none(), "the fresh status replaced it");
+        assert_eq!(m.snapshot.ready().unwrap().held.len(), 1);
+        assert_eq!(m.held.ready().map(Vec::len), Some(1));
     }
 
     #[test]

@@ -100,6 +100,21 @@ no flags isn't "safe", and one with flags isn't "bad". Read the flagged files fi
 
 Deleted files are never flagged.
 
+When more than one file's only flag is `allowed-tools` (a plugin whose skills each say which tools they use), they
+share one line: `12 files  declare allowed-tools (Read, Grep; …); -v lists them`. With `-v` each file has its own
+line again, and `--json` always lists a flag per file. The recommendation doesn't change.
+
+## Saved checks
+
+Reading a held version means reading every changed file, which took 14 s for two 50-commit updates. So the check is
+saved, once, when [`update`](update.md) or [`refresh`](refresh.md) holds the version, and `status`, `review` and the
+TUI read it back. It lives in `~/.colctl/.state/cache/reviews/`, one file per held version.
+
+A saved check is used only for exactly what was held: the same pin and held commit (or the same snapshot of a skill
+or agent), written by the same colctl version with the same risk rules. Anything else is checked again and saved
+over. Approve, reject and a new hold forget the old check. The diff is never saved: `review <name>` reads it from git
+each time. Deleting the folder is always safe; the next command checks again.
+
 ## Refusals
 
 | Case | Shown as |
