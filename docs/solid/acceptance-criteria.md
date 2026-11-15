@@ -88,13 +88,15 @@ Then no path under .state/cache is in the commit
 ```gherkin
 Given a saved status from an earlier run
 When colctl opens the TUI and the fresh snapshot takes 2 s
-Then the first frame shows the saved profiles, items and verdict, with "as of <age> · refreshing" on the status line
+Then the first frame shows the saved profiles, items and verdict, with "as of <age> ·" before the spinner and
+  "colctl status" on the status line
 And when the fresh snapshot arrives it replaces the saved one and the age goes away
 ```
 
 **AC9-12 No saved status falls back to today's behaviour**
 ```gherkin
-Given no .state/cache/status.json, or one from another colctl version, or one that doesn't parse
+Given the TUI saves each fresh status to .state/cache/status.json (colctl status itself writes nothing)
+And no such file, or one from another colctl version, or one that doesn't parse
 When the TUI opens
 Then it shows the loading state it shows in 2.5
 ```
@@ -169,10 +171,10 @@ And with nothing to adopt, a says "Nothing in <profile> that colctl doesn't alre
 **AC9-21 Discover's other views**
 ```gherkin
 Given the Discover tab
-When the user presses v
-Then the view cycles Plugins → Developers → Marketplaces → Connectors → Plugins, and the title says which
+When the user presses Ctrl-V (letters search in Discover, so the key needs Ctrl)
+Then the view cycles Plugins → Developers → Marketplaces → Connectors → Plugins, and the header says which
 And type-to-search filters whichever view is showing
-And in Marketplaces, u asks to refresh them and runs Job::MarketplaceRefresh
+And in Marketplaces, ⏎ asks to refresh them and runs Job::MarketplaceRefresh
 And in Developers, ⏎ on a developer shows their plugins in Plugins
 ```
 
@@ -222,12 +224,8 @@ Then each is written to a temporary name and renamed into place, and the suite p
   stress job
 ```
 
-**AC9-28 connectors shows no empty fields**
-```gherkin
-Given a connector with no description or no category
-When connectors runs
-Then the missing field is left out of the row and of --json, instead of printed empty
-```
+~~AC9-28 connectors shows no empty fields~~ — _dropped in Generate._ A connector row already leaves out an empty
+description; leaving fields out of `--json` would change its shape, which S7 rules out.
 
 **AC9-29 sync's wording**
 ```gherkin
@@ -235,12 +233,9 @@ When sync finishes with a profile it couldn't fix
 Then the verdict names what's wrong and the command that fixes it, instead of "needs attention"
 ```
 
-**AC9-30 status names adopt for a plugin colctl didn't install**
-```gherkin
-Given a Claude profile where a plugin colctl manages is installed from another marketplace
-When status runs
-Then its hint is "colctl adopt <profile>" with the reason, not "colctl sync"
-```
+~~AC9-30 status names adopt for a plugin colctl didn't install~~ — _dropped in Generate._ The case behind it (qdrant
+installed as `qdrant@qdrant`) was fixed by 2.5.0's re-pointing and reinstall (#114); the real profiles show it in
+sync, and no state is left where `status` suggests the wrong fix.
 
 **AC9-31 marketplace with no subcommand**
 ```gherkin

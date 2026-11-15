@@ -84,7 +84,8 @@ The docs follow [Diataxis](https://diataxis.fr):
   [Where the catalogs come from](docs/explanation/catalogs.md) ·
   [How colctl talks to you](docs/explanation/how-colctl-talks.md) ·
   [Converting plugins](docs/explanation/converting-plugins.md) ·
-  [The TUI and the CLI](docs/explanation/the-tui-and-the-cli.md)
+  [The TUI and the CLI](docs/explanation/the-tui-and-the-cli.md) ·
+  [Why checks are saved](docs/explanation/saved-checks.md)
 
 colctl is built in [FORGE](https://github.com/scottfeltham/forge-framework) cycles. Each cycle's intent (PRD,
 architecture, acceptance criteria) is in `docs/prd/`, `docs/tasks/` and `docs/<cycle>/`.

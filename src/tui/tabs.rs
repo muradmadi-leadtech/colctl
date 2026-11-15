@@ -64,6 +64,33 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        // A connector isn't in any catalog `show` reads: its details are what `connectors` found.
+        (Tab::Discover, Action::Open) if m.discover_view == app::DiscoverView::Connectors => {
+            if let Some(p) = focused_plugin(m) {
+                let mut lines = vec![format!("{}  connector", escape(&p.ids[0]))];
+                if let Some(v) = &p.version {
+                    lines.push(format!("version  {}", escape(v)));
+                }
+                if !p.description.is_empty() {
+                    lines.push(String::new());
+                    lines.push(escape(&p.description));
+                }
+                if !p.installed.is_empty() {
+                    let into: Vec<String> = p.installed.iter().map(|h| escape(h)).collect();
+                    lines.push(String::new());
+                    lines.push(format!("✓ installed in {}", into.join(", ")));
+                }
+                lines.push(String::new());
+                lines.push(escape(&p.add));
+                m.overlay = Some(Overlay::Detail {
+                    title: p.name.clone(),
+                    lines,
+                    scroll: 0,
+                    held: None,
+                });
+            }
+            Vec::new()
+        }
         (Tab::Discover, Action::Open) if m.discover_view == app::DiscoverView::Marketplaces => {
             if focused_marketplace(m).is_none() {
                 return Vec::new();
@@ -1367,6 +1394,16 @@ fn discover_head(m: &Model, t: Theme) -> Vec<Line<'static>> {
     vec![Line::from(views), Line::from(search)]
 }
 
+/// What an empty Discover view says: nothing found, or nothing matching the search.
+fn none_match(t: Theme, noun: &str, q: &str) -> Line<'static> {
+    let text = if q.is_empty() {
+        format!("No {noun} found")
+    } else {
+        format!("No {noun} match \"{q}\"")
+    };
+    Line::styled(text, t.style(Token::Muted))
+}
+
 fn data_lines<T>(t: Theme, d: &Data<T>, what: &str) -> Option<Vec<Line<'static>>> {
     match d {
         Data::Ready(_) => None,
@@ -1440,10 +1477,7 @@ fn discover(m: &Model, t: Theme) -> Body {
             Body {
                 header,
                 rows,
-                empty: Some(Line::styled(
-                    format!("No developers match \"{q}\""),
-                    t.style(Token::Muted),
-                )),
+                empty: Some(none_match(t, "developers", &q)),
                 skip: Vec::new(),
             }
         }
@@ -1494,10 +1528,7 @@ fn discover(m: &Model, t: Theme) -> Body {
             Body {
                 header,
                 rows,
-                empty: Some(Line::styled(
-                    format!("No marketplaces match \"{q}\""),
-                    t.style(Token::Muted),
-                )),
+                empty: Some(none_match(t, "marketplaces", &q)),
                 skip: Vec::new(),
             }
         }
@@ -1519,10 +1550,7 @@ fn discover(m: &Model, t: Theme) -> Body {
             Body {
                 header,
                 rows,
-                empty: Some(Line::styled(
-                    format!("No connectors match \"{q}\""),
-                    t.style(Token::Muted),
-                )),
+                empty: Some(none_match(t, "connectors", &q)),
                 skip: Vec::new(),
             }
         }

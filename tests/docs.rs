@@ -173,6 +173,7 @@ fn defined_ids() -> BTreeSet<String> {
         ("convert", "AC7", "EC7"),
         ("tui", "AC8", "EC8"),
         ("reserved-marketplace-names", "ACH1", "ECH1"),
+        ("solid", "AC9", "EC9"),
     ] {
         for (file, prefix, id) in [
             ("acceptance-criteria.md", format!("**{ac}-"), ac),
@@ -220,7 +221,7 @@ fn tested_ids() -> BTreeSet<String> {
             for pair in parts.windows(2) {
                 if [
                     "ac", "ec", "ac2", "ec2", "ac3", "ec3", "ac4", "ec4", "ac5", "ec5", "ac6",
-                    "ec6", "ac7", "ec7", "ac8", "ec8", "ach1", "ech1",
+                    "ec6", "ac7", "ec7", "ac8", "ec8", "ach1", "ech1", "ac9", "ec9",
                 ]
                 .contains(&pair[0])
                     && pair[1].len() == 2
@@ -257,6 +258,8 @@ fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_ac6_30_ac8_31_every_criterion_and_edge_case
         ("EC8-", 29),
         ("ACH1-", 2),
         ("ECH1-", 1),
+        ("AC9-", 30),
+        ("EC9-", 17),
     ] {
         assert_eq!(
             defined.iter().filter(|i| i.starts_with(prefix)).count(),
@@ -453,4 +456,19 @@ fn ac8_31_docs_cover_the_tui() {
     assert!(read("docs/reference/search.md").contains("letters appear in that order"));
     assert!(read("docs/reference/commands.md").contains("[tui](tui.md)"));
     assert!(read("README.md").contains("full-screen view"));
+}
+
+#[test]
+fn ac9_01_ac9_32_the_measure_is_recorded_and_the_docs_cover_what_changed() {
+    let review = read("docs/solid/cycle-review.md");
+    assert!(review.contains("2 227"), "the git processes counted");
+    assert!(review.contains("14.9 s"), "the time before");
+    let tui = read("docs/reference/tui.md");
+    assert!(tui.contains("as of 3 min ago"));
+    assert!(tui.contains("all actions"));
+    let r = read("docs/reference/review.md");
+    assert!(r.contains("## Saved checks"));
+    assert!(r.contains("allowed-tools ("));
+    assert!(read("docs/explanation/saved-checks.md").contains("Never stale"));
+    assert!(read("README.md").contains("docs/explanation/saved-checks.md"));
 }
