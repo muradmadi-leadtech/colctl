@@ -8,10 +8,10 @@ _Cycle 9 · Evaluate · 2026-11-15_
 | **Run mode** | Focus, Orchestrate and Refine were confirmed with the owner phase by phase. Generate ran **autonomously** under the policy in `.forge/context.md` |
 | **Intent** | [PRD](../prd/solid.md): make what exists fast and complete, so the daily loop never makes you wait or drop to the CLI |
 | **Scope delivered** | S1–S7. AC9-01 – 32 (30 kept, 2 dropped on purpose, below) and EC9-01 – 17 each have a named test |
-| **Released** | v2.6.0 |
+| **Released** | [v2.6.0](https://github.com/muradmadi-leadtech/colctl/releases/tag/v2.6.0) |
 | **PRs** | #127 plan · #128 T1+T2 saved checks · #130 T3 saved status · #131 T4 core jobs · #132 T5 screens · #133 T6 palette · #134 T7 follow-ups · #135 T8 docs, smoke fixes · release PR |
 | **Production impact** | None on this machine. Real profiles were only read; the smoke test ran on a copy with credentials and sessions removed, deleted afterwards |
-| **Disposition** | _Yours_ |
+| **Disposition** | **Accept** (owner, 2026-11-15) |
 
 ## Where the 14 seconds went (T1, AC9-01)
 
@@ -107,13 +107,15 @@ written with the fix.
 ## Autonomy gate: what was not done
 
 - colctl 2.6.0 has **not** run on your real profiles. Nothing was written there.
-- The disposition is yours.
 
 ## New follow-ups
 
 - databricks's update flags 123 files, nearly all `script: new script`. The same grouping as `allowed-tools` could
   fold "new script" files under one folder into one line.
 - The palette lists "Overview · ⏎ · run", which means little out of context; entries could say what ⏎ does there.
+- Marketplace names are mixed (owner, at accept): a source whose repo ships its own marketplace keeps that name
+  (`qdrant`, `superpowers-dev`), while a wrapped one is `colctl-<source>`. Naming every source's marketplace
+  `colctl-<source>` would make it obvious which are colctl's. Changing it reinstalls each such plugin once.
 
 ## Reviewer checklist
 
