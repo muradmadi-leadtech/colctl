@@ -306,8 +306,10 @@ pub fn apply_observed(
                 Outcome::Done
             }
         };
+        // AC9-26: paths under home read as ~/….
+        let home = format!("{}/", ctx.home.display());
         results.push(Applied {
-            description: action.describe(tool),
+            description: action.describe(tool).replace(&home, "~/"),
             outcome,
             action: action.clone(),
             took: started.elapsed(),

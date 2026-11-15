@@ -792,9 +792,15 @@ fn flagged_files(r: &Review) -> usize {
 
 /// Risk flags grouped per file (AC6-22): kinds joined with " · ", files ordered by their most
 /// serious kind, then path.
-fn flag_rows(r: &Review) -> Vec<(String, String)> {
+fn flag_rows(r: &Review, verbose: bool) -> Vec<(String, String)> {
+    // AC9-25: files that only declare allowed-tools are one line, unless -v.
+    let grouped = if verbose {
+        Vec::new()
+    } else {
+        crate::risk::allowed_tools_only(&r.flags)
+    };
     let mut by_file: Vec<(String, Vec<&crate::risk::Flag>)> = Vec::new();
-    for f in &r.flags {
+    for f in r.flags.iter().filter(|f| !grouped.contains(&f.path)) {
         match by_file.iter_mut().find(|(p, _)| *p == f.path) {
             Some((_, list)) => list.push(f),
             None => by_file.push((f.path.clone(), vec![f])),
@@ -823,6 +829,10 @@ fn flag_rows(r: &Review) -> Vec<(String, String)> {
                 format!("{kinds}: {}", escape(&reasons.join("; "))),
             )
         })
+        .chain((!grouped.is_empty()).then(|| {
+            let (what, why) = crate::risk::allowed_tools_line(&r.flags, &grouped);
+            (what, escape(&why))
+        }))
         .collect()
 }
 
@@ -947,7 +957,7 @@ fn detail_lines(ctx: &Ctx, v: &View) -> Vec<String> {
         }
     }
     section(&mut lines, "Risk flags");
-    let rows = flag_rows(r);
+    let rows = flag_rows(r, caps.verbose);
     if rows.is_empty() {
         lines.push(format!("  {} none", crate::ui::style::mark(Token::Info, c)));
     } else {
@@ -1021,7 +1031,7 @@ fn detail_lines(ctx: &Ctx, v: &View) -> Vec<String> {
                 ctx,
                 &super::convert::summary(package),
             ));
-            for (path, what) in flag_rows(cr) {
+            for (path, what) in flag_rows(cr, ctx.out.caps.verbose) {
                 lines.push(format!(
                     "  {}  {}",
                     crate::ui::style::paint(&escape(&path), Token::Name, c),

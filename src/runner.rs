@@ -75,7 +75,7 @@ impl Cmd {
         }
         // Its own process group, so a timeout kills everything it started (EC-25).
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
-        let mut child = command.spawn()?;
+        let mut child = spawn_retrying(|| command.spawn())?;
         let stdout = drain(child.stdout.take());
         let stderr = drain(child.stderr.take());
         let started = Instant::now();
@@ -127,9 +127,19 @@ fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<S
 
 /// Finds an executable called `name` on `path_var`.
 /// Runs `spawn`, again after a moment when the executable is busy (ETXTBSY, AC9-27): on Linux a
-/// program just written can't run while another thread's fork still holds it open. Stub.
+/// program just written can't run while another thread's fork still holds it open.
 pub fn spawn_retrying<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
-    spawn()
+    const ETXTBSY: i32 = 26;
+    let mut tries = 0;
+    loop {
+        match spawn() {
+            Err(e) if e.raw_os_error() == Some(ETXTBSY) && tries < 10 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(20 * tries));
+            }
+            other => return other,
+        }
+    }
 }
 
 pub fn find_program(name: &str, path_var: &OsStr) -> Option<PathBuf> {

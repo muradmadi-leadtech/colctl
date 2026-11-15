@@ -787,10 +787,10 @@ mod follow_ups {
             .split("Risk flags")
             .nth(1)
             .unwrap_or_default()
-            .lines()
-            .take_while(|l| !l.trim().is_empty() || l.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
+            .split("Commits")
+            .next()
+            .unwrap_or_default()
+            .to_string();
         assert!(
             Env::words(&out).contains("12 files declare allowed-tools"),
             "{out}"

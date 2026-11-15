@@ -316,18 +316,7 @@ pub(super) fn report(
             caps,
             Token::Attention,
             &format!("Synced {}", plural(usable, "profile")),
-            &[
-                plural(changes, "change"),
-                format!(
-                    "{} {} attention",
-                    attention.len() + unusable,
-                    if attention.len() + unusable == 1 {
-                        "needs"
-                    } else {
-                        "need"
-                    }
-                ),
-            ],
+            &[plural(changes, "change"), left_over(&attention, unusable)],
         ))
     } else if lead.is_empty() {
         Some(if changes == 0 {
@@ -383,6 +372,16 @@ pub(super) fn report(
         lines.extend(verdict);
     }
     lines
+}
+
+/// What sync couldn't fix, for its verdict (AC9-29): the one thing and its fix, or how many.
+fn left_over(attention: &[Attention], unusable: usize) -> String {
+    match (attention, unusable) {
+        ([a], 0) if !a.fix.is_empty() => escape(&format!("{} {} → {}", a.name, a.what, a.fix)),
+        ([a], 0) => escape(&format!("{} {}", a.name, a.what)),
+        ([], 1) => "1 profile can't be used".into(),
+        _ => format!("{} still need you", attention.len() + unusable),
+    }
 }
 
 /// One line per profile: its mark, name and outcomes, on one line when they fit, else one outcome per

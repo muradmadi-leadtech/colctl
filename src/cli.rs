@@ -866,6 +866,15 @@ fn parse_error(err: &clap::Error, words: &[String], out: &crate::ui::Out) -> i32
         }
         return 0;
     }
+    // A command that needs a subcommand, given none, shows its help (AC9-31).
+    if err.kind() == clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand {
+        if out.caps.color_out {
+            out.raw(&err.render().ansi().to_string());
+        } else {
+            out.raw(&err.render().to_string());
+        }
+        return EXIT_USAGE;
+    }
     let text = err.render().to_string();
     let mut what = String::new();
     let mut hint = None;
