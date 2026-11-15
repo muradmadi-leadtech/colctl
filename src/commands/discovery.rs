@@ -485,12 +485,9 @@ pub fn marketplace_refresh(ctx: &Ctx, dry_run: bool) -> Result<i32, CliError> {
 
 /// `colctl connectors` (AC5-21, EC5-15, EC5-16): Codex's remote catalog, one call per profile,
 /// in parallel.
-pub fn connectors(
-    ctx: &Ctx,
-    terms: &[String],
-    limit: usize,
-    as_json: bool,
-) -> Result<i32, CliError> {
+/// Codex's app connectors from every Codex profile, merged, and a warning per profile that
+/// couldn't list them. Shared by `colctl connectors` and the TUI (AC9-15).
+pub(crate) fn connector_plugins(ctx: &Ctx) -> Result<(Vec<Plugin>, Vec<String>), CliError> {
     let ws = load(ctx)?;
     let program = runner::find_program("codex", &ctx.path_var)
         .ok_or_else(|| CliError::usage("connectors come from codex, and it isn't on PATH"))?;
@@ -551,12 +548,21 @@ pub fn connectors(
             Err(e) => warnings.push(format!("{harness}: {e}")),
         }
     }
+    Ok((search::merge(&entries), warnings))
+}
+
+pub fn connectors(
+    ctx: &Ctx,
+    terms: &[String],
+    limit: usize,
+    as_json: bool,
+) -> Result<i32, CliError> {
+    let (all, warnings) = connector_plugins(ctx)?;
     if !as_json {
         for w in &warnings {
             ctx.out.warn(&escape(w));
         }
     }
-    let all = search::merge(&entries);
     let query = Query {
         terms: terms.to_vec(),
         limit,

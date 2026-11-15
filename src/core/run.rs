@@ -65,6 +65,22 @@ pub enum Job {
     /// `colctl add …`: what a catalog entry says to run (`colctl add plugin <id>`, `colctl add
     /// source <id>`), without the leading `colctl`.
     Add(Vec<String>),
+    /// `colctl rm <kind> <name> [--codex]`
+    Rm {
+        kind: String,
+        name: String,
+        codex: bool,
+    },
+    /// `colctl adopt <profile> [<item>]`, once per item; everything when `items` is empty.
+    Adopt { profile: String, items: Vec<String> },
+    /// `colctl convert <source>`
+    Convert(String),
+    /// `colctl convert <source> --undo`
+    ConvertUndo(String),
+    /// `colctl refresh [<items>]`
+    Refresh(Vec<String>),
+    /// `colctl marketplace refresh`
+    MarketplaceRefresh,
 }
 
 impl Job {
@@ -85,8 +101,63 @@ impl Job {
             Job::Approve(n) => format!("colctl approve{}", names(n)),
             Job::Reject(n) => format!("colctl reject{}", names(n)),
             Job::Add(words) => format!("colctl {}", words.join(" ")),
+            Job::Adopt { profile, items } if items.len() > 1 => {
+                format!("colctl adopt {profile} {}", items.join(", "))
+            }
+            other => format!("colctl {}", other.words().join(" ")),
         }
     }
+
+    /// The command as words after `colctl`, for the jobs that run through the CLI's own dispatch.
+    fn words(&self) -> Vec<String> {
+        let w = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        match self {
+            Job::Rm { kind, name, codex } => {
+                let mut v = w(&["rm", kind, name]);
+                if *codex {
+                    v.push("--codex".into());
+                }
+                v
+            }
+            Job::Adopt { profile, items } => {
+                let mut v = w(&["adopt", profile]);
+                if let Some(item) = items.first() {
+                    v.extend(item.split_whitespace().map(String::from));
+                }
+                v
+            }
+            Job::Convert(s) => w(&["convert", s]),
+            Job::ConvertUndo(s) => w(&["convert", s, "--undo"]),
+            Job::Refresh(items) => {
+                let mut v = w(&["refresh"]);
+                v.extend(items.iter().cloned());
+                v
+            }
+            Job::MarketplaceRefresh => w(&["marketplace", "refresh"]),
+            Job::Add(words) => words.clone(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// `colctl adopt <profile> <item>` for each item; one that can't be adopted (gone since it was
+/// listed, EC9-11) is reported with the reason and the rest still run.
+fn adopt_each(ctx: &Ctx, profile: &str, items: &[String]) -> i32 {
+    let mut exit = 0;
+    for item in items {
+        let job = Job::Adopt {
+            profile: profile.to_string(),
+            items: vec![item.clone()],
+        };
+        match crate::cli::dispatch_words(ctx, &job.words()) {
+            Ok(code) => exit = exit.max(code),
+            Err(e) => {
+                exit = exit.max(e.code);
+                ctx.out.line(format!("✗ {item}: {}", e.message));
+            }
+        }
+    }
+    exit
 }
 
 /// Runs `job` as its CLI command would, without printing: lines are rendered at `width` columns,
@@ -113,6 +184,8 @@ pub fn run(
             "\"{}\" isn't an add command",
             words.join(" ")
         ))),
+        Job::Adopt { profile, items } if items.len() > 1 => Ok(adopt_each(&ctx, profile, items)),
+        other => crate::cli::dispatch_words(&ctx, &other.words()),
     }?;
     Ok(Report {
         exit,
