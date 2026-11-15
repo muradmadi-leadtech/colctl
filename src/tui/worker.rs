@@ -77,6 +77,16 @@ pub fn load(ctx: &Ctx, what: &Load, width: usize) -> Loaded {
             title: id.clone(),
             lines: guarded(|| discover::show(ctx, id, width)),
         },
+        Load::ConvertPlan(source) => Loaded::ConvertPlan {
+            source: source.clone(),
+            lines: guarded(|| run::preview(ctx, &Job::Convert(source.clone()), width)),
+        },
+        Load::Adopt(profile) => Loaded::Adopt {
+            profile: profile.clone(),
+            list: guarded(|| crate::core::adopt::candidates(ctx, profile)),
+        },
+        Load::Marketplaces => Loaded::Marketplaces(guarded(|| discover::marketplaces(ctx))),
+        Load::Connectors => Loaded::Connectors(guarded(|| discover::connectors(ctx))),
     }
 }
 

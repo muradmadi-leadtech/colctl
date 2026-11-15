@@ -49,6 +49,36 @@ impl Tab {
     }
 }
 
+/// What Discover lists (AC9-21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiscoverView {
+    #[default]
+    Plugins,
+    Developers,
+    Marketplaces,
+    Connectors,
+}
+
+impl DiscoverView {
+    pub fn title(self) -> &'static str {
+        match self {
+            DiscoverView::Plugins => "Plugins",
+            DiscoverView::Developers => "Developers",
+            DiscoverView::Marketplaces => "Marketplaces",
+            DiscoverView::Connectors => "Connectors",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            DiscoverView::Plugins => DiscoverView::Developers,
+            DiscoverView::Developers => DiscoverView::Marketplaces,
+            DiscoverView::Marketplaces => DiscoverView::Connectors,
+            DiscoverView::Connectors => DiscoverView::Plugins,
+        }
+    }
+}
+
 /// How the TUI was opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Options {
@@ -67,6 +97,18 @@ pub enum Loaded {
         title: String,
         lines: Result<Vec<String>, CliError>,
     },
+    /// What `colctl convert <source>` would do (AC9-18).
+    ConvertPlan {
+        source: String,
+        lines: Result<Vec<String>, CliError>,
+    },
+    /// What `colctl adopt <profile>` would take (AC9-20).
+    Adopt {
+        profile: String,
+        list: Result<Vec<crate::core::adopt::AdoptCandidate>, CliError>,
+    },
+    Marketplaces(Result<Vec<crate::catalog::Marketplace>, CliError>),
+    Connectors(Result<Vec<crate::search::Plugin>, CliError>),
 }
 
 /// Progress from a running job.
@@ -111,6 +153,14 @@ pub enum Load {
     Catalog,
     Review(String),
     Show(String),
+    /// `colctl convert <source> --dry-run`, before asking (AC9-18).
+    ConvertPlan(String),
+    /// What `colctl adopt <profile>` would take (AC9-20).
+    Adopt(String),
+    /// `colctl marketplace list` (AC9-21).
+    Marketplaces,
+    /// `colctl connectors` (AC9-21).
+    Connectors,
 }
 
 impl Load {
@@ -122,6 +172,10 @@ impl Load {
             Load::Catalog => "colctl search".into(),
             Load::Review(n) => format!("colctl review {n}"),
             Load::Show(id) => format!("colctl show {id}"),
+            Load::ConvertPlan(s) => format!("colctl convert {s} --dry-run"),
+            Load::Adopt(p) => format!("colctl adopt {p} --dry-run"),
+            Load::Marketplaces => "colctl marketplace list".into(),
+            Load::Connectors => "colctl connectors".into(),
         }
     }
 
@@ -131,6 +185,10 @@ impl Load {
             | (Load::Held, Loaded::Held(_))
             | (Load::Catalog, Loaded::Catalog(_)) => true,
             (Load::Review(n) | Load::Show(n), Loaded::Detail { title, .. }) => n == title,
+            (Load::ConvertPlan(n), Loaded::ConvertPlan { source, .. }) => n == source,
+            (Load::Adopt(n), Loaded::Adopt { profile, .. }) => n == profile,
+            (Load::Marketplaces, Loaded::Marketplaces(_))
+            | (Load::Connectors, Loaded::Connectors(_)) => true,
             _ => false,
         }
     }
@@ -231,6 +289,13 @@ pub enum Overlay {
         cause: Option<String>,
         hint: Option<String>,
     },
+    /// A checklist: what to adopt from `profile` (AC9-20).
+    Pick {
+        title: String,
+        profile: String,
+        items: Vec<(crate::core::adopt::AdoptCandidate, bool)>,
+        selected: usize,
+    },
 }
 
 /// One profile's (or source's) row in the progress panel.
@@ -272,6 +337,10 @@ pub struct Model {
     pub saved: Option<Option<u64>>,
     pub held: Data<Vec<HeldSummary>>,
     pub catalog: Data<Catalog>,
+    /// What Discover lists, and the lists it loads on demand (AC9-21).
+    pub discover_view: DiscoverView,
+    pub marketplaces: Data<Vec<crate::catalog::Marketplace>>,
+    pub connectors: Data<Vec<crate::search::Plugin>>,
     pub cursors: [Cursor; 5],
     pub filters: [Input; 5],
     pub overlay: Option<Overlay>,
@@ -321,6 +390,9 @@ impl Model {
             saved: None,
             held: Data::Loading,
             catalog: Data::Loading,
+            discover_view: DiscoverView::Plugins,
+            marketplaces: Data::Loading,
+            connectors: Data::Loading,
             cursors: [Cursor::default(); 5],
             filters: Default::default(),
             overlay: None,
@@ -396,6 +468,7 @@ impl Model {
             Some(Overlay::Confirm { .. } | Overlay::ConfirmQuit) => vec![Scope::Confirm],
             Some(Overlay::Detail { .. }) => vec![Scope::Detail, Scope::Global],
             Some(Overlay::Help | Overlay::Error { .. }) => vec![Scope::Global],
+            Some(Overlay::Pick { .. }) => vec![Scope::Pick, Scope::Global],
             None => vec![Scope::Tab(self.tab), Scope::Global],
         }
     }
@@ -405,7 +478,7 @@ impl Model {
         super::view::rows(self).len()
     }
 
-    fn toast(&mut self, text: impl Into<String>, sticky: bool) {
+    pub fn toast(&mut self, text: impl Into<String>, sticky: bool) {
         self.toast = Some(Toast {
             text: text.into(),
             until: (!sticky).then_some(self.now + TOAST_MS),
@@ -537,11 +610,51 @@ fn loaded(m: &mut Model, l: Loaded) -> Vec<Cmd> {
             }
             Err(e) => m.error(&e),
         },
+        Loaded::ConvertPlan { source, lines } => match lines {
+            Ok(mut lines) => {
+                lines.push(String::new());
+                lines.push(format!("Runs colctl convert {source} and syncs."));
+                ask(
+                    m,
+                    format!("Convert {source} for Codex"),
+                    lines.iter().map(|l| crate::review::escape(l)).collect(),
+                    Job::Convert(source),
+                );
+            }
+            Err(e) => m.error(&e),
+        },
+        Loaded::Adopt { profile, list } => match list {
+            Ok(list) if list.is_empty() => m.toast(
+                format!("· Nothing in {profile} that colctl doesn't already have"),
+                false,
+            ),
+            Ok(list) => {
+                m.overlay = Some(Overlay::Pick {
+                    title: format!("Adopt from {profile}"),
+                    profile,
+                    items: list.into_iter().map(|c| (c, true)).collect(),
+                    selected: 0,
+                });
+            }
+            Err(e) => m.error(&e),
+        },
+        Loaded::Marketplaces(r) => m.marketplaces = r.map_or_else(Data::Failed, Data::Ready),
+        Loaded::Connectors(r) => m.connectors = r.map_or_else(Data::Failed, Data::Ready),
     }
     let (len, rows) = (m.list_len(), m.body_rows());
     m.cursor_mut().fit(len, rows);
     settle(m, 1);
     Vec::new()
+}
+
+/// Runs `job` now, without asking (it only holds or reads), unless another is running.
+pub fn begin(m: &mut Model, job: Job) -> Vec<Cmd> {
+    if let Some(run) = &m.job {
+        let text = format!("Wait for {} to finish", run.job.command());
+        m.toast(text, false);
+        return Vec::new();
+    }
+    start(m, job)
 }
 
 fn job_event(m: &mut Model, e: JobEvent) -> Vec<Cmd> {
@@ -742,6 +855,12 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             if let Some(Overlay::Detail { lines, scroll, .. }) = &mut m.overlay {
                 let max = lines.len().saturating_sub(1);
                 *scroll = (*scroll as isize + by).clamp(0, max as isize) as usize;
+            } else if let Some(Overlay::Pick {
+                items, selected, ..
+            }) = &mut m.overlay
+            {
+                let max = items.len().saturating_sub(1);
+                *selected = (*selected as isize + by).clamp(0, max as isize) as usize;
             } else {
                 m.cursor_mut().move_by(by, len, rows);
                 settle(m, by.signum());
@@ -788,7 +907,13 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
         | Action::Add
         | Action::NextFile
         | Action::PrevFile
-        | Action::FullReview => return super::tabs::act(m, action),
+        | Action::FullReview
+        | Action::Remove
+        | Action::Convert
+        | Action::Refresh
+        | Action::Adopt
+        | Action::Toggle
+        | Action::NextView => return super::tabs::act(m, action),
     }
     Vec::new()
 }

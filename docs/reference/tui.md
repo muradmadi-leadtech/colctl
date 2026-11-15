@@ -24,10 +24,10 @@ Ctrl-C, after an error, or after a bug.
 | Tab | Shows | Actions |
 |---|---|---|
 | **Overview** | `colctl status`'s verdict; a menu (sync every profile, check for updates, review what's held, find a plugin, look through every item); one line per profile with what it has; and **Needs you**: each problem with its fix | ⏎ runs the focused menu entry or fix (a review opens it; sync and update ask first; anything else says which command to run); `s` sync, `u` check for updates |
-| **Profiles** | Every profile with its path and what it has | ⏎ lists a profile's items, like `status --harness <name> --all`; `s` syncs only that profile; `/` filters |
-| **Items** | Every instructions file, skill, agent, plugin and source plugin once, with its state in each profile (numbered columns; the legend is above) | ⏎ shows each profile's state, where the item lives there, and its fix; `/` filters |
+| **Profiles** | Every profile with its path and what it has | ⏎ lists a profile's items, like `status --harness <name> --all`; `s` syncs only that profile; `a` lists what `colctl adopt <profile>` would take, all ticked (space unticks, ⏎ asks, then adopts the ticked ones); `/` filters |
+| **Items** | Every instructions file, skill, agent, plugin and source plugin once, with its state in each profile (numbered columns; the legend is above) | ⏎ shows each profile's state, where the item lives there, and its fix; `x` removes it everywhere (`colctl rm`, after asking); `c` on a source converts it for Codex after showing what the package would carry, or undoes a conversion; `f` on a taken-over skill or agent holds what changed where it came from (`colctl refresh`); `/` filters |
 | **Review** | What's held for review, as `colctl review` lists it; the count is on the tab | ⏎ shows a held version at a glance: what changed, the recommendation, anything suspicious, what runs code; `d` shows everything `colctl review <name>` prints, diff included; `a` approve, `x` reject, `A` approve all, `u` check for updates |
-| **Discover** | Every plugin every catalog knows, ranked as `colctl search` ranks them | type to search (every key but `?` goes to the search; Ctrl-C quits); ⏎ shows what `colctl show <id>` prints, and `a` there adds it as its add command says; Esc clears the search |
+| **Discover** | Every plugin every catalog knows, ranked as `colctl search` ranks them. Ctrl-V switches to **Developers** (`colctl developers`), **Marketplaces** (`colctl marketplace list`) and **Connectors** (`colctl connectors`), then back | In Developers ⏎ lists a developer's plugins; in Marketplaces ⏎ asks to refresh them (`colctl marketplace refresh`); type to search (every key but `?` goes to the search; Ctrl-C quits); ⏎ shows what `colctl show <id>` prints, and `a` there adds it as its add command says; Esc clears the search |
 
 The tab bar marks the current tab. `Overview !` means something needs you, and `Review !2` means two versions are
 held.
@@ -45,8 +45,13 @@ held.
 | type | Discover | search; Esc clears it; ←→ still switch tabs and ctrl-c quits |
 | r | everywhere | reload from disk |
 | s | Overview, Profiles | sync |
+| x | Items | remove |
+| c | Items | convert a source for Codex, or undo it |
+| f | Items | refresh a taken-over skill or agent |
+| space | adopt's checklist | tick, untick |
+| ctrl-v | Discover | next view: plugins, developers, marketplaces, connectors |
 | u | Review | check for updates |
-| a | Review, Discover | approve, add |
+| a | Review, Discover, Profiles | approve, add, adopt |
 | x | Review | reject |
 | A | Review | approve every held version |
 | d | a held version | the full review, diff included |

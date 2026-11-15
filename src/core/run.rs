@@ -140,6 +140,18 @@ impl Job {
     }
 }
 
+/// What `job` would do: its command with `--dry-run`, as plain lines at `width` (AC9-18). A
+/// refusal (nothing Codex can use) is an `Err` with the CLI's reason.
+pub fn preview(ctx: &Ctx, job: &Job, width: usize) -> Result<Vec<String>, CliError> {
+    let (out, sink) = Out::capture(width, Box::new(super::observer::Quiet));
+    let mut ctx = ctx.clone();
+    ctx.out = out;
+    let mut words = job.words();
+    words.push("--dry-run".into());
+    crate::cli::dispatch_words(&ctx, &words)?;
+    Ok(sink.lines())
+}
+
 /// `colctl adopt <profile> <item>` for each item; one that can't be adopted (gone since it was
 /// listed, EC9-11) is reported with the reason and the rest still run.
 fn adopt_each(ctx: &Ctx, profile: &str, items: &[String]) -> i32 {

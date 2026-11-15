@@ -4,13 +4,13 @@ expression: "mask(&{\n    let mut small = opened(&env, 80, 24); ch(&mut small, '
 ---
  Overview  Profiles  Items  Review  Discover                       colctl [VERSION]
 ────────────────────────────────────────────────────────────────────────────────
+ Plugins · Developers · Marketplaces · Connectors   ctrl-v next view
  › / to search
  3 of 3 plugins · 1 catalog
 
  › local    o    A local one
    tool     ann  A tool
    toolbox  bo   Many tools
-
 
 
 
