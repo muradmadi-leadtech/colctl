@@ -2271,6 +2271,7 @@ mod rest {
         env.native();
         env.kilo();
         env.codex();
+        env.agents_dir();
         env.ok(&["init"]);
         env
     }
@@ -2365,18 +2366,31 @@ mod rest {
             panic!("{:?}\n{}", m.overlay, screen(&m));
         };
         assert_eq!(*job, Job::Convert("cli".into()));
-        assert!(body.join("\n").contains("edge"), "{body:#?}");
+        assert!(body.join("\n").contains("1 skill"), "{body:#?}");
         confirm(&tui, &mut m);
         cli.ok(&["convert", "cli"]);
         same_state(&tui, &cli);
-        m.cursor_mut().selected = row_of(&m, "cli");
+    }
+
+    /// A Claude-only source whose Codex package was approved.
+    fn converted() -> Env {
+        let env = claude_only(true);
+        env.ok(&["convert", "cli"]);
+        env.run(&["approve", "--all", "-y"]);
+        env
+    }
+
+    #[test]
+    fn ac9_18_undo_a_conversion_from_items() {
+        let (tui, cli) = (converted(), converted());
+        let mut m = items_at(&tui, "cli");
         ch(&mut m, 'c');
         let Some(Overlay::Confirm { job, .. }) = &m.overlay else {
             panic!("{:?}", m.overlay);
         };
         assert_eq!(*job, Job::ConvertUndo("cli".into()));
         confirm(&tui, &mut m);
-        cli.ok(&["convert", "cli", "--undo"]);
+        cli.run(&["convert", "cli", "--undo"]);
         same_state(&tui, &cli);
     }
 
@@ -2447,7 +2461,7 @@ mod rest {
             }
         );
         confirm(&tui, &mut m);
-        cli.ok(&["adopt", "claude", "skills/mine"]);
+        cli.run(&["adopt", "claude", "skills/mine"]);
         same_state(&tui, &cli);
     }
 
@@ -2506,8 +2520,6 @@ mod rest {
         let env = local_catalog_fixture();
         let mut m = opened(&env, 110, 32);
         ch(&mut m, '5');
-        let cmds = ctrl(&mut m, 'v');
-        drive(&env, &mut m, cmds);
         ctrl(&mut m, 'v');
         let cmds = ctrl(&mut m, 'v');
         drive(&env, &mut m, cmds);
@@ -2601,11 +2613,9 @@ mod rest {
             started: 0,
         });
         assert!(ch(&mut m, 'f').is_empty());
-        assert!(
-            screen(&m).contains("Wait for colctl sync to finish"),
-            "{}",
-            screen(&m)
-        );
+        // The running job owns the status line; the toast says why nothing started.
+        let toast = m.toast.as_ref().map(|t| t.text.clone()).unwrap_or_default();
+        assert!(toast.contains("Wait for colctl sync to finish"), "{toast}");
     }
 
     #[test]

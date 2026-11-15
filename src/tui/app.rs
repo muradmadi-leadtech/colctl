@@ -855,6 +855,12 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
             if let Some(Overlay::Detail { lines, scroll, .. }) = &mut m.overlay {
                 let max = lines.len().saturating_sub(1);
                 *scroll = (*scroll as isize + by).clamp(0, max as isize) as usize;
+            } else if let Some(Overlay::Pick {
+                items, selected, ..
+            }) = &mut m.overlay
+            {
+                let max = items.len().saturating_sub(1);
+                *selected = (*selected as isize + by).clamp(0, max as isize) as usize;
             } else {
                 m.cursor_mut().move_by(by, len, rows);
                 settle(m, by.signum());

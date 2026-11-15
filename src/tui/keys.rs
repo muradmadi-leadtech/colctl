@@ -93,6 +93,27 @@ const fn b(
     }
 }
 
+/// A binding with modifiers (Ctrl-V in Discover, where letters search).
+const fn bm(
+    key: &'static str,
+    code: KeyCode,
+    mods: KeyModifiers,
+    scope: Scope,
+    action: Action,
+    label: &'static str,
+    bar: bool,
+) -> Binding {
+    Binding {
+        key,
+        code,
+        mods,
+        scope,
+        action,
+        label,
+        bar,
+    }
+}
+
 use Action as A;
 use KeyCode as K;
 use Scope as S;
@@ -125,14 +146,22 @@ pub const KEYMAP: &[Binding] = &[
         false,
     ),
     b("esc", K::Esc, S::Detail, A::Back, "close", true),
+    // Pick lists (adopt's checklist).
+    b("space", K::Char(' '), S::Pick, A::Toggle, "tick", true),
+    b("⏎", K::Enter, S::Pick, A::Open, "adopt ticked", true),
+    b("esc", K::Esc, S::Pick, A::Back, "close", true),
     // Tabs.
     b("⏎", K::Enter, S::Tab(Tab::Overview), A::Open, "run", true),
     b("s", K::Char('s'), S::Tab(Tab::Overview), A::Sync, "sync", true),
     b("u", K::Char('u'), S::Tab(Tab::Overview), A::Update, "check updates", true),
     b("s", K::Char('s'), S::Tab(Tab::Profiles), A::Sync, "sync", true),
     b("⏎", K::Enter, S::Tab(Tab::Profiles), A::Open, "open", true),
+    b("a", K::Char('a'), S::Tab(Tab::Profiles), A::Adopt, "adopt", true),
     b("/", K::Char('/'), S::Tab(Tab::Profiles), A::Filter, "filter", true),
     b("⏎", K::Enter, S::Tab(Tab::Items), A::Open, "open", true),
+    b("x", K::Char('x'), S::Tab(Tab::Items), A::Remove, "remove", true),
+    b("c", K::Char('c'), S::Tab(Tab::Items), A::Convert, "convert", true),
+    b("f", K::Char('f'), S::Tab(Tab::Items), A::Refresh, "refresh", true),
     b("/", K::Char('/'), S::Tab(Tab::Items), A::Filter, "filter", true),
     b("a", K::Char('a'), S::Tab(Tab::Review), A::Approve, "approve", true),
     b("x", K::Char('x'), S::Tab(Tab::Review), A::Reject, "reject", true),
@@ -144,6 +173,7 @@ pub const KEYMAP: &[Binding] = &[
     b("⏎", K::Enter, S::Tab(Tab::Discover), A::Open, "details", true),
     b("esc", K::Esc, S::Tab(Tab::Discover), A::Back, "clear", true),
     b("←→", K::Null, S::Tab(Tab::Discover), A::NextTab, "tabs", true),
+    bm("ctrl-v", K::Char('v'), KeyModifiers::CONTROL, S::Tab(Tab::Discover), A::NextView, "view", true),
     b("ctrl-c", K::Null, S::Tab(Tab::Discover), A::Quit, "quit", true),
     // Everywhere.
     b("→", K::Right, S::Global, A::NextTab, "next tab", false),

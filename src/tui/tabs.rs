@@ -32,7 +32,52 @@ pub fn needs_you(m: &Model) -> bool {
 
 /// A tab's own actions.
 pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
+    if matches!(m.overlay, Some(Overlay::Pick { .. })) {
+        return pick(m, action);
+    }
     match (m.tab, action) {
+        (Tab::Items, Action::Remove) => match focused_item(m) {
+            Some(item) => ask_remove(m, &item),
+            None => Vec::new(),
+        },
+        (Tab::Items, Action::Convert) => match focused_item(m) {
+            Some(item) => convert(m, &item),
+            None => Vec::new(),
+        },
+        (Tab::Items, Action::Refresh) => match focused_item(m) {
+            Some(item) => refresh(m, &item),
+            None => Vec::new(),
+        },
+        (Tab::Profiles, Action::Adopt) => match focused_profile(m) {
+            Some(p) => vec![Cmd::Load(Load::Adopt(p.name.clone()))],
+            None => Vec::new(),
+        },
+        (Tab::Discover, Action::NextView) => next_view(m),
+        (Tab::Discover, Action::Open) if m.discover_view == app::DiscoverView::Developers => {
+            if let Some(d) = focused_developer(m) {
+                m.discover_view = app::DiscoverView::Plugins;
+                m.filters[4] = app::Input {
+                    text: d.name,
+                    focused: false,
+                };
+                *m.cursor_mut() = app::Cursor::default();
+            }
+            Vec::new()
+        }
+        (Tab::Discover, Action::Open) if m.discover_view == app::DiscoverView::Marketplaces => {
+            if focused_marketplace(m).is_none() {
+                return Vec::new();
+            }
+            app::ask(
+                m,
+                "Refresh marketplaces",
+                vec![
+                    "Ask claude and codex to update every marketplace".into(),
+                    "your profiles know (uses the network).".into(),
+                ],
+                Job::MarketplaceRefresh,
+            )
+        }
         (Tab::Overview, Action::Sync) => ask_sync(m, None),
         (Tab::Overview, Action::Update) => ask_update(m),
         (Tab::Overview, Action::Open) => {
@@ -171,6 +216,161 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
                 }
             }
             Vec::new()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Keys in adopt's checklist: move, tick, adopt what's ticked.
+fn pick(m: &mut Model, action: Action) -> Vec<Cmd> {
+    let Some(Overlay::Pick {
+        profile,
+        items,
+        selected,
+        ..
+    }) = &mut m.overlay
+    else {
+        return Vec::new();
+    };
+    match action {
+        Action::Toggle => {
+            if let Some((_, on)) = items.get_mut(*selected) {
+                *on = !*on;
+            }
+            Vec::new()
+        }
+        Action::Open => {
+            let ticked: Vec<String> = items
+                .iter()
+                .filter(|(_, on)| *on)
+                .map(|(c, _)| c.address.clone())
+                .collect();
+            if ticked.is_empty() {
+                m.toast("· Nothing ticked", false);
+                return Vec::new();
+            }
+            let all = ticked.len() == items.len();
+            let profile = profile.clone();
+            let mut body = vec![format!("Move into ~/.colctl from {profile}, then sync:")];
+            body.push(String::new());
+            body.extend(ticked.iter().map(|t| format!("  {}", escape(t))));
+            let job = Job::Adopt {
+                profile: profile.clone(),
+                items: if all { Vec::new() } else { ticked },
+            };
+            m.overlay = None;
+            app::ask(m, format!("Adopt from {profile}"), body, job)
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// `x` on Items: what `colctl rm` would remove, and from where (AC9-17).
+fn ask_remove(m: &mut Model, item: &ItemAcross) -> Vec<Cmd> {
+    let Some(s) = m.snapshot.ready() else {
+        return Vec::new();
+    };
+    if item.kind == "instructions" {
+        m.toast(
+            "· Instructions aren't removed: edit ~/.colctl/AGENTS.md instead",
+            false,
+        );
+        return Vec::new();
+    }
+    let having: Vec<&Profile> = s
+        .profiles
+        .iter()
+        .zip(&item.states)
+        .filter(|(_, st)| st.is_some())
+        .map(|(p, _)| p)
+        .collect();
+    let codex = item.kind == "plugin"
+        && !having.is_empty()
+        && having.iter().all(|p| p.kind == crate::config::Kind::Codex);
+    let names: Vec<String> = having.iter().map(|p| escape(&p.name)).collect();
+    let body = vec![
+        format!(
+            "Remove {} {} from ~/.colctl and every profile:",
+            item.kind,
+            escape(&item.name)
+        ),
+        if names.is_empty() {
+            "no profile has it yet.".into()
+        } else {
+            names.join(", ")
+        },
+    ];
+    let job = Job::Rm {
+        kind: item.kind.clone(),
+        name: item.name.clone(),
+        codex,
+    };
+    app::ask(
+        m,
+        format!("Remove {} {}", item.kind, escape(&item.name)),
+        body,
+        job,
+    )
+}
+
+/// `c` on Items: convert a source for Codex after showing its plan, or undo it (AC9-18).
+fn convert(m: &mut Model, item: &ItemAcross) -> Vec<Cmd> {
+    if item.kind != "source" {
+        m.toast("· Only source plugins convert for Codex", false);
+        return Vec::new();
+    }
+    let converted = m
+        .snapshot
+        .ready()
+        .is_some_and(|s| s.converted.contains(&item.name));
+    if converted {
+        let name = item.name.clone();
+        return app::ask(
+            m,
+            format!("Stop converting {}", escape(&name)),
+            vec![
+                format!("Uninstall {} from Codex profiles", escape(&name)),
+                "and stop converting it.".into(),
+            ],
+            Job::ConvertUndo(name),
+        );
+    }
+    vec![Cmd::Load(Load::ConvertPlan(item.name.clone()))]
+}
+
+/// `f` on Items: hold what changed where a taken-over item came from (AC9-19).
+fn refresh(m: &mut Model, item: &ItemAcross) -> Vec<Cmd> {
+    let address = match item.kind.as_str() {
+        "skill" => format!("skills/{}", item.name),
+        "agent" => format!("agents/{}.md", item.name),
+        _ => String::new(),
+    };
+    let taken = m
+        .snapshot
+        .ready()
+        .is_some_and(|s| s.taken_over.contains(&address));
+    if !taken {
+        m.toast(
+            format!(
+                "· {} isn't taken over, so there's nowhere to refresh it from",
+                escape(&item.name)
+            ),
+            false,
+        );
+        return Vec::new();
+    }
+    app::begin(m, Job::Refresh(vec![address]))
+}
+
+/// Ctrl-V in Discover: the next view, loading its list when it needs one (AC9-21).
+fn next_view(m: &mut Model) -> Vec<Cmd> {
+    m.discover_view = m.discover_view.next();
+    m.filters[4] = app::Input::default();
+    *m.cursor_mut() = app::Cursor::default();
+    match m.discover_view {
+        app::DiscoverView::Marketplaces => vec![Cmd::Load(Load::Marketplaces)],
+        app::DiscoverView::Connectors if !matches!(m.connectors, Data::Ready(_)) => {
+            vec![Cmd::Load(Load::Connectors)]
         }
         _ => Vec::new(),
     }
@@ -1072,10 +1272,261 @@ pub fn results(m: &Model) -> (std::rc::Rc<Vec<crate::search::Plugin>>, usize) {
 }
 
 fn focused_plugin(m: &Model) -> Option<crate::search::Plugin> {
-    results(m).0.get(m.cursor().selected).cloned()
+    match m.discover_view {
+        app::DiscoverView::Plugins => results(m).0.get(m.cursor().selected).cloned(),
+        app::DiscoverView::Connectors => connector_results(m).get(m.cursor().selected).cloned(),
+        _ => None,
+    }
+}
+
+/// The developers matching the search line (AC9-21), as `colctl developers` lists them.
+fn developer_results(m: &Model) -> Vec<crate::search::Developer> {
+    let Some(c) = m.catalog.ready() else {
+        return Vec::new();
+    };
+    let q = m.filters[4].text.trim().to_lowercase();
+    crate::core::discover::developers(c)
+        .into_iter()
+        .filter(|d| q.is_empty() || d.name.to_lowercase().contains(&q))
+        .collect()
+}
+
+fn focused_developer(m: &Model) -> Option<crate::search::Developer> {
+    developer_results(m).get(m.cursor().selected).cloned()
+}
+
+fn marketplace_results(m: &Model) -> Vec<crate::catalog::Marketplace> {
+    let Some(list) = m.marketplaces.ready() else {
+        return Vec::new();
+    };
+    let q = m.filters[4].text.trim().to_lowercase();
+    list.iter()
+        .filter(|mk| {
+            q.is_empty()
+                || mk.name.to_lowercase().contains(&q)
+                || mk.tool.contains(&q)
+                || mk.source.to_lowercase().contains(&q)
+        })
+        .cloned()
+        .collect()
+}
+
+fn focused_marketplace(m: &Model) -> Option<crate::catalog::Marketplace> {
+    marketplace_results(m).get(m.cursor().selected).cloned()
+}
+
+fn connector_results(m: &Model) -> Vec<crate::search::Plugin> {
+    let Some(list) = m.connectors.ready() else {
+        return Vec::new();
+    };
+    let q = crate::search::Query {
+        terms: m.filters[4]
+            .text
+            .split_whitespace()
+            .map(String::from)
+            .collect(),
+        limit: 0,
+        ..crate::search::Query::default()
+    };
+    crate::core::discover::rank(list, &q).0
+}
+
+/// Discover's search line and which view it's on.
+fn discover_head(m: &Model, t: Theme) -> Vec<Line<'static>> {
+    let f = m.filter();
+    let mut search = vec![
+        Span::styled("› ", t.style(Token::Accent)),
+        Span::raw(f.text.clone()),
+    ];
+    if f.focused {
+        search.push(Span::styled("▏", t.style(Token::Accent)));
+    } else if f.text.is_empty() {
+        search.push(Span::styled("/ to search", t.style(Token::Muted)));
+    }
+    let mut views = Vec::new();
+    for v in [
+        app::DiscoverView::Plugins,
+        app::DiscoverView::Developers,
+        app::DiscoverView::Marketplaces,
+        app::DiscoverView::Connectors,
+    ] {
+        if !views.is_empty() {
+            views.push(Span::styled(" · ", t.style(Token::Muted)));
+        }
+        let tok = if v == m.discover_view {
+            Token::Accent
+        } else {
+            Token::Muted
+        };
+        views.push(Span::styled(v.title(), t.style(tok)));
+    }
+    views.push(Span::styled("   ctrl-v next view", t.style(Token::Muted)));
+    vec![Line::from(views), Line::from(search)]
+}
+
+fn data_lines<T>(t: Theme, d: &Data<T>, what: &str) -> Option<Vec<Line<'static>>> {
+    match d {
+        Data::Ready(_) => None,
+        Data::Loading => Some(vec![Line::styled(
+            format!("Loading {what}…"),
+            t.style(Token::Muted),
+        )]),
+        Data::Failed(e) => Some(error_lines(t, e)),
+    }
 }
 
 fn discover(m: &Model, t: Theme) -> Body {
+    let cols = usize::from(m.width.saturating_sub(4));
+    let mut header = discover_head(m, t);
+    let q = escape(m.filter().text.trim());
+    match m.discover_view {
+        app::DiscoverView::Plugins => {
+            let mut b = discover_plugins(m, t);
+            header.truncate(1);
+            header.append(&mut b.header);
+            b.header = header;
+            b
+        }
+        app::DiscoverView::Developers => {
+            if let Some(mut l) = data_lines(t, &m.catalog, "catalogs") {
+                header.append(&mut l);
+                return Body {
+                    header,
+                    ..Body::default()
+                };
+            }
+            let list = developer_results(m);
+            header.push(Line::styled(
+                format!("{} developers · ⏎ lists one's plugins", list.len()),
+                t.style(Token::Muted),
+            ));
+            header.push(Line::default());
+            let name_w = list
+                .iter()
+                .map(|d| width(&escape(&d.name)))
+                .max()
+                .unwrap_or(0)
+                .min(30);
+            let rows = list
+                .iter()
+                .map(|d| {
+                    Line::from(vec![
+                        Span::styled(
+                            pad(&cut(&escape(&d.name), name_w), name_w),
+                            t.style(Token::Name),
+                        ),
+                        Span::raw("  "),
+                        Span::raw(pad(
+                            &format!(
+                                "{} plugin{}",
+                                d.plugins,
+                                if d.plugins == 1 { "" } else { "s" }
+                            ),
+                            12,
+                        )),
+                        Span::styled(
+                            cut(
+                                &escape(&d.catalogs.join(", ")),
+                                cols.saturating_sub(name_w + 18),
+                            ),
+                            t.style(Token::Muted),
+                        ),
+                    ])
+                })
+                .collect();
+            Body {
+                header,
+                rows,
+                empty: Some(Line::styled(
+                    format!("No developers match \"{q}\""),
+                    t.style(Token::Muted),
+                )),
+                skip: Vec::new(),
+            }
+        }
+        app::DiscoverView::Marketplaces => {
+            if let Some(mut l) = data_lines(t, &m.marketplaces, "marketplaces") {
+                header.append(&mut l);
+                return Body {
+                    header,
+                    ..Body::default()
+                };
+            }
+            let list = marketplace_results(m);
+            header.push(Line::styled(
+                format!("{} marketplaces · ⏎ refreshes them", list.len()),
+                t.style(Token::Muted),
+            ));
+            header.push(Line::default());
+            let name_w = list
+                .iter()
+                .map(|mk| width(&escape(&mk.name)))
+                .max()
+                .unwrap_or(0)
+                .min(30);
+            let rows = list
+                .iter()
+                .map(|mk| {
+                    let mut spans = vec![
+                        Span::styled(
+                            pad(&cut(&escape(&mk.name), name_w), name_w),
+                            t.style(Token::Name),
+                        ),
+                        Span::raw("  "),
+                        Span::raw(pad(&mk.tool, 6)),
+                        Span::raw("  "),
+                        Span::raw(pad(&mk.plugins.to_string(), 6)),
+                        Span::raw("  "),
+                        Span::styled(
+                            mk.profiles.iter().cloned().collect::<Vec<_>>().join(", "),
+                            t.style(Token::Muted),
+                        ),
+                    ];
+                    if mk.managed {
+                        spans.push(Span::styled("  ✓ managed", t.style(Token::Ok)));
+                    }
+                    Line::from(spans)
+                })
+                .collect();
+            Body {
+                header,
+                rows,
+                empty: Some(Line::styled(
+                    format!("No marketplaces match \"{q}\""),
+                    t.style(Token::Muted),
+                )),
+                skip: Vec::new(),
+            }
+        }
+        app::DiscoverView::Connectors => {
+            if let Some(mut l) = data_lines(t, &m.connectors, "connectors") {
+                header.append(&mut l);
+                return Body {
+                    header,
+                    ..Body::default()
+                };
+            }
+            let list = connector_results(m);
+            header.push(Line::styled(
+                format!("{} connectors · installed through codex", list.len()),
+                t.style(Token::Muted),
+            ));
+            header.push(Line::default());
+            let rows = plugin_rows(t, &list, cols);
+            Body {
+                header,
+                rows,
+                empty: Some(Line::styled(
+                    format!("No connectors match \"{q}\""),
+                    t.style(Token::Muted),
+                )),
+                skip: Vec::new(),
+            }
+        }
+    }
+}
+
+fn discover_plugins(m: &Model, t: Theme) -> Body {
     let cols = usize::from(m.width.saturating_sub(4));
     let c = match &m.catalog {
         Data::Ready(c) => c,
@@ -1136,6 +1587,21 @@ fn discover(m: &Model, t: Theme) -> Body {
         ));
     }
     header.push(Line::default());
+    let rows = plugin_rows(t, &shown, cols);
+    let empty = Some(Line::styled(
+        format!("No plugins match \"{}\"", escape(f.text.trim())),
+        t.style(Token::Muted),
+    ));
+    Body {
+        header,
+        rows,
+        empty,
+        skip: Vec::new(),
+    }
+}
+
+/// Plugin (or connector) rows: name, developer, description, ✓ when installed.
+fn plugin_rows(t: Theme, shown: &[crate::search::Plugin], cols: usize) -> Vec<Line<'static>> {
     let name_w = shown
         .iter()
         .map(|p| width(&escape(&p.name)))
@@ -1149,7 +1615,7 @@ fn discover(m: &Model, t: Theme) -> Body {
         .unwrap_or(0)
         .min(18);
     let desc_w = cols.saturating_sub(2 + name_w + 2 + dev_w + 2 + 2).max(10);
-    let rows = shown
+    shown
         .iter()
         .map(|p| {
             let installed = !p.installed.is_empty();
@@ -1171,17 +1637,7 @@ fn discover(m: &Model, t: Theme) -> Body {
                 ),
             ])
         })
-        .collect();
-    let empty = Some(Line::styled(
-        format!("No plugins match \"{}\"", escape(f.text.trim())),
-        t.style(Token::Muted),
-    ));
-    Body {
-        header,
-        rows,
-        empty,
-        skip: Vec::new(),
-    }
+        .collect()
 }
 
 /// A held version at a glance (AC8-36): what changed, the recommendation, anything suspicious, and
