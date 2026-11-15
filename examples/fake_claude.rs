@@ -145,6 +145,13 @@ fn main() {
                         .to_string()
                 })
             };
+            // Like Claude: Anthropic's marketplace names only come from GitHub's anthropics org.
+            if local && name == "claude-plugins-official" {
+                eprintln!(
+                    "✘ Failed to add marketplace: The name 'claude-plugins-official' is reserved for official Anthropic marketplaces and can only be used with GitHub sources from the 'anthropics' organization."
+                );
+                exit(1);
+            }
             let location = if local {
                 src.to_string()
             } else {

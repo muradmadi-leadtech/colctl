@@ -172,6 +172,7 @@ fn defined_ids() -> BTreeSet<String> {
         ("cli-output-design", "AC6", "EC6"),
         ("convert", "AC7", "EC7"),
         ("tui", "AC8", "EC8"),
+        ("reserved-marketplace-names", "ACH1", "ECH1"),
     ] {
         for (file, prefix, id) in [
             ("acceptance-criteria.md", format!("**{ac}-"), ac),
@@ -219,7 +220,7 @@ fn tested_ids() -> BTreeSet<String> {
             for pair in parts.windows(2) {
                 if [
                     "ac", "ec", "ac2", "ec2", "ac3", "ec3", "ac4", "ec4", "ac5", "ec5", "ac6",
-                    "ec6", "ac7", "ec7", "ac8", "ec8",
+                    "ec6", "ac7", "ec7", "ac8", "ec8", "ach1", "ech1",
                 ]
                 .contains(&pair[0])
                     && pair[1].len() == 2
@@ -254,6 +255,8 @@ fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_ac6_30_ac8_31_every_criterion_and_edge_case
         ("EC7-", 20),
         ("AC8-", 40),
         ("EC8-", 29),
+        ("ACH1-", 2),
+        ("ECH1-", 1),
     ] {
         assert_eq!(
             defined.iter().filter(|i| i.starts_with(prefix)).count(),

@@ -402,6 +402,50 @@ mod tests {
     }
 
     #[test]
+    fn ech1_01_a_reserved_repo_wraps_the_plugins_subfolder() {
+        let f = fixture();
+        write(
+            &f.clone.join(".claude-plugin/marketplace.json"),
+            &json!({"name": "claude-plugins-official", "plugins": [
+                {"name": "typescript-lsp", "source": "./plugins/typescript-lsp"}]}),
+        );
+        write(
+            &f.clone
+                .join("plugins/typescript-lsp/.claude-plugin/plugin.json"),
+            &json!({"name": "typescript-lsp"}),
+        );
+        let p = inspect(
+            &f.clone,
+            &f.manifests,
+            "ts",
+            "typescript-lsp",
+            Some("plugins/typescript-lsp"),
+        );
+        let t = supported(&p.claude);
+        assert_eq!(t.marketplace, "colctl-ts");
+        assert_eq!(t.id, "typescript-lsp@colctl-ts");
+        assert_eq!(t.marketplace_dir, f.manifests);
+        assert_eq!(
+            fs::read_link(f.manifests.join("plugin")).unwrap(),
+            f.clone.join("plugins/typescript-lsp")
+        );
+        // Any other name is used as the repo has it.
+        let g = fixture();
+        write(
+            &g.clone.join(".claude-plugin/marketplace.json"),
+            &json!({"name": "mine", "plugins": [{"name": "x", "source": "./"}]}),
+        );
+        write(
+            &g.clone.join(".claude-plugin/plugin.json"),
+            &json!({"name": "x"}),
+        );
+        assert_eq!(
+            supported(&inspect(&g.clone, &g.manifests, "x", "x", None).claude).id,
+            "x@mine"
+        );
+    }
+
+    #[test]
     fn ac6_31_a_manifest_pointing_outside_the_repo_is_wrapped() {
         let f = fixture();
         remote_manifests(&f);
