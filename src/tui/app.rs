@@ -334,6 +334,14 @@ impl Model {
         }
     }
 
+    /// Shows a saved status until the fresh one arrives (stub until AC9-11 lands).
+    pub fn show_saved(&mut self, snapshot: Snapshot, age_secs: u64) {
+        self.show_saved_at(snapshot, Some(age_secs));
+    }
+
+    /// Like [`Model::show_saved`], with no age (stub until AC9-11 lands).
+    pub fn show_saved_at(&mut self, _snapshot: Snapshot, _age_secs: Option<u64>) {}
+
     /// What to load when the app opens: local state first; the catalog after (AC8-08).
     pub fn start(&mut self) -> Vec<Cmd> {
         self.pending

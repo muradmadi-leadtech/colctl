@@ -116,6 +116,14 @@ pub(crate) struct Inner {
     pub(crate) held: Vec<View>,
 }
 
+/// The status the TUI saved last, and its age in seconds (stub until AC9-11 lands).
+pub fn last(_ctx: &Ctx) -> Option<(Snapshot, Option<u64>)> {
+    None
+}
+
+/// Saves a snapshot for the TUI to open on (stub until AC9-11 lands).
+pub fn save(_ctx: &Ctx, _snap: &Snapshot) {}
+
 /// Reads the source and every profile (or only `filter`). Never writes.
 pub fn snapshot(ctx: &Ctx, filter: Option<&str>) -> Result<Snapshot, CliError> {
     let ws = commands::load(ctx)?;

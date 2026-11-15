@@ -321,7 +321,7 @@ fn ec9_01_02_03_a_missing_broken_or_misnamed_check_is_a_miss() {
 fn ec9_04_an_unwritable_cache_only_costs_speed() {
     let (env, _, _) = held_source();
     let cache = env.source.join(".state/cache");
-    fs::create_dir_all(env.source.join(".state")).unwrap();
+    let _ = fs::remove_dir_all(&cache);
     fs::write(&cache, "not a folder").unwrap();
     let out = env.ok(&["update"]);
     assert!(!out.contains("cache"), "{out}");
@@ -341,4 +341,147 @@ fn ec9_09_checks_for_versions_no_longer_held_are_pruned() {
     env.run(&["review"]);
     assert!(!stray.exists());
     assert!(cached(&env, "sources/superpowers").is_file());
+}
+
+// ---------------------------------------------------------------- the TUI opens on the last state (T3)
+
+mod saved_status {
+    use super::*;
+    use colctl::core::status;
+    use colctl::ctx::Ctx;
+    use colctl::tui::app::{self, Cmd, Model, Msg, Options, update};
+    use colctl::tui::view;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::ffi::OsString;
+
+    const PLAIN: Options = Options {
+        color: false,
+        motion: false,
+    };
+
+    fn ctx(env: &Env) -> Ctx {
+        Ctx::from_vars(&[
+            ("HOME".into(), OsString::from(&env.home)),
+            ("PATH".into(), env.path.clone()),
+        ])
+        .unwrap()
+    }
+
+    fn screen(m: &Model) -> String {
+        let mut t = Terminal::new(TestBackend::new(m.width, m.height)).unwrap();
+        t.draw(|f| view::draw(m, f)).unwrap();
+        view::text(t.backend().buffer())
+    }
+
+    fn saved_file(env: &Env) -> PathBuf {
+        env.source.join(".state/cache/status.json")
+    }
+
+    #[test]
+    fn ac9_11_the_first_frame_is_the_last_known_state() {
+        let env = machine();
+        let c = ctx(&env);
+        let snap = status::snapshot(&c, None).unwrap();
+        assert!(!saved_file(&env).exists(), "colctl status writes nothing");
+        status::save(&c, &snap);
+        assert!(saved_file(&env).is_file());
+        let (saved, _) = status::last(&c).expect("the saved status reads back");
+        let mut m = Model::new(PLAIN, 100, 30);
+        m.show_saved(saved, 180);
+        m.start();
+        let first = screen(&m);
+        assert!(first.contains("kilo-claude"), "{first}");
+        assert!(first.contains("as of 3 min ago"), "{first}");
+        let fresh = status::snapshot(&c, None).unwrap();
+        update(
+            &mut m,
+            Msg::Loaded(app::Loaded::Snapshot(Box::new(Ok(fresh)))),
+        );
+        assert!(!screen(&m).contains("as of"), "{}", screen(&m));
+    }
+
+    #[test]
+    fn ac9_11_ages_read_plainly() {
+        let env = machine();
+        let c = ctx(&env);
+        status::save(&c, &status::snapshot(&c, None).unwrap());
+        for (secs, text) in [
+            (5, "as of just now"),
+            (59, "as of just now"),
+            (60, "as of 1 min ago"),
+            (7200, "as of 2 h ago"),
+            (3 * 86400, "as of 3 days ago"),
+        ] {
+            let (saved, _) = status::last(&c).unwrap();
+            let mut m = Model::new(PLAIN, 100, 30);
+            m.show_saved(saved, secs);
+            m.start();
+            assert!(screen(&m).contains(text), "{secs}: {}", screen(&m));
+        }
+    }
+
+    #[test]
+    fn ac9_12_no_readable_saved_status_loads_as_before() {
+        let env = machine();
+        let c = ctx(&env);
+        assert!(status::last(&c).is_none(), "nothing saved yet");
+        status::save(&c, &status::snapshot(&c, None).unwrap());
+        let good = fs::read_to_string(saved_file(&env)).unwrap();
+        fs::write(saved_file(&env), "{oops").unwrap();
+        assert!(status::last(&c).is_none(), "unparsable");
+        let mut v: Value = serde_json::from_str(&good).unwrap();
+        v["colctl"] = Value::from("0.0.1");
+        fs::write(saved_file(&env), v.to_string()).unwrap();
+        assert!(status::last(&c).is_none(), "another colctl's");
+    }
+
+    #[test]
+    fn ac9_12_the_tui_saves_each_fresh_status() {
+        let env = machine();
+        let c = ctx(&env);
+        let msgs = colctl::tui::worker::run_now(&c, &Cmd::Load(app::Load::Snapshot), 80);
+        assert!(!msgs.is_empty());
+        assert!(saved_file(&env).is_file());
+    }
+
+    #[test]
+    fn ac9_13_writes_never_act_on_the_saved_status() {
+        let env = machine();
+        let c = ctx(&env);
+        status::save(&c, &status::snapshot(&c, None).unwrap());
+        let (saved, _) = status::last(&c).unwrap();
+        let mut stale = Model::new(PLAIN, 100, 30);
+        stale.show_saved(saved, 600);
+        stale.start();
+        let key = Msg::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+        let cmds = update(&mut stale, key);
+        assert!(
+            cmds.iter().all(|c| !matches!(c, Cmd::Run(_))),
+            "sync asks first: {cmds:?}"
+        );
+        let screen = screen(&stale);
+        assert!(
+            !screen.contains("as of") || screen.contains("colctl status"),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn ec9_07_a_saved_status_from_the_future_reads_earlier() {
+        let env = machine();
+        let c = ctx(&env);
+        status::save(&c, &status::snapshot(&c, None).unwrap());
+        let mut v: Value =
+            serde_json::from_str(&fs::read_to_string(saved_file(&env)).unwrap()).unwrap();
+        v["saved_at"] = Value::from(u64::MAX / 2);
+        fs::write(saved_file(&env), v.to_string()).unwrap();
+        let (saved, age) = status::last(&c).unwrap();
+        assert_eq!(age, None, "no age for a time ahead of now");
+        let mut m = Model::new(PLAIN, 100, 30);
+        m.show_saved_at(saved, age);
+        m.start();
+        assert!(screen(&m).contains("as of earlier"), "{}", screen(&m));
+    }
 }
