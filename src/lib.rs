@@ -15,6 +15,7 @@ pub mod ctx;
 pub mod error;
 pub mod fsx;
 pub mod git;
+pub mod mcp;
 pub mod origin;
 pub mod packaging;
 pub mod plan;
