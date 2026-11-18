@@ -44,3 +44,11 @@ Exit code: **0** when every action succeeded and everything is in sync afterward
 
 `--dry-run` prints `· Would make <n> changes in <p> profiles` and each profile's changes in future tense, or
 `✓ Nothing to change`.
+
+## `--replace-mcp <name>`
+
+Takes over a profile's own MCP server with config's entry of that name (it's `taken` until then), or re-adds one
+colctl already has, for example after its keychain value changed: colctl never reads a secret to compare it.
+Repeatable.
+
+After sync adds or changes an MCP server, start a new Claude or Codex session to pick it up.

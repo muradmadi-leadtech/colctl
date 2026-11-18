@@ -1129,7 +1129,18 @@ fn adopt_hooks(ctx: &Ctx, git: &Git, harness: &str, dry_run: bool) -> Result<i32
         ours["hooks"] = json!({});
     }
     let mut added = 0;
+    let mut relative: Vec<String> = Vec::new();
     for (event, groups) in events {
+        for g in groups.as_array().into_iter().flatten() {
+            for h in g["hooks"].as_array().into_iter().flatten() {
+                if let Some(c) = h["command"].as_str()
+                    && !c.starts_with(['/', '$', '~'])
+                    && !relative.contains(&c.to_string())
+                {
+                    relative.push(c.to_string());
+                }
+            }
+        }
         let list = ours["hooks"]
             .as_object_mut()
             .map(|m| m.entry(event.clone()).or_insert_with(|| json!([])))
@@ -1169,12 +1180,21 @@ fn adopt_hooks(ctx: &Ctx, git: &Git, harness: &str, dry_run: bool) -> Result<i32
         Token::Ok,
         &format!("Adopted {} from {shown}", plural(added, "hook group")),
         &[],
-        &[(
+        &std::iter::once((
             Token::Attention,
             format!(
                 "Remove these from {shown} yourself; colctl doesn't edit it. Until you do, they run twice."
             ),
-        )],
+        ))
+        .chain(relative.iter().map(|c| {
+            (
+                Token::Attention,
+                format!(
+                    "{c} is a relative path: it runs from wherever Claude runs, not from ~/.colctl/hooks"
+                ),
+            )
+        }))
+        .collect::<Vec<_>>(),
     );
     run_sync_led(ctx, git, None, &lead)
 }
@@ -1808,6 +1828,24 @@ pub fn adopt(
     item: &[String],
     dry_run: bool,
 ) -> Result<i32, CliError> {
+    // `colctl adopt mcp <name>`: one MCP server, from every profile that has it (cycle 10).
+    if harness == Some("mcp")
+        && let [name] = item
+    {
+        let git = Git::for_ctx(ctx)?;
+        let said = mcp::adopt(ctx, &git, None, Some(name), dry_run)?;
+        let verdict = match said.len() {
+            0 => format!("No profile has an MCP server {name} that colctl doesn't already have"),
+            _ if dry_run => format!("Would adopt MCP server {name}, then sync"),
+            _ => format!("Adopted MCP server {name}"),
+        };
+        let lead = item_lines(ctx, Token::Ok, &verdict, &[], &said);
+        if dry_run || said.is_empty() {
+            ctx.out.lines(lead);
+            return Ok(0);
+        }
+        return run_sync_led(ctx, &git, None, &lead);
+    }
     let git = Git::for_ctx(ctx)?;
     let ws = load(ctx)?;
     check_harness(&ws.config, harness)?;

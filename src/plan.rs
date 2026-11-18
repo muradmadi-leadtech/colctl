@@ -503,6 +503,13 @@ impl Builder<'_> {
                     let edited = crate::mcp::written_hash(have) != record.written;
                     if record.config == config && !edited {
                         self.item(ItemKind::Mcp, &e.name, ItemState::Ok);
+                        // EC10-14: a secret changed where status can't see it.
+                        if self.inputs.replace_mcp.contains(&e.name) {
+                            self.actions.push(Action::RemoveMcp {
+                                name: e.name.clone(),
+                            });
+                            self.actions.push(add);
+                        }
                     } else {
                         if edited {
                             self.item_why(

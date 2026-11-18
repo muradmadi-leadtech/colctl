@@ -79,3 +79,30 @@ codex harness its repo packages for, always from colctl's own one-plugin marketp
 `~/.colctl/plugins/.manifests/<name>/`, pointing at the plugin's folder in the clone), so its id is
 `<plugin>@colctl-<name>`. Change `rev` with [`colctl update`](update.md) and [`colctl approve`](approve.md) rather than by hand. A claude or
 codex harness can opt out of one source with `exclude = ["sources/<name>"]`.
+
+## MCP servers
+
+```toml
+[[mcp]]
+name = "toolport"                       # [a-z0-9][a-z0-9_-]*, at most 64 characters, unique
+command = "/Applications/Toolport.app/Contents/MacOS/toolport-gateway"   # or url = "https://…"
+args = []                               # command servers only
+env = { TOOLPORT_PROFILE = "trimmed" }
+# tools = ["claude"]                    # default: every Claude and Codex profile
+# headers = { X-Team = "core" }         # url servers only; Claude only
+# bearer = { env = "TOKEN" }            # url servers only
+
+[mcp.profile.kilo-claude]               # what one profile changes
+env = { TOOLPORT_CLIENT_ID = "claude-code@f32399132c8e1a62" }
+```
+
+A value in `env`, `headers` or `bearer` is a string, `{ env = "NAME" }` (your environment variable) or
+`{ keychain = "item" }` (a macOS keychain item). An override's `env` and `headers` merge key by key over the entry's;
+its `args` replace them. `config.toml` never holds a secret's value: colctl won't commit a literal that looks like one
+(a key with TOKEN, SECRET, KEY, PASSWORD, AUTH or CREDENTIAL in it, or a value shaped like a token). End the line with
+`# colctl: not-secret` when it isn't one.
+
+## Commands and hooks
+
+- `~/.colctl/commands/<name>.md`: slash commands (see [add command](add.md#add-command)).
+- `~/.colctl/hooks/hooks.json` and the scripts beside it: hooks (see [hooks](hooks.md)).

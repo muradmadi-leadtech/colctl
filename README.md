@@ -73,10 +73,12 @@ The docs follow [Diataxis](https://diataxis.fr):
   [Move a plugin to its source](docs/how-to/move-a-plugin-to-its-source.md) · [Update plugins](docs/how-to/update-plugins.md) ·
   [Review an update before it installs](docs/how-to/review-an-update.md) ·
   [Find a plugin and add it from its source](docs/how-to/find-and-add-a-plugin.md) ·
-  [Use a Claude-only plugin in Codex](docs/how-to/use-a-claude-only-plugin-in-codex.md)
+  [Use a Claude-only plugin in Codex](docs/how-to/use-a-claude-only-plugin-in-codex.md) ·
+  [Share an MCP server across Claude and Codex](docs/how-to/share-an-mcp-server.md) ·
+  [Keep a secret out of ~/.colctl](docs/how-to/keep-a-secret-out-of-colctl.md)
 - **Reference:** [commands](docs/reference/commands.md) · [`config.toml`](docs/reference/config.md) ·
   [exit codes](docs/reference/exit-codes.md) · [output](docs/reference/output.md) · [the TUI](docs/reference/tui.md) ·
-  [the `.state` folder](docs/reference/state.md)
+  [the `.state` folder](docs/reference/state.md) · [hooks](docs/reference/hooks.md)
 - **Explanation:** [Links, not copies](docs/explanation/links-not-copies.md) ·
   [What "owned" means](docs/explanation/ownership.md) ·
   [Codex and the shared skills folder](docs/explanation/codex-and-the-shared-skills-folder.md) ·
@@ -85,7 +87,8 @@ The docs follow [Diataxis](https://diataxis.fr):
   [How colctl talks to you](docs/explanation/how-colctl-talks.md) ·
   [Converting plugins](docs/explanation/converting-plugins.md) ·
   [The TUI and the CLI](docs/explanation/the-tui-and-the-cli.md) ·
-  [Why checks are saved](docs/explanation/saved-checks.md)
+  [Why checks are saved](docs/explanation/saved-checks.md) ·
+  [Hooks travel as a plugin](docs/explanation/hooks-travel-as-a-plugin.md)
 
 colctl is built in [FORGE](https://github.com/scottfeltham/forge-framework) cycles. Each cycle's intent (PRD,
 architecture, acceptance criteria) is in `docs/prd/`, `docs/tasks/` and `docs/<cycle>/`.
