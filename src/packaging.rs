@@ -252,6 +252,27 @@ pub fn wrap_converted(
     )
 }
 
+/// The `colctl-<name>` marketplace entry Claude installs a package colctl built from (cycle 10's
+/// `colctl-setup`): linked as `plugin` in the wrapper folder.
+pub fn wrap_claude(
+    write: bool,
+    manifests: &Path,
+    name: &str,
+    package: &Path,
+    plugin_name: &str,
+) -> ToolPackaging {
+    wrap(
+        write,
+        &CLAUDE,
+        manifests,
+        name,
+        package,
+        plugin_name,
+        "plugin",
+        None,
+    )
+}
+
 /// Removes a converted package's Codex marketplace manifest and link from the wrapper folder.
 pub fn unwrap_converted(manifests: &Path) {
     let manifest = manifests.join(CODEX.marketplace);

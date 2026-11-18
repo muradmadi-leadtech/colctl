@@ -135,6 +135,11 @@ leak_check(config_text) -> Vec<Finding>        // literal values for which looks
   is `colctl-setup` and the plugin id is `setup@colctl-setup`:
   - Claude: `hooks/hooks.json` and the scripts.
   - Codex: the same hooks passed through `repackage::hooks` (cycle 7).
+- Built in `~/.colctl/plugins/.setup/` (git-ignored) and planned like a source plugin named `colctl-setup`, so
+  status lists it as `source colctl-setup` (ok / outdated / invalid / unsupported in Codex when Codex runs none of
+  the hooks). Changed in Generate, T6: a source item instead of a separate `hooks` kind, which reuses install,
+  update, reinstall and removal as they are.
+- Adopt: `colctl adopt <claude profile> hooks`.
 - The plugin's version is the content hash, so a change reinstalls it (the 2.5 lesson: Claude ignores an update whose
   version didn't change).
 - Adopt: hooks in a profile's `settings.json` (`hooks` key) are copied into `hooks/hooks.json` and merged by event and
