@@ -5,7 +5,8 @@
 //! and appends one JSON line per call to `$FAKE_CLAUDE_LOG`. `FAKE_CLAUDE_FAIL=<text>` makes any
 //! call containing `<text>` exit 1; `FAKE_CLAUDE_MARKET_NAME` overrides the name a marketplace
 //! records itself under; `FAKE_CLAUDE_SLEEP=<secs>` delays every call; `FAKE_CLAUDE_SHA` is the
-//! commit recorded for every install, instead of the marketplace folder's.
+//! commit recorded for every install, instead of the marketplace folder's. `mcp add|remove -s user`
+//! keep `.claude.json` as Claude Code does.
 
 use serde_json::{Map, Value, json};
 use std::env;
@@ -94,7 +95,7 @@ fn main() {
             .collect();
         let line = json!({
             "args": args,
-            "config_dir": config_dir.map(|d| d.to_string_lossy().into_owned()),
+            "config_dir": config_dir.as_ref().map(|d| d.to_string_lossy().into_owned()),
             "secure_storage": env::var_os("CLAUDE_SECURESTORAGE_CONFIG_DIR").is_some(),
             "anthropic": anthropic,
         });
@@ -120,6 +121,11 @@ fn main() {
     {
         eprintln!("fake failure for: {joined}");
         exit(1);
+    }
+
+    if args.first().map(String::as_str) == Some("mcp") {
+        mcp(&args[1..], config_dir.is_some(), &dir);
+        return;
     }
 
     let installed_path = dir.join("plugins/installed_plugins.json");
@@ -213,6 +219,85 @@ fn main() {
         }
         _ => {
             eprintln!("fake claude doesn't understand: {joined}");
+            exit(2);
+        }
+    }
+}
+
+/// `mcp add|remove -s user`, kept in `.claude.json` the way Claude Code 2.1 does: in the profile
+/// folder when `CLAUDE_CONFIG_DIR` is set, else `~/.claude.json`. `FAKE_CLAUDE_MCP_GONE` makes
+/// `remove` say the server doesn't exist without touching the file.
+fn mcp(args: &[String], configured: bool, dir: &Path) {
+    let file = if configured {
+        dir.join(".claude.json")
+    } else {
+        PathBuf::from(env::var_os("HOME").unwrap()).join(".claude.json")
+    };
+    let mut doc = read(&file, json!({}));
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    match words.as_slice() {
+        ["add", "-s", "user", rest @ ..] => {
+            let mut http = false;
+            let mut env_map = Map::new();
+            let mut headers = Map::new();
+            let mut positional: Vec<&str> = Vec::new();
+            let mut command: Vec<&str> = Vec::new();
+            let mut i = 0;
+            while i < rest.len() {
+                match rest[i] {
+                    "-t" => {
+                        http = rest[i + 1] == "http";
+                        i += 2;
+                    }
+                    "-e" => {
+                        let (k, v) = rest[i + 1].split_once('=').unwrap();
+                        env_map.insert(k.into(), json!(v));
+                        i += 2;
+                    }
+                    "-H" => {
+                        let (k, v) = rest[i + 1].split_once(": ").unwrap();
+                        headers.insert(k.into(), json!(v));
+                        i += 2;
+                    }
+                    "--" => {
+                        command = rest[i + 1..].to_vec();
+                        i = rest.len();
+                    }
+                    other => {
+                        positional.push(other);
+                        i += 1;
+                    }
+                }
+            }
+            let name = positional[0];
+            let entry = if http {
+                let mut e = json!({"type": "http", "url": positional[1]});
+                if !headers.is_empty() {
+                    e["headers"] = Value::Object(headers);
+                }
+                e
+            } else {
+                json!({"type": "stdio", "command": command[0], "args": command[1..],
+                       "env": Value::Object(env_map)})
+            };
+            if !doc["mcpServers"].is_object() {
+                doc["mcpServers"] = json!({});
+            }
+            doc["mcpServers"][name] = entry;
+            write(&file, &doc);
+        }
+        ["remove", "-s", "user", name] => {
+            let gone = env::var_os("FAKE_CLAUDE_MCP_GONE").is_some()
+                || doc["mcpServers"].get(*name).is_none();
+            if gone {
+                eprintln!("No MCP server named \"{name}\" in user scope");
+                exit(1);
+            }
+            doc["mcpServers"].as_object_mut().unwrap().remove(*name);
+            write(&file, &doc);
+        }
+        _ => {
+            eprintln!("fake claude doesn't understand: mcp {}", args.join(" "));
             exit(2);
         }
     }

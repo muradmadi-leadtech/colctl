@@ -5,7 +5,8 @@
 //! `$CODEX_HOME/config.toml` (`[marketplaces.<name>]`, `[plugins."<id>"]`) the way Codex does,
 //! and appends one JSON line per call to `$FAKE_CODEX_LOG`. `FAKE_CODEX_FAIL=<text>` makes any
 //! call containing `<text>` exit 1; `FAKE_CODEX_MARKET_NAME` overrides the name a marketplace
-//! records itself under; `FAKE_CODEX_SLEEP=<secs>` delays every call.
+//! records itself under; `FAKE_CODEX_SLEEP=<secs>` delays every call. `mcp add|remove` keep
+//! `[mcp_servers.<name>]` as codex-cli 0.169 does.
 
 use serde_json::json;
 use std::env;
@@ -87,6 +88,58 @@ fn main() {
     };
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.as_slice() {
+        ["mcp", "add", name, rest @ ..] => {
+            // Like codex-cli 0.169: `--env K=V`, `--url`, `--bearer-token-env-var`, `-- cmd args`.
+            let mut entry = toml::Table::new();
+            let mut env_table = toml::Table::new();
+            let mut i = 0;
+            while i < rest.len() {
+                match rest[i] {
+                    "--env" => {
+                        let (k, v) = rest[i + 1].split_once('=').unwrap();
+                        env_table.insert(k.into(), v.into());
+                        i += 2;
+                    }
+                    "--url" => {
+                        entry.insert("url".into(), rest[i + 1].into());
+                        i += 2;
+                    }
+                    "--bearer-token-env-var" => {
+                        entry.insert("bearer_token_env_var".into(), rest[i + 1].into());
+                        i += 2;
+                    }
+                    "--" => {
+                        entry.insert("command".into(), rest[i + 1].into());
+                        let args: Vec<toml::Value> =
+                            rest[i + 2..].iter().map(|a| (*a).into()).collect();
+                        if !args.is_empty() {
+                            entry.insert("args".into(), args.into());
+                        }
+                        i = rest.len();
+                    }
+                    other => {
+                        eprintln!("fake codex: unexpected mcp add argument {other}");
+                        exit(2);
+                    }
+                }
+            }
+            if !env_table.is_empty() {
+                entry.insert("env".into(), env_table.into());
+            }
+            let mut servers = table(&mut config, "mcp_servers");
+            servers.insert(name.to_string(), entry.into());
+            config.insert("mcp_servers".into(), servers.into());
+            println!("Added global MCP server '{name}'.");
+        }
+        ["mcp", "remove", name] => {
+            let mut servers = table(&mut config, "mcp_servers");
+            if servers.remove(*name).is_none() {
+                // Like Codex: not an error.
+                println!("No MCP server named '{name}' found.");
+                exit(0);
+            }
+            config.insert("mcp_servers".into(), servers.into());
+        }
         ["plugin", "marketplace", "add", src] => {
             let manifest = PathBuf::from(src).join(".agents/plugins/marketplace.json");
             let from_manifest = (src.starts_with('/') && manifest.is_file())
