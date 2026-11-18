@@ -908,7 +908,15 @@ fn profile_detail(p: &Profile) -> Vec<String> {
 // ── Items (AC8-17) ──────────────────────────────────────────────────────────────────────────
 
 /// Kinds in the order Items lists them.
-const KINDS: [&str; 5] = ["instructions", "skill", "agent", "plugin", "source"];
+const KINDS: [&str; 7] = [
+    "instructions",
+    "skill",
+    "agent",
+    "command",
+    "plugin",
+    "source",
+    "mcp",
+];
 
 /// One item across every profile that has it.
 #[derive(Debug, Clone, PartialEq, Eq)]
