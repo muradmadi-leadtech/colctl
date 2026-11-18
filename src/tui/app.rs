@@ -289,6 +289,11 @@ pub enum Overlay {
         cause: Option<String>,
         hint: Option<String>,
     },
+    /// `colctl add …` typed on one line (cycle 10, AC10-61): `mcp <name> -- <command>`,
+    /// `command <file>`, or anything else `colctl add` takes.
+    AddLine {
+        text: String,
+    },
     /// The command palette (AC9-23): what's typed, and the focused entry.
     Palette {
         query: String,
@@ -475,7 +480,7 @@ impl Model {
             Some(Overlay::Help | Overlay::Error { .. }) => vec![Scope::Global],
             Some(Overlay::Pick { .. }) => vec![Scope::Pick, Scope::Global],
             // The palette reads every key itself.
-            Some(Overlay::Palette { .. }) => Vec::new(),
+            Some(Overlay::Palette { .. } | Overlay::AddLine { .. }) => Vec::new(),
             None => vec![Scope::Tab(self.tab), Scope::Global],
         }
     }
@@ -775,6 +780,9 @@ fn key(m: &mut Model, ev: KeyEvent) -> Vec<Cmd> {
     if matches!(m.overlay, Some(Overlay::Palette { .. })) {
         return palette_key(m, ev);
     }
+    if matches!(m.overlay, Some(Overlay::AddLine { .. })) {
+        return add_line_key(m, ev);
+    }
     if m.overlay.is_none()
         && (m.filter().focused || m.tab == Tab::Discover)
         && let Some(cmds) = input_key(m, ev)
@@ -871,6 +879,47 @@ fn palette_key(m: &mut Model, ev: KeyEvent) -> Vec<Cmd> {
     Vec::new()
 }
 
+/// Keys on the add line: typing edits it, ⏎ asks to run `colctl add <text>`, Esc closes.
+fn add_line_key(m: &mut Model, ev: KeyEvent) -> Vec<Cmd> {
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+    let Some(Overlay::AddLine { text }) = &mut m.overlay else {
+        return Vec::new();
+    };
+    match ev.code {
+        KeyCode::Esc => m.overlay = None,
+        KeyCode::Backspace => {
+            text.pop();
+        }
+        KeyCode::Char(c)
+            if !ev
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            text.push(c);
+        }
+        KeyCode::Enter => {
+            let line = text.trim().to_string();
+            m.overlay = None;
+            if line.is_empty() {
+                return Vec::new();
+            }
+            let mut words = vec!["add".to_string()];
+            words.extend(line.split_whitespace().map(str::to_string));
+            return ask(
+                m,
+                format!("colctl add {line}"),
+                vec![
+                    format!("Run colctl add {line}"),
+                    "then sync every profile.".into(),
+                ],
+                Job::Add(words),
+            );
+        }
+        _ => {}
+    }
+    Vec::new()
+}
+
 fn quit(m: &mut Model) -> Vec<Cmd> {
     if m.job.is_some() {
         m.overlay = Some(Overlay::ConfirmQuit);
@@ -886,6 +935,11 @@ pub fn act(m: &mut Model, action: Action) -> Vec<Cmd> {
     match action {
         Action::Quit => return quit(m),
         Action::Help => m.overlay = Some(Overlay::Help),
+        Action::NewItem => {
+            m.overlay = Some(Overlay::AddLine {
+                text: String::new(),
+            });
+        }
         Action::Palette => {
             m.overlay = Some(Overlay::Palette {
                 query: String::new(),

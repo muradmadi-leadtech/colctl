@@ -264,6 +264,7 @@ fn overlay_height(m: &Model) -> u16 {
         }
         Some(Overlay::Pick { items, .. }) => items.len() as u16 + 4,
         Some(Overlay::Palette { .. }) => PALETTE_ROWS as u16 + 4,
+        Some(Overlay::AddLine { .. }) => 6,
         None => 0,
     }
 }
@@ -588,6 +589,22 @@ fn overlay(m: &Model, f: &mut Frame, o: &Overlay) {
             }
             ("Error".into(), l, "esc close".into())
         }
+        Overlay::AddLine { text } => (
+            "Add".into(),
+            vec![
+                Line::from(vec![
+                    Span::styled("colctl add ", t.style(Token::Accent)),
+                    Span::raw(text.clone()),
+                    Span::styled("▏", t.style(Token::Accent)),
+                ]),
+                Line::default(),
+                Line::styled(
+                    "mcp <name> -- <command> · mcp <name> --url <url> · command <file.md>",
+                    t.style(Token::Muted),
+                ),
+            ],
+            "⏎ run · esc close".into(),
+        ),
         Overlay::Palette { query, selected } => {
             let all = super::palette::entries(m);
             let mut l = vec![Line::from(vec![

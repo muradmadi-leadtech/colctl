@@ -60,6 +60,8 @@ pub enum Action {
     NextView,
     /// The command palette (AC9-23).
     Palette,
+    /// Type a `colctl add …` line (cycle 10, AC10-61).
+    NewItem,
 }
 
 /// One key.

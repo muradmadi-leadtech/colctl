@@ -2784,3 +2784,151 @@ mod palette {
         env
     }
 }
+
+/// Cycle 10, T7: MCP servers, commands and colctl-setup in Items. Named after AC10-NN.
+mod whole_setup {
+    use super::*;
+
+    fn machine() -> Env {
+        let env = Env::new();
+        env.native();
+        env.kilo();
+        env.codex();
+        env.agents_dir();
+        env.ok(&["init"]);
+        env
+    }
+
+    fn with_setup() -> Env {
+        let env = machine();
+        env.ok(&["add", "mcp", "toolport", "--", "gateway"]);
+        let file = env.home.join("standup.md");
+        fs::write(&file, "Write the standup\n").unwrap();
+        env.ok(&["add", "command", file.to_str().unwrap()]);
+        env
+    }
+
+    fn items_at(env: &Env, name: &str) -> Model {
+        let mut m = opened(env, 110, 32);
+        ch(&mut m, '3');
+        m.cursor_mut().selected = row_of(&m, name);
+        m
+    }
+
+    #[test]
+    fn ac10_60_items_shows_the_new_kinds() {
+        let env = with_setup();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '3');
+        let s = screen(&m);
+        assert!(s.contains("toolport"), "{s}");
+        assert!(s.contains("standup"), "{s}");
+        let all = colctl::tui::tabs::items_across(&m);
+        assert!(all.iter().any(|i| i.kind == "mcp" && i.name == "toolport"));
+        assert!(
+            all.iter()
+                .any(|i| i.kind == "command" && i.name == "standup")
+        );
+    }
+
+    #[test]
+    fn ac10_61_remove_an_mcp_server_from_items() {
+        let (tui, cli) = (with_setup(), with_setup());
+        let mut m = items_at(&tui, "toolport");
+        ch(&mut m, 'x');
+        let Some(Overlay::Confirm { job, .. }) = &m.overlay else {
+            panic!("{:?}", m.overlay);
+        };
+        assert_eq!(
+            *job,
+            Job::Rm {
+                kind: "mcp".into(),
+                name: "toolport".into(),
+                codex: false
+            }
+        );
+        confirm(&tui, &mut m);
+        cli.ok(&["rm", "mcp", "toolport", "-y"]);
+        same_state(&tui, &cli);
+    }
+
+    #[test]
+    fn ac10_61_add_from_items() {
+        let (tui, cli) = (machine(), machine());
+        let mut m = opened(&tui, 110, 32);
+        ch(&mut m, '3');
+        ch(&mut m, 'n');
+        assert!(
+            matches!(m.overlay, Some(Overlay::AddLine { .. })),
+            "{:?}",
+            m.overlay
+        );
+        assert!(screen(&m).contains("colctl add"), "{}", screen(&m));
+        for c in "mcp web -- web-mcp --stdio".chars() {
+            ch(&mut m, c);
+        }
+        press(&mut m, KeyCode::Enter);
+        let Some(Overlay::Confirm { job, .. }) = &m.overlay else {
+            panic!("{:?}", m.overlay);
+        };
+        assert_eq!(
+            *job,
+            Job::Add(
+                ["add", "mcp", "web", "--", "web-mcp", "--stdio"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            )
+        );
+        confirm(&tui, &mut m);
+        cli.ok(&["add", "mcp", "web", "--", "web-mcp", "--stdio"]);
+        same_state(&tui, &cli);
+    }
+
+    #[test]
+    fn ac10_61_esc_closes_the_add_line() {
+        let env = machine();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '3');
+        ch(&mut m, 'n');
+        ch(&mut m, 'x');
+        press(&mut m, KeyCode::Backspace);
+        press(&mut m, KeyCode::Esc);
+        assert!(m.overlay.is_none());
+        // ⏎ on nothing typed does nothing either.
+        ch(&mut m, 'n');
+        press(&mut m, KeyCode::Enter);
+        assert!(m.overlay.is_none(), "{:?}", m.overlay);
+    }
+
+    #[test]
+    fn ac10_61_adopt_offers_foreign_mcp_servers() {
+        let env = machine();
+        fs::write(
+            env.codex().join("config.toml"),
+            "[mcp_servers.orrery]\ncommand = \"orrery\"\n",
+        )
+        .unwrap();
+        let ctx = ctx(&env);
+        let list = colctl::core::adopt::candidates(&ctx, "codex").unwrap();
+        assert!(list.iter().any(|c| c.address == "mcp orrery"), "{list:?}");
+    }
+
+    #[test]
+    fn ac10_61_the_palette_lists_add() {
+        let env = machine();
+        let mut m = opened(&env, 110, 32);
+        ch(&mut m, '3');
+        ch(&mut m, ':');
+        for c in "add".chars() {
+            ch(&mut m, c);
+        }
+        assert!(screen(&m).contains("add"), "{}", screen(&m));
+        press(&mut m, KeyCode::Enter);
+        assert!(
+            matches!(m.overlay, Some(Overlay::AddLine { .. })),
+            "{:?}",
+            m.overlay
+        );
+    }
+}
