@@ -527,6 +527,17 @@ fn cleanup_source_temps(ctx: &Ctx) {
 }
 
 fn commit(git: &Git, ctx: &Ctx, message: &str) -> Result<bool, CliError> {
+    // AC10-32: a literal that looks like a secret never reaches ~/.colctl's history.
+    let text = fs::read_to_string(ctx.source.join(CONFIG_FILE)).unwrap_or_default();
+    let found = crate::secret::leak_check(&text);
+    if !found.is_empty() {
+        let paths: Vec<&str> = found.iter().map(|f| f.path.as_str()).collect();
+        return Err(CliError::usage(format!(
+            "{CONFIG_FILE}: {} looks like a secret, so colctl won't commit it. Use {{ env = \"NAME\" }} or {{ keychain = \"item\" }} instead, or end the line with {} if it isn't one",
+            paths.join(", "),
+            crate::secret::NOT_SECRET
+        )));
+    }
     git.commit_all(&ctx.source, message)
         .map_err(|e| CliError::usage(format!("{e:#}")))
 }
@@ -554,6 +565,7 @@ fn run_sync_led(
 ) -> Result<i32, CliError> {
     // Layout first, so a new ignore rule (e.g. plugins/ for sources) is part of this commit.
     ensure_layout(ctx)?;
+    ctx.keychain.clear();
     commit_pending(git, ctx)?;
     let mut ws = load(ctx)?;
     let (errors, notes) = ensure_sources(ctx, git, &ws.config);
