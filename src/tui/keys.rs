@@ -167,6 +167,7 @@ pub const KEYMAP: &[Binding] = &[
     b("c", K::Char('c'), S::Tab(Tab::Items), A::Convert, "convert", true),
     b("f", K::Char('f'), S::Tab(Tab::Items), A::Refresh, "refresh", true),
     b("/", K::Char('/'), S::Tab(Tab::Items), A::Filter, "filter", true),
+    b("n", K::Char('n'), S::Tab(Tab::Items), A::NewItem, "add", true),
     b("a", K::Char('a'), S::Tab(Tab::Review), A::Approve, "approve", true),
     b("x", K::Char('x'), S::Tab(Tab::Review), A::Reject, "reject", true),
     b("u", K::Char('u'), S::Tab(Tab::Review), A::Update, "check updates", true),
