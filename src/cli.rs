@@ -276,10 +276,13 @@ enum Command {
         /// Print the plan without changing anything
         #[arg(long)]
         dry_run: bool,
+        /// Replace a profile's own MCP server of this name with config's (repeatable)
+        #[arg(long = "replace-mcp", value_name = "NAME")]
+        replace_mcp: Vec<String>,
     },
-    /// Add a skill, agent, plugin or source plugin, then sync
+    /// Add a skill, agent, plugin, source plugin or MCP server, then sync
     #[command(
-        after_help = "Examples:\n  colctl add skill ./my-skill\n  colctl add source superpowers@claude-plugins-official\n  colctl add plugin sadr@sadr --marketplace github:muradmadi/sadr"
+        after_help = "Examples:\n  colctl add skill ./my-skill\n  colctl add source superpowers@claude-plugins-official\n  colctl add plugin sadr@sadr --marketplace github:muradmadi/sadr\n  colctl add mcp github --env-from GITHUB_TOKEN=GH_TOKEN -- npx -y @mcp/github"
     )]
     Add {
         #[command(subcommand)]
@@ -306,7 +309,7 @@ enum Command {
     Adopt {
         /// Only this harness
         harness: Option<String>,
-        /// skills/<name>, agents/<name>.md, CLAUDE.md, or plugin <id>
+        /// skills/<name>, agents/<name>.md, CLAUDE.md, plugin <id>, or mcp <name>
         item: Vec<String>,
         /// Print what would happen without changing anything
         #[arg(long)]
@@ -522,6 +525,43 @@ enum Add {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Add an MCP server to every Claude and Codex profile
+    #[command(
+        after_help = "Examples:\n  colctl add mcp github --env-from GITHUB_TOKEN=GH_TOKEN -- npx -y @mcp/github\n  colctl add mcp docs --url https://docs.example/mcp --bearer-from DOCS_TOKEN\n  colctl add mcp search --only claude --keychain API_KEY=colctl-search -- search-mcp"
+    )]
+    Mcp {
+        /// [a-z0-9][a-z0-9_-]*
+        name: String,
+        /// Only Claude's or only Codex's profiles
+        #[arg(long, value_enum)]
+        only: Option<ToolArg>,
+        /// An environment variable with a plain value, KEY=VALUE (repeatable)
+        #[arg(long, value_name = "KEY=VALUE")]
+        env: Vec<String>,
+        /// An environment variable taken from yours, KEY=NAME (repeatable)
+        #[arg(long = "env-from", value_name = "KEY=NAME")]
+        env_from: Vec<String>,
+        /// An environment variable read from a macOS keychain item, KEY=ITEM (repeatable)
+        #[arg(long, value_name = "KEY=ITEM")]
+        keychain: Vec<String>,
+        /// A streamable HTTP server instead of a command
+        #[arg(long)]
+        url: Option<String>,
+        /// An HTTP header, NAME=VALUE (repeatable; Claude only)
+        #[arg(long = "header", value_name = "NAME=VALUE")]
+        headers: Vec<String>,
+        /// A bearer token from this environment variable
+        #[arg(long = "bearer-from", value_name = "NAME")]
+        bearer_from: Option<String>,
+        /// A bearer token from this macOS keychain item (Claude only)
+        #[arg(long = "bearer-keychain", value_name = "ITEM")]
+        bearer_keychain: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        /// The command and its arguments, after --
+        #[arg(last = true, value_name = "COMMAND")]
+        command: Vec<String>,
+    },
     /// Enable a plugin, name@marketplace
     Plugin {
         id: String,
@@ -573,6 +613,7 @@ enum Kind {
     Agent,
     Plugin,
     Source,
+    Mcp,
 }
 
 fn list(codex: bool) -> PluginList {
@@ -610,7 +651,17 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
         Command::Status { harness, all, json } => {
             commands::status(ctx, harness.as_deref(), json, all)
         }
-        Command::Sync { harness, dry_run } => commands::sync(ctx, harness.as_deref(), dry_run),
+        Command::Sync {
+            harness,
+            dry_run,
+            replace_mcp,
+        } => {
+            let ctx = &Ctx {
+                replace_mcp,
+                ..ctx.clone()
+            };
+            commands::sync(ctx, harness.as_deref(), dry_run)
+        }
         Command::Add { what } => match what {
             Add::Skill {
                 source,
@@ -639,6 +690,37 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
                 codex,
                 dry_run,
             } => commands::add_plugin(ctx, &id, marketplace.as_deref(), list(codex), dry_run),
+            Add::Mcp {
+                name,
+                only,
+                env,
+                env_from,
+                keychain,
+                url,
+                headers,
+                bearer_from,
+                bearer_keychain,
+                dry_run,
+                command,
+            } => commands::mcp::add(
+                ctx,
+                &commands::mcp::AddMcp {
+                    name,
+                    only: only.map(|t| match t {
+                        ToolArg::Claude => crate::tool::Tool::Claude,
+                        ToolArg::Codex => crate::tool::Tool::Codex,
+                    }),
+                    env,
+                    env_from,
+                    keychain,
+                    url,
+                    headers,
+                    bearer_from,
+                    bearer_keychain,
+                    command,
+                },
+                dry_run,
+            ),
         },
         Command::Rm {
             kind,
@@ -651,6 +733,7 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
                 Kind::Agent => RmKind::Agent,
                 Kind::Plugin => RmKind::Plugin,
                 Kind::Source => RmKind::Source,
+                Kind::Mcp => RmKind::Mcp,
             };
             commands::rm(ctx, kind, &name, list(codex), dry_run)
         }

@@ -329,6 +329,8 @@ pub struct Inputs<'a> {
     pub codex_agents: &'a BTreeMap<String, Result<Vec<u8>, String>>,
     /// Source plugins and where each tool installs them from (cycle 3).
     pub sources: &'a [SourceInput],
+    /// MCP servers to take over where a profile has its own under that name (AC10-14).
+    pub replace_mcp: &'a [String],
 }
 
 /// Where one tool gets a source plugin from, as far as planning is concerned.
@@ -481,7 +483,15 @@ impl Builder<'_> {
                     self.item(ItemKind::Mcp, &e.name, ItemState::Missing);
                     self.actions.push(add);
                 }
-                (Some(_), None) => self.item(ItemKind::Mcp, &e.name, ItemState::Taken),
+                (Some(_), None) => {
+                    self.item(ItemKind::Mcp, &e.name, ItemState::Taken);
+                    if self.inputs.replace_mcp.contains(&e.name) {
+                        self.actions.push(Action::RemoveMcp {
+                            name: e.name.clone(),
+                        });
+                        self.actions.push(add);
+                    }
+                }
                 (Some(have), Some(record)) => {
                     let edited = crate::mcp::written_hash(have) != record.written;
                     if record.config == config && !edited {
@@ -1201,6 +1211,7 @@ mod tests {
             generated: GEN,
             codex_agents: &BTreeMap::new(),
             sources: &[],
+            replace_mcp: &[],
         };
         plan(h, s, st, &inputs)
     }
@@ -1785,6 +1796,7 @@ mod tests {
             generated: GEN,
             codex_agents: &BTreeMap::new(),
             sources: std::slice::from_ref(&src),
+            replace_mcp: &[],
         };
         let mut ready = src.clone();
         ready.claude = SourceTarget::Ready(crate::packaging::Target {
@@ -1794,6 +1806,7 @@ mod tests {
         });
         let inputs_ready = Inputs {
             sources: std::slice::from_ref(&ready),
+            replace_mcp: &[],
             ..inputs
         };
         let p = plan(&harness(&[]), &s, &HarnessState::default(), &inputs_ready);
