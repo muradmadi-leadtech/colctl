@@ -27,24 +27,27 @@ PRD: `docs/prd/whole-setup.md`. System context: `docs/whole-setup/system-context
 
 ---
 
-<!-- FORGE_PHASE:Orchestrate:Active -->
+<!-- FORGE_PHASE:Orchestrate:Complete -->
 ## Phase 2: Orchestrate
 
 **Purpose**: Break the work into session-sized pieces.
 
 ### Required Outputs
-- [ ] Container architecture (C4 L2) designed
-- [ ] Component architecture (C4 L3) designed
-- [ ] Dependency map created
-- [ ] Tasks sized for single AI sessions
+- [x] Container architecture (C4 L2) designed
+- [x] Component architecture (C4 L3) designed
+- [x] Dependency map created
+- [x] Tasks sized for single AI sessions
 
 ### Tasks
 
-<!-- List tasks here -->
+Tasks: `docs/tasks/whole-setup.md` (T1–T8). Containers: `docs/whole-setup/containers.md`. Components:
+`docs/whole-setup/components.md`. Confirmed by the owner 2026-11-18.
+
+T1 MCP config and state · T2 MCP in the planner · T3 MCP commands · T4 secrets · T5 commands · T6 hooks · T7 TUI · T8 docs, smoke, release.
 
 ---
 
-<!-- FORGE_PHASE:Refine:Pending -->
+<!-- FORGE_PHASE:Refine:Active -->
 ## Phase 3: Refine
 
 **Purpose**: Define exactly what "done" looks like.
