@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.7.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.6.1...v2.7.0) (2026-11-18)
+
+
+### Features
+
+* **commands:** keep slash commands in every Claude and Codex profile ([#149](https://github.com/muradmadi-leadtech/colctl/issues/149)) ([7fa9d72](https://github.com/muradmadi-leadtech/colctl/commit/7fa9d72f62783057cba7d175466dfb6ace6e2511))
+* **config:** declare MCP servers once with per-profile overrides ([#144](https://github.com/muradmadi-leadtech/colctl/issues/144)) ([32ed690](https://github.com/muradmadi-leadtech/colctl/commit/32ed690b72c8a93609a07da9017cb511caa2de31))
+* **hooks:** carry ~/.colctl/hooks to every profile in colctl's own plugin ([#150](https://github.com/muradmadi-leadtech/colctl/issues/150)) ([150acdf](https://github.com/muradmadi-leadtech/colctl/commit/150acdfc3dbc2ffc25f581709229771ce56a117b))
+* **mcp:** add mcp, rm mcp, sync --replace-mcp and adopt for MCP servers ([#147](https://github.com/muradmadi-leadtech/colctl/issues/147)) ([1a487f3](https://github.com/muradmadi-leadtech/colctl/commit/1a487f34ee5cb64721f647ac9ce7f938750e759a))
+* **mcp:** adopt one MCP server from every profile, and document the whole setup ([#152](https://github.com/muradmadi-leadtech/colctl/issues/152)) ([9740cf5](https://github.com/muradmadi-leadtech/colctl/commit/9740cf50889b449f49cefe021ab3efea3e83b670))
+* **mcp:** keep secrets out of ~/.colctl with env and keychain references ([#148](https://github.com/muradmadi-leadtech/colctl/issues/148)) ([3c62dcf](https://github.com/muradmadi-leadtech/colctl/commit/3c62dcf2a6d6d1f0b3bcbac28ba8c3e510f23414))
+* **sync:** keep MCP servers in every Claude and Codex profile ([#146](https://github.com/muradmadi-leadtech/colctl/issues/146)) ([0d21879](https://github.com/muradmadi-leadtech/colctl/commit/0d21879ee626f1f111a321a760faacd65e7dcd69))
+* **tui:** show MCP servers and commands in Items, and add from a typed line ([#151](https://github.com/muradmadi-leadtech/colctl/issues/151)) ([3a75a31](https://github.com/muradmadi-leadtech/colctl/commit/3a75a31d88b1c32efc305d8a452ae8d81f48d423))
+
 ## [2.6.1](https://github.com/muradmadi-leadtech/colctl/compare/v2.6.0...v2.6.1) (2026-11-15)
 
 
