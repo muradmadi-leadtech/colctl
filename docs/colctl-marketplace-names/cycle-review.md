@@ -9,7 +9,7 @@ _HIL cycle after cycle 9 · Evaluate · 2026-11-15_
 | **Scope delivered** | ACH2-01 – 03, ECH2-01 – 04, each with a named test |
 | **Released** | v2.6.1 |
 | **PRs** | #137 (RED, then GREEN), #138 release |
-| **Disposition** | _Yours_ |
+| **Disposition** | **Accept** (owner, 2026-11-18), before running the checklist below on the real profiles |
 
 ## What was going on
 

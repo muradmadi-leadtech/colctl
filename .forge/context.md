@@ -59,4 +59,6 @@ The TUI only displays logic the CLI already has.
 | 6 | CLI output design | Done, v2.2.1. One output system: verdicts, live progress, prompts, a welcome help, completions, snapshots; sources install from their pinned clone |
 | 7 | convert | Done, v2.3.0. Repackage plugins, skills, agents and hooks for a tool their repo doesn't package (e.g. a Claude-only plugin into Codex) |
 | 8 | TUI | Done, v2.5.0 (accepted after one Revise). `colctl` with no arguments in a terminal opens a full-screen UI (piped, it stays the welcome help) over everything above. Claude Code-level polish: ratatui + tachyonfx transitions, nucleo fuzzy search, a design spec (tokens, keymap, components, motion) before code, snapshot tests per screen; followed by a refinement pass |
-| 9–13 | solid · whole setup · sets and cost · machines · autopilot | **Proposed** 2026-11-15, not agreed yet. Outlined in [roadmap.md](roadmap.md) |
+| 9 | solid | Done, v2.6.0, then v2.6.1 (every source plugin from a `colctl-` marketplace) |
+| 10 | whole setup | **In progress** (Focus confirmed 2026-11-18). MCP servers, commands and hooks from one place |
+| 11–13 | sets and cost · machines · autopilot | **Proposed** 2026-11-15, not agreed yet. Outlined in [roadmap.md](roadmap.md) |
