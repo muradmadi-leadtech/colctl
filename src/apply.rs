@@ -360,12 +360,25 @@ fn add_mcp(
     config: &str,
     state: &mut HarnessState,
 ) -> Outcome {
-    let resolve = |v: &crate::mcp::Value| resolve(ctx, v);
+    // Every value read from the environment or the keychain, to hide from whatever is shown.
+    let secrets = std::cell::RefCell::new(Vec::new());
+    let resolve = |v: &crate::mcp::Value| {
+        let value = resolve(ctx, v)?;
+        if !matches!(v, crate::mcp::Value::Literal(_)) {
+            secrets.borrow_mut().push(value.clone());
+        }
+        Ok(value)
+    };
     let argv = match crate::mcp::add_argv(entry, tool, &resolve) {
         Ok(a) => a,
         Err(why) => return Outcome::Skipped(format!("{}: {why}", tool.program())),
     };
-    let outcome = run_calls(ctx, tool, program, harness, &[argv]);
+    let hide = |text: &str| crate::secret::redact(text, &secrets.borrow());
+    let outcome = match run_calls(ctx, tool, program, harness, &[argv]) {
+        Outcome::Failed(why) => return Outcome::Failed(hide(&why)),
+        Outcome::Skipped(why) => return Outcome::Skipped(hide(&why)),
+        done => done,
+    };
     if !outcome.is_done() {
         return outcome;
     }
@@ -391,6 +404,20 @@ fn add_mcp(
     }
 }
 
+/// Reads a macOS keychain item with `security find-generic-password -s <item> -w`.
+fn keychain_lookup(ctx: &Ctx, item: &str) -> Result<String, String> {
+    let program = runner::find_program("security", &ctx.path_var).ok_or_else(|| {
+        "security isn't available here (keychain references are macOS only)".to_string()
+    })?;
+    let mut cmd = runner::Cmd::new(program, &["find-generic-password", "-s", item, "-w"]);
+    cmd.timeout = Some(ctx.tool_timeout);
+    match cmd.run() {
+        Ok(out) if out.success() => Ok(out.stdout.trim_end_matches('\n').to_string()),
+        Ok(out) => Err(out.stderr.trim().to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// The value a reference stands for, read at apply time and never stored.
 fn resolve(ctx: &Ctx, v: &crate::mcp::Value) -> Result<String, String> {
     match v {
@@ -400,9 +427,10 @@ fn resolve(ctx: &Ctx, v: &crate::mcp::Value) -> Result<String, String> {
             .get(n)
             .map(str::to_string)
             .ok_or_else(|| format!("set {n}, then colctl sync")),
-        crate::mcp::Value::Keychain(i) => Err(format!(
-            "keychain item {i}: keychain references aren't supported yet"
-        )),
+        crate::mcp::Value::Keychain(i) => ctx
+            .keychain
+            .get(i, || keychain_lookup(ctx, i))
+            .map_err(|why| format!("keychain item {i}: {why}")),
     }
 }
 

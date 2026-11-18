@@ -27,6 +27,8 @@ pub struct Ctx {
     pub env_values: EnvValues,
     /// MCP servers `sync --replace-mcp` takes over where a profile has its own (AC10-14).
     pub replace_mcp: Vec<String>,
+    /// Keychain items read in this run (EC10-13).
+    pub keychain: crate::secret::Keychain,
     /// How long one `claude` or `codex` call may run.
     pub tool_timeout: Duration,
     /// Where human-readable output goes, and what the terminal allows (cycle 6).
@@ -72,6 +74,7 @@ impl Ctx {
             ),
             tool_timeout,
             replace_mcp: Vec::new(),
+            keychain: crate::secret::Keychain::default(),
             out: crate::ui::Out::default(),
         })
     }

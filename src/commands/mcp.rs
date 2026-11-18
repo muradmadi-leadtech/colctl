@@ -48,6 +48,11 @@ pub fn entry(a: &AddMcp) -> Result<Server, CliError> {
     let mut env = BTreeMap::new();
     for raw in &a.env {
         let (k, v) = pair("--env", raw)?;
+        if crate::secret::looks_secret(k, v) {
+            return Err(CliError::usage(format!(
+                "That looks like a secret. Use --env-from {k}=NAME or --keychain {k}=ITEM."
+            )));
+        }
         env.insert(k.to_string(), Value::Literal(v.to_string()));
     }
     for raw in &a.env_from {
@@ -198,7 +203,14 @@ fn from_profile(
             })
             .unwrap_or_default()
     };
-    let env = strings(&raw["env"]);
+    // AC10-33: a value that looks like a secret becomes a reference to a variable of that name.
+    let env: BTreeMap<String, Value> = strings(&raw["env"])
+        .into_iter()
+        .map(|(k, v)| match &v {
+            Value::Literal(s) if crate::secret::looks_secret(&k, s) => (k.clone(), Value::Env(k)),
+            _ => (k, v),
+        })
+        .collect();
     let args: Vec<String> = raw["args"]
         .as_array()
         .map(|a| {
@@ -455,6 +467,14 @@ pub fn adopt(
             f.entry.name,
             names(&f.have)
         );
+        for (k, v) in &f.entry.env {
+            if matches!(v, Value::Env(n) if n == k) {
+                let item = format!("colctl-{}", f.entry.name);
+                line.push_str(&format!(
+                    ". {k} looked like a secret, so config refers to it: Set {k} in your shell, or store it with security add-generic-password -s {item} -w and switch to {{ keychain = \"{item}\" }}"
+                ));
+            }
+        }
         if !f.differ.is_empty() {
             line.push_str(&format!(
                 "; {} has a different {} and keeps it (colctl sync --replace-mcp {} replaces it)",
