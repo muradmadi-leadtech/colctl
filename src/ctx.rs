@@ -25,6 +25,8 @@ pub struct Ctx {
     /// Values of the environment variables that are valid UTF-8, read when an MCP server's
     /// `{ env = "NAME" }` must be resolved (cycle 10).
     pub env_values: EnvValues,
+    /// MCP servers `sync --replace-mcp` takes over where a profile has its own (AC10-14).
+    pub replace_mcp: Vec<String>,
     /// How long one `claude` or `codex` call may run.
     pub tool_timeout: Duration,
     /// Where human-readable output goes, and what the terminal allows (cycle 6).
@@ -69,6 +71,7 @@ impl Ctx {
                     .collect(),
             ),
             tool_timeout,
+            replace_mcp: Vec::new(),
             out: crate::ui::Out::default(),
         })
     }

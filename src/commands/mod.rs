@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 
 pub(crate) mod convert;
 pub(crate) mod discovery;
+pub(crate) mod mcp;
 pub(crate) mod quarantine;
 mod run_view;
 mod status_view;
@@ -331,6 +332,7 @@ pub(crate) fn plan_all(
         generated: &generated,
         codex_agents: &codex_agents,
         sources: &ws.sources,
+        replace_mcp: &ctx.replace_mcp,
     };
     Ok(ws
         .config
@@ -1125,6 +1127,7 @@ pub enum RmKind {
     Agent,
     Plugin,
     Source,
+    Mcp,
 }
 
 /// `colctl rm` (AC-23).
@@ -1140,6 +1143,9 @@ pub fn rm(
     if list == PluginList::Codex && kind != RmKind::Plugin {
         return Err(CliError::usage("--codex only applies to plugins"));
     }
+    if kind == RmKind::Mcp {
+        return mcp::rm(ctx, &ws, name, dry_run);
+    }
     let (label, path) = match kind {
         RmKind::Skill => ("skill", Some(ctx.source.join(SKILLS).join(name))),
         RmKind::Agent => (
@@ -1148,6 +1154,7 @@ pub fn rm(
         ),
         RmKind::Plugin => (plugin_label(list), None),
         RmKind::Source => ("source", None),
+        RmKind::Mcp => unreachable!("handled above"),
     };
     let known = match (&path, kind) {
         (Some(p), _) => config::valid_item_name(name) && fsx::exists_any(p),
@@ -1197,7 +1204,7 @@ pub fn rm(
         RmKind::Skill => Some(format!("{SKILLS}/{name}")),
         RmKind::Agent => Some(format!("{AGENTS}/{name}.md")),
         RmKind::Source => Some(quarantine::source_key(name)),
-        RmKind::Plugin => None,
+        RmKind::Plugin | RmKind::Mcp => None,
     };
     if let Some(key) = key {
         quarantine::forget(ctx, &git, &key)?;
@@ -1544,8 +1551,9 @@ fn parse_item(words: &[String]) -> Result<Option<String>, CliError> {
             Ok(Some(one.clone()))
         }
         [kind, id] if kind == "plugin" => Ok(Some(format!("plugin {id}"))),
+        [kind, name] if kind == "mcp" => Ok(Some(format!("mcp {name}"))),
         _ => Err(CliError::usage(format!(
-            "unknown item \"{}\"; use skills/<name>, agents/<name>.md|.toml, CLAUDE.md, AGENTS.md or plugin <id>",
+            "unknown item \"{}\"; use skills/<name>, agents/<name>.md|.toml, CLAUDE.md, AGENTS.md, plugin <id> or mcp <name>",
             words.join(" ")
         ))),
     }
@@ -1611,7 +1619,13 @@ pub fn adopt(
     }
     let matches = |i: &Item| wanted.as_ref().is_none_or(|w| *w == i.address());
     let mut said: Vec<(Token, String)> = Vec::new();
+    // MCP servers are adopted across profiles at once (cycle 10).
+    let mcp_wanted = wanted.as_deref().and_then(|w| w.strip_prefix("mcp "));
+    let with_mcp = wanted.is_none() || mcp_wanted.is_some();
     if dry_run {
+        if with_mcp {
+            said.extend(mcp::adopt(ctx, &git, harness, mcp_wanted, true)?);
+        }
         for a in adoptable(ctx, &ws, harness, &matches)? {
             said.push((
                 Token::Info,
@@ -1640,6 +1654,11 @@ pub fn adopt(
     commit_pending(&git, ctx)?;
     let mut refused = 0;
     let mut seen = false;
+    if with_mcp {
+        let lines = mcp::adopt(ctx, &git, harness, mcp_wanted, false)?;
+        seen = !lines.is_empty();
+        said.extend(lines);
+    }
     let names: Vec<String> = ws
         .config
         .harnesses
@@ -1654,6 +1673,8 @@ pub fn adopt(
         for i in p.plan.items.iter().filter(|i| matches(i)) {
             seen = true;
             let outcome = match i.state {
+                // Adopted above, or left as the profile's when another profile's was taken.
+                ItemState::Foreign if i.kind == ItemKind::Mcp => continue,
                 ItemState::Foreign | ItemState::FromAggregator => adopt_item(ctx, &p.harness, i),
                 // AC3-29: a list plugin whose source is known moves to that source.
                 ItemState::Unreviewed if i.kind == ItemKind::Plugin && i.target.is_some() => {
