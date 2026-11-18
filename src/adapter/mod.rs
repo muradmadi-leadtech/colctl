@@ -145,7 +145,10 @@ pub struct Scan {
     pub instructions: Instructions,
     pub skills: BTreeMap<String, Entry>,
     pub agents: BTreeMap<String, Entry>,
-    /// Generated agent files by agent name (Codex).
+    /// Command links in a Claude profile's `commands/` (cycle 10).
+    pub commands: BTreeMap<String, Entry>,
+    /// Generated agent files by agent name (Codex); in `~/.agents`, each real skill folder's
+    /// SKILL.md, by skill name (command skills, cycle 10).
     pub generated: BTreeMap<String, Generated>,
     /// `Err` with the reason when Claude's plugin files can't be read (EC-13).
     pub plugins: Result<Plugins, String>,
@@ -162,6 +165,7 @@ impl Scan {
             instructions: Instructions::Absent,
             skills: BTreeMap::new(),
             agents: BTreeMap::new(),
+            commands: BTreeMap::new(),
             generated: BTreeMap::new(),
             plugins: Ok(Plugins::default()),
             temps: Vec::new(),

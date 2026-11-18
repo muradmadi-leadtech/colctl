@@ -57,6 +57,7 @@ pub fn scan(harness: &Path, source: &Path) -> Scan {
         instructions,
         skills: BTreeMap::new(),
         agents: BTreeMap::new(),
+        commands: Default::default(),
         generated,
         plugins: read_plugins(harness),
         temps: temps_in(harness, &[AGENTS]),

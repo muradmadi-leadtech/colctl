@@ -5,7 +5,7 @@
 use crate::adapter::codex::AGENTS_MD as CODEX_AGENTS_MD;
 use crate::adapter::{CLAUDE_MD, Entry, Generated, Instructions, Root, Scan};
 use crate::config::{Config, Harness, Kind, PluginList};
-use crate::source::{AGENTS, AGENTS_MD, SKILLS, Source};
+use crate::source::{AGENTS, AGENTS_MD, COMMANDS, SKILLS, Source};
 use crate::state::HarnessState;
 use crate::tool::Tool;
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,6 +22,8 @@ pub enum ItemKind {
     Source,
     /// An MCP server (cycle 10).
     Mcp,
+    /// A slash command (cycle 10).
+    Command,
 }
 
 impl ItemKind {
@@ -34,6 +36,7 @@ impl ItemKind {
             ItemKind::Plugin => "plugin",
             ItemKind::Source => "source",
             ItemKind::Mcp => "mcp",
+            ItemKind::Command => "command",
         }
     }
 }
@@ -128,6 +131,8 @@ impl Item {
             ItemKind::Marketplace => format!("marketplace {name}"),
             ItemKind::Source => format!("sources/{name}"),
             ItemKind::Mcp => format!("mcp {name}"),
+            ItemKind::Command if harness == Kind::Claude => format!("commands/{name}.md"),
+            ItemKind::Command => format!("skills/{name}/SKILL.md"),
         }
     }
 
@@ -331,6 +336,8 @@ pub struct Inputs<'a> {
     pub sources: &'a [SourceInput],
     /// MCP servers to take over where a profile has its own under that name (AC10-14).
     pub replace_mcp: &'a [String],
+    /// Each command rendered as a skill for `~/.agents` (cycle 10).
+    pub command_skills: &'a BTreeMap<String, Vec<u8>>,
 }
 
 /// Where one tool gets a source plugin from, as far as planning is concerned.
@@ -665,9 +672,107 @@ impl Builder<'_> {
         }
     }
 
+    /// Names in `~/.agents/skills` that are commands' skills: commands in the source that no skill
+    /// shares a name with, and generated ones colctl recorded.
+    fn command_skill_names(&self, scan: &Scan, state: &HarnessState) -> BTreeSet<String> {
+        let source = self.inputs.source;
+        let mut names: BTreeSet<String> = source
+            .commands
+            .iter()
+            .filter(|n| !source.skills.contains(*n))
+            .cloned()
+            .collect();
+        for name in scan.generated.keys() {
+            if state
+                .generated
+                .contains_key(&format!("{SKILLS}/{name}/SKILL.md"))
+                && !source.skills.contains(name)
+            {
+                names.insert(name.clone());
+            }
+        }
+        names
+    }
+
+    /// Commands as generated skills in `~/.agents` (cycle 10, T5): written, rewritten when the
+    /// command changes, left alone once edited, removed with the command.
+    fn command_skills(
+        &mut self,
+        scan: &BTreeMap<String, Generated>,
+        names: &BTreeSet<String>,
+        state: &HarnessState,
+    ) {
+        let kind = ItemKind::Command;
+        for name in &self.inputs.source.commands {
+            if self.inputs.source.skills.contains(name) {
+                self.invalid(
+                    kind,
+                    name,
+                    &format!("a skill is also called {name}, so Codex gets the skill; rename one"),
+                );
+            }
+        }
+        for name in names {
+            let rel = format!("{SKILLS}/{name}/SKILL.md");
+            let dir = self.harness.path.join(SKILLS).join(name);
+            let path = dir.join("SKILL.md");
+            let recorded = state.generated.get(&rel);
+            let desired = self.inputs.command_skills.get(name);
+            match (scan.get(name), desired) {
+                (None, Some(content)) => {
+                    self.item(kind, name, ItemState::Missing);
+                    self.actions.push(Action::WriteGenerated {
+                        rel,
+                        path,
+                        content: content.clone(),
+                    });
+                }
+                (None, None) => {}
+                (Some(Generated::Link(_)), _) => self.item(kind, name, ItemState::ForeignLink),
+                (Some(Generated::File { content, hash }), desired) => {
+                    let owned = recorded == Some(hash) || desired.is_some_and(|d| d == content);
+                    if !owned {
+                        let st = if recorded.is_some() {
+                            ItemState::Edited
+                        } else {
+                            ItemState::Foreign
+                        };
+                        self.item(kind, name, st);
+                        continue;
+                    }
+                    match desired {
+                        Some(want) if want == content => {
+                            self.item(kind, name, ItemState::Ok);
+                            if recorded != Some(hash) {
+                                self.actions.push(Action::RecordGenerated {
+                                    rel,
+                                    hash: hash.clone(),
+                                });
+                            }
+                        }
+                        Some(want) => {
+                            self.item(kind, name, ItemState::Broken);
+                            self.actions.push(Action::WriteGenerated {
+                                rel,
+                                path,
+                                content: want.clone(),
+                            });
+                        }
+                        None => {
+                            self.item(kind, name, ItemState::Orphaned);
+                            self.actions
+                                .push(Action::RemoveGenerated { rel, path: dir });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn links(&mut self, kind: ItemKind, entries: &std::collections::BTreeMap<String, Entry>) {
         let (dir, suffix, wanted) = match kind {
             ItemKind::Skill => (SKILLS, "", &self.inputs.source.skills),
+            ItemKind::Command => (COMMANDS, ".md", &self.inputs.source.commands),
             _ => (AGENTS, ".md", &self.inputs.source.agents),
         };
         let names: BTreeSet<&String> = wanted.iter().chain(entries.keys()).collect();
@@ -1139,6 +1244,7 @@ pub fn plan(harness: &Harness, scan: &Scan, state: &HarnessState, inputs: &Input
                 b.instructions(&scan.instructions, state);
                 b.links(ItemKind::Skill, &scan.skills);
                 b.links(ItemKind::Agent, &scan.agents);
+                b.links(ItemKind::Command, &scan.commands);
                 b.plugins(&scan.plugins, state, PluginList::Claude);
                 b.sources(&scan.plugins, state, PluginList::Claude);
                 b.mcp(&scan.mcp, state);
@@ -1150,7 +1256,18 @@ pub fn plan(harness: &Harness, scan: &Scan, state: &HarnessState, inputs: &Input
                 b.sources(&scan.plugins, state, PluginList::Codex);
                 b.mcp(&scan.mcp, state);
             }
-            Kind::Agents => b.links(ItemKind::Skill, &scan.skills),
+            Kind::Agents => {
+                // A command's generated skill isn't a foreign skill (cycle 10).
+                let commands = b.command_skill_names(scan, state);
+                let skills: BTreeMap<String, Entry> = scan
+                    .skills
+                    .iter()
+                    .filter(|(n, _)| !commands.contains(*n))
+                    .map(|(n, e)| (n.clone(), e.clone()))
+                    .collect();
+                b.links(ItemKind::Skill, &skills);
+                b.command_skills(&scan.generated, &commands, state);
+            }
         }
     }
     HarnessPlan {
@@ -1186,6 +1303,7 @@ mod tests {
             instructions: Instructions::Absent,
             skills: BTreeMap::new(),
             agents: BTreeMap::new(),
+            commands: BTreeMap::new(),
             generated: BTreeMap::new(),
             plugins: Ok(Plugins::default()),
             temps: Vec::new(),
@@ -1198,6 +1316,7 @@ mod tests {
             agents_md,
             skills: skills.iter().map(|s| s.to_string()).collect(),
             agents: agents.iter().map(|s| s.to_string()).collect(),
+            commands: Default::default(),
             invalid: Vec::new(),
         }
     }
@@ -1212,6 +1331,7 @@ mod tests {
             codex_agents: &BTreeMap::new(),
             sources: &[],
             replace_mcp: &[],
+            command_skills: &BTreeMap::new(),
         };
         plan(h, s, st, &inputs)
     }
@@ -1797,6 +1917,7 @@ mod tests {
             codex_agents: &BTreeMap::new(),
             sources: std::slice::from_ref(&src),
             replace_mcp: &[],
+            command_skills: &BTreeMap::new(),
         };
         let mut ready = src.clone();
         ready.claude = SourceTarget::Ready(crate::packaging::Target {
@@ -1807,6 +1928,7 @@ mod tests {
         let inputs_ready = Inputs {
             sources: std::slice::from_ref(&ready),
             replace_mcp: &[],
+            command_skills: &BTreeMap::new(),
             ..inputs
         };
         let p = plan(&harness(&[]), &s, &HarnessState::default(), &inputs_ready);

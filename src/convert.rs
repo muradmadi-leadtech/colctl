@@ -85,6 +85,37 @@ pub fn codex_agent(markdown: &str, stem: &str, source_display: &str) -> Result<V
     Ok(render_codex(&agent, source_display, stem).into_bytes())
 }
 
+/// A slash command as a skill for `~/.agents` (cycle 10, T5; EC10-18): the command's description
+/// (frontmatter `description:`, else its first line, else "Command <name>") and its text, with
+/// `$ARGUMENTS` as "the user's request".
+pub fn command_skill(markdown: &str, name: &str) -> Vec<u8> {
+    let (front, body) = match markdown
+        .strip_prefix("---\n")
+        .and_then(|r| r.split_once("\n---\n"))
+    {
+        Some((front, body)) => (Some(front), body),
+        None => (None, markdown),
+    };
+    let from_front = front.and_then(|f| {
+        f.lines().find_map(|l| {
+            l.strip_prefix("description:")
+                .map(|d| d.trim().trim_matches('"').to_string())
+        })
+    });
+    let first_line = body
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(str::to_string);
+    let description = from_front
+        .filter(|d| !d.is_empty())
+        .or(first_line)
+        .unwrap_or_else(|| format!("Command {name}"))
+        .replace('\n', " ");
+    let body = body.replace("$ARGUMENTS", "the user's request");
+    format!("---\nname: {name}\ndescription: {description}\n---\n{body}").into_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

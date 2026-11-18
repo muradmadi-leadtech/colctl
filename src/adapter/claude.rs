@@ -34,6 +34,15 @@ pub fn scan(harness: &Path, source: &Path) -> Scan {
         |p| p.is_file(),
     );
 
+    let commands = link_entries(
+        &harness.join(crate::source::COMMANDS),
+        &source.join(crate::source::COMMANDS),
+        ".md",
+        &[],
+        &owned,
+        |p| p.is_file(),
+    );
+
     let claude_md = harness.join(CLAUDE_MD);
     let instructions = if fsx::is_symlink(&claude_md) {
         Instructions::Link
@@ -52,6 +61,7 @@ pub fn scan(harness: &Path, source: &Path) -> Scan {
         instructions,
         skills,
         agents,
+        commands,
         generated: Default::default(),
         plugins: read_plugins(harness),
         temps: temps_in(harness, &[SKILLS, AGENTS]),

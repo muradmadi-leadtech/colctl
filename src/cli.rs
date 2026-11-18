@@ -525,6 +525,12 @@ enum Add {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Add a slash command file (<name>.md): a command in Claude, a skill in ~/.agents for Codex
+    Command {
+        file: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Add an MCP server to every Claude and Codex profile
     #[command(
         after_help = "Examples:\n  colctl add mcp github --env-from GITHUB_TOKEN=GH_TOKEN -- npx -y @mcp/github\n  colctl add mcp docs --url https://docs.example/mcp --bearer-from DOCS_TOKEN\n  colctl add mcp search --only claude --keychain API_KEY=colctl-search -- search-mcp"
@@ -614,6 +620,7 @@ enum Kind {
     Plugin,
     Source,
     Mcp,
+    Command,
 }
 
 fn list(codex: bool) -> PluginList {
@@ -670,6 +677,7 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
                 dry_run,
             } => commands::add_skill(ctx, &source, subdir.as_deref(), name.as_deref(), dry_run),
             Add::Agent { file, dry_run } => commands::add_agent(ctx, &file, dry_run),
+            Add::Command { file, dry_run } => commands::add_command(ctx, &file, dry_run),
             Add::Source {
                 repo,
                 rev,
@@ -734,6 +742,7 @@ fn dispatch(ctx: &Ctx, command: Command) -> Result<i32, CliError> {
                 Kind::Plugin => RmKind::Plugin,
                 Kind::Source => RmKind::Source,
                 Kind::Mcp => RmKind::Mcp,
+                Kind::Command => RmKind::Command,
             };
             commands::rm(ctx, kind, &name, list(codex), dry_run)
         }

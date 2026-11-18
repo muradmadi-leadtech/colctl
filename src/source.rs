@@ -8,6 +8,8 @@ use std::path::Path;
 pub const AGENTS_MD: &str = "AGENTS.md";
 pub const SKILLS: &str = "skills";
 pub const AGENTS: &str = "agents";
+/// Slash commands, one `<name>.md` each (cycle 10).
+pub const COMMANDS: &str = "commands";
 /// claude.ai account skills live here in `~/.claude/skills`; never managed (EC-16).
 pub const SYNCED: &str = "synced";
 
@@ -25,6 +27,8 @@ pub struct Source {
     pub agents_md: bool,
     pub skills: BTreeSet<String>,
     pub agents: BTreeSet<String>,
+    /// Command names, from `commands/<name>.md` (cycle 10).
+    pub commands: BTreeSet<String>,
     pub invalid: Vec<Invalid>,
 }
 
@@ -89,6 +93,30 @@ pub fn scan(source: &Path) -> Source {
             }
             (reason, _) => out.invalid.push(Invalid {
                 kind: "agent",
+                name: file.clone(),
+                reason: reason.unwrap_or_default(),
+            }),
+        }
+    }
+    for file in visible_entries(&source.join(COMMANDS)) {
+        let path = source.join(COMMANDS).join(&file);
+        let stem = file.strip_suffix(".md");
+        let reason = match stem {
+            None => Some("a command must be a .md file".to_string()),
+            Some(stem) if !crate::mcp::valid_name(stem) => {
+                Some("name must match [a-z0-9][a-z0-9_-]*".to_string())
+            }
+            Some(_) if !fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) => {
+                Some("a command must be a regular file".to_string())
+            }
+            Some(_) => None,
+        };
+        match (reason, stem) {
+            (None, Some(stem)) => {
+                out.commands.insert(stem.to_string());
+            }
+            (reason, _) => out.invalid.push(Invalid {
+                kind: "command",
                 name: file.clone(),
                 reason: reason.unwrap_or_default(),
             }),
