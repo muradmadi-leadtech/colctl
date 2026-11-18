@@ -47,26 +47,28 @@ T1 MCP config and state · T2 MCP in the planner · T3 MCP commands · T4 secret
 
 ---
 
-<!-- FORGE_PHASE:Refine:Active -->
+<!-- FORGE_PHASE:Refine:Complete -->
 ## Phase 3: Refine
 
 **Purpose**: Define exactly what "done" looks like.
 
 ### Required Outputs
-- [ ] Acceptance criteria in Given-When-Then format
-- [ ] Interface specifications documented
-- [ ] Edge cases enumerated by category
-- [ ] Constraints vs criteria documented
+- [x] Acceptance criteria in Given-When-Then format
+- [x] Interface specifications documented
+- [x] Edge cases enumerated by category
+- [x] Constraints vs criteria documented
 
 **CRITICAL**: No code in this phase - specifications only.
 
 ### Specifications
 
-<!-- Document specifications here -->
+`docs/whole-setup/acceptance-criteria.md` (AC10-01 – AC10-71), `interfaces.md` (CLI behaviour verified 2026-11-18 against Claude Code 2.1.327 and codex-cli 0.169.0 in throwaway folders), `edge-cases.md` (EC10-01 – EC10-30). Confirmed by the owner 2026-11-18, with Generate to run autonomously (PRs auto-merged once `check` passes).
+
+Findings that shaped the spec: Claude expands `${VAR}` in user-scope MCP env and headers; `codex mcp add` can't set `env_vars`, so Codex stdio env references are resolved at sync; Codex 0.169 has no user prompts, so commands become skills in the generated `colctl-setup` plugin (renamed from `colctl-hooks`).
 
 ---
 
-<!-- FORGE_PHASE:Generate:Pending -->
+<!-- FORGE_PHASE:Generate:Active -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.

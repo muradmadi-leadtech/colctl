@@ -12,7 +12,7 @@ flowchart LR
   end
   core --> source[(~/.colctl: config.toml with mcp entries, commands/, hooks/)]
   core --> state[(~/.colctl/.state: state.json)]
-  core --> wrap[(colctl's marketplace folder: colctl-hooks plugin)]
+  core --> wrap[(colctl's marketplace folder: colctl-setup plugin)]
   core --> secrets[(environment, macOS keychain)]
   core --> tools[claude / codex CLIs]
   core -.->|read-only| configs[(profile .claude.json, config.toml)]
@@ -20,7 +20,7 @@ flowchart LR
 
 - **`~/.colctl` grows three things:** `[[mcp]]` entries, a `commands/` folder and a `hooks/` folder. All are committed
   as before. `config.toml` only ever holds references to secrets.
-- **colctl's marketplace folder** gains a generated `colctl-hooks` plugin. It's built from `hooks/` on each sync, the
+- **colctl's marketplace folder** gains a generated `colctl-setup` plugin. It's built from `hooks/` on each sync, the
   same way converted packages are wrapped today.
 - **Secret stores are read at apply time only.** A resolved value is passed straight to the tool's CLI. It's never
   written to disk by colctl, logged or cached.
