@@ -223,7 +223,8 @@ headers = { X-Team = "core" }
     let text = env.expect(1, &["status"]);
     assert!(text.contains("colctl adopt"), "{text}");
     assert!(text.contains("colctl sync --replace-mcp mine"), "{text}");
-    assert!(text.contains("can't set headers"), "{text}");
+    let all = env.expect(1, &["status", "--all"]);
+    assert!(all.contains("can't set headers"), "{all}");
 }
 
 #[test]

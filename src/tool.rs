@@ -68,6 +68,11 @@ impl Tool {
             Action::RemoveSourceMarketplace { name } => {
                 vec![own(vec!["plugin", "marketplace", "remove", name])]
             }
+            // Shown with references by name; apply resolves them (cycle 10).
+            Action::AddMcp { entry, .. } => crate::mcp::add_argv(entry, self, &crate::mcp::shown)
+                .into_iter()
+                .collect(),
+            Action::RemoveMcp { name } => vec![crate::mcp::remove_argv(name, self)],
             other => self.argv(other).into_iter().collect(),
         }
     }

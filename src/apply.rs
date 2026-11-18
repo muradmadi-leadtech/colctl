@@ -44,11 +44,22 @@ fn run_tool(
     harness: &Harness,
     action: &Action,
 ) -> Outcome {
+    run_calls(ctx, tool, program, harness, &tool.argvs(action))
+}
+
+/// Runs each call in order, stopping at the first failure.
+fn run_calls(
+    ctx: &Ctx,
+    tool: Tool,
+    program: &Option<PathBuf>,
+    harness: &Harness,
+    calls: &[Vec<String>],
+) -> Outcome {
     let Some(program) = program else {
         return Outcome::Skipped(format!("{} not found", tool.program()));
     };
-    for args in tool.argvs(action) {
-        let cmd = tool.command(ctx, program.clone(), harness, &args);
+    for args in calls {
+        let cmd = tool.command(ctx, program.clone(), harness, args);
         let failure = match cmd.run() {
             Err(err) => Some(format!("{}: {err}", cmd.display())),
             Ok(out) if out.timed_out => Some(format!(
@@ -307,6 +318,24 @@ pub fn apply_observed(
                 state.sources.remove(source);
                 Outcome::Done
             }
+            Action::AddMcp { entry, config } => match tool {
+                Some(t) => add_mcp(ctx, t, &program, harness, entry, config, state),
+                None => run(action),
+            },
+            Action::RemoveMcp { name } => {
+                let outcome = match run(action) {
+                    Outcome::Failed(why) if crate::mcp::says_not_found(&why) => Outcome::Done,
+                    other => other,
+                };
+                if outcome.is_done() {
+                    state.mcp.remove(name);
+                }
+                outcome
+            }
+            Action::ForgetMcp { name } => {
+                state.mcp.remove(name);
+                Outcome::Done
+            }
         };
         // AC9-26: paths under home read as ~/….
         let home = format!("{}/", ctx.home.display());
@@ -318,6 +347,63 @@ pub fn apply_observed(
         });
     }
     results
+}
+
+/// Adds an MCP server with its references resolved, then records what the profile's file holds
+/// (cycle 10). A reference that can't be resolved skips the server here (AC10-30).
+fn add_mcp(
+    ctx: &Ctx,
+    tool: Tool,
+    program: &Option<PathBuf>,
+    harness: &Harness,
+    entry: &crate::mcp::Effective,
+    config: &str,
+    state: &mut HarnessState,
+) -> Outcome {
+    let resolve = |v: &crate::mcp::Value| resolve(ctx, v);
+    let argv = match crate::mcp::add_argv(entry, tool, &resolve) {
+        Ok(a) => a,
+        Err(why) => return Outcome::Skipped(format!("{}: {why}", tool.program())),
+    };
+    let outcome = run_calls(ctx, tool, program, harness, &[argv]);
+    if !outcome.is_done() {
+        return outcome;
+    }
+    let written = crate::commands::read_mcp(ctx, harness)
+        .ok()
+        .and_then(|e| e.get(&entry.name).map(crate::mcp::written_hash));
+    match written {
+        Some(written) => {
+            state.mcp.insert(
+                entry.name.clone(),
+                crate::state::McpRecord {
+                    config: config.to_string(),
+                    written,
+                },
+            );
+            Outcome::Done
+        }
+        None => Outcome::Failed(format!(
+            "{} said it added {}, but the profile doesn't list it",
+            tool.program(),
+            entry.name
+        )),
+    }
+}
+
+/// The value a reference stands for, read at apply time and never stored.
+fn resolve(ctx: &Ctx, v: &crate::mcp::Value) -> Result<String, String> {
+    match v {
+        crate::mcp::Value::Literal(s) => Ok(s.clone()),
+        crate::mcp::Value::Env(n) => ctx
+            .env_values
+            .get(n)
+            .map(str::to_string)
+            .ok_or_else(|| format!("set {n}, then colctl sync")),
+        crate::mcp::Value::Keychain(i) => Err(format!(
+            "keychain item {i}: keychain references aren't supported yet"
+        )),
+    }
 }
 
 #[cfg(test)]

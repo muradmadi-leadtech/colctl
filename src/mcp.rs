@@ -429,3 +429,186 @@ pub(crate) fn render(server: &Server) -> String {
     }
     out
 }
+
+/// A profile's MCP servers as its file holds them, by name.
+pub type Entries = BTreeMap<String, serde_json::Value>;
+
+/// The file a Claude profile keeps user-scope servers in: `~/.claude.json` for the default profile
+/// (run without `CLAUDE_CONFIG_DIR`), else `.claude.json` inside the profile.
+pub fn claude_file(
+    home: &std::path::Path,
+    profile: &std::path::Path,
+    native: bool,
+) -> std::path::PathBuf {
+    if native {
+        home.join(".claude.json")
+    } else {
+        profile.join(".claude.json")
+    }
+}
+
+/// A Claude profile's `mcpServers`. A missing file is no servers (EC10-02); one that doesn't parse is
+/// an error naming it (EC10-03).
+pub fn read_claude(file: &std::path::Path) -> Result<Entries, String> {
+    let text = match std::fs::read_to_string(file) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Entries::new()),
+        Err(e) => return Err(format!("reading {}: {e}", file.display())),
+    };
+    let doc: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("{} doesn't parse: {e}", file.display()))?;
+    Ok(doc
+        .get("mcpServers")
+        .and_then(serde_json::Value::as_object)
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default())
+}
+
+/// A Codex profile's `[mcp_servers]`, from its `config.toml`.
+pub fn read_codex(profile: &std::path::Path) -> Result<Entries, String> {
+    let file = profile.join("config.toml");
+    let text = match std::fs::read_to_string(&file) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Entries::new()),
+        Err(e) => return Err(format!("reading {}: {e}", file.display())),
+    };
+    let doc: toml::Table =
+        toml::from_str(&text).map_err(|e| format!("{} doesn't parse: {e}", file.display()))?;
+    let Some(servers) = doc.get("mcp_servers").and_then(toml::Value::as_table) else {
+        return Ok(Entries::new());
+    };
+    servers
+        .iter()
+        .map(|(k, v)| {
+            serde_json::to_value(v)
+                .map(|j| (k.clone(), j))
+                .map_err(|e| format!("{}: {e}", file.display()))
+        })
+        .collect()
+}
+
+/// `sha256:` of an entry as a profile holds it.
+pub fn written_hash(entry: &serde_json::Value) -> String {
+    fsx::hash_bytes(entry.to_string().as_bytes())
+}
+
+/// Why `tool` can't take this entry, if it can't.
+pub fn unsupported(entry: &Effective, tool: Tool) -> Option<String> {
+    match (&entry.transport, tool) {
+        (Transport::Http { headers, .. }, Tool::Codex) if !headers.is_empty() => {
+            Some("codex mcp add can't set headers".into())
+        }
+        (
+            Transport::Http {
+                bearer: Some(Value::Literal(_) | Value::Keychain(_)),
+                ..
+            },
+            Tool::Codex,
+        ) => Some("codex takes a bearer token only from an environment variable".into()),
+        _ => None,
+    }
+}
+
+/// Turns a value into what the tool is given. `resolve` reads environment variables and keychain
+/// items; Claude keeps an environment variable as `${NAME}`, which it expands itself.
+pub type Resolve<'a> = dyn Fn(&Value) -> Result<String, String> + 'a;
+
+/// The argv (without the program) that adds `entry` to a profile of `tool`.
+pub fn add_argv(entry: &Effective, tool: Tool, resolve: &Resolve) -> Result<Vec<String>, String> {
+    let claude_value = |v: &Value| match v {
+        Value::Literal(s) => Ok(s.clone()),
+        Value::Env(n) => Ok(format!("${{{n}}}")),
+        Value::Keychain(_) => resolve(v),
+    };
+    let codex_value = |v: &Value| match v {
+        Value::Literal(s) => Ok(s.clone()),
+        _ => resolve(v),
+    };
+    let mut argv: Vec<String> = Vec::new();
+    let mut push = |w: &str| argv.push(w.to_string());
+    match (tool, &entry.transport) {
+        (Tool::Claude, Transport::Stdio { command, args }) => {
+            for w in ["mcp", "add", "-s", "user", &entry.name] {
+                push(w);
+            }
+            for (k, v) in &entry.env {
+                push("-e");
+                push(&format!("{k}={}", claude_value(v)?));
+            }
+            push("--");
+            push(command);
+            for a in args {
+                push(a);
+            }
+        }
+        (
+            Tool::Claude,
+            Transport::Http {
+                url,
+                headers,
+                bearer,
+            },
+        ) => {
+            for w in ["mcp", "add", "-s", "user", "-t", "http", &entry.name, url] {
+                push(w);
+            }
+            for (k, v) in headers {
+                push("-H");
+                push(&format!("{k}: {}", claude_value(v)?));
+            }
+            if let Some(b) = bearer {
+                push("-H");
+                push(&format!("Authorization: Bearer {}", claude_value(b)?));
+            }
+        }
+        (Tool::Codex, Transport::Stdio { command, args }) => {
+            for w in ["mcp", "add", &entry.name] {
+                push(w);
+            }
+            for (k, v) in &entry.env {
+                push("--env");
+                push(&format!("{k}={}", codex_value(v)?));
+            }
+            push("--");
+            push(command);
+            for a in args {
+                push(a);
+            }
+        }
+        (Tool::Codex, Transport::Http { url, bearer, .. }) => {
+            for w in ["mcp", "add", &entry.name, "--url", url] {
+                push(w);
+            }
+            if let Some(Value::Env(n)) = bearer {
+                push("--bearer-token-env-var");
+                push(n);
+            }
+        }
+    }
+    Ok(argv)
+}
+
+/// The argv that removes server `name` from a profile of `tool`.
+pub fn remove_argv(name: &str, tool: Tool) -> Vec<String> {
+    match tool {
+        Tool::Claude => vec!["mcp", "remove", "-s", "user", name],
+        Tool::Codex => vec!["mcp", "remove", name],
+    }
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+/// True when a failed `mcp remove` said the server isn't there (EC10-11).
+pub fn says_not_found(message: &str) -> bool {
+    message.contains("No MCP server named")
+}
+
+/// How a value appears in plans and logs: references by name, never a value.
+pub fn shown(v: &Value) -> Result<String, String> {
+    Ok(match v {
+        Value::Literal(s) => s.clone(),
+        Value::Env(n) => format!("${n}"),
+        Value::Keychain(i) => format!("<keychain {i}>"),
+    })
+}

@@ -60,6 +60,7 @@ pub fn scan(harness: &Path, source: &Path) -> Scan {
         generated,
         plugins: read_plugins(harness),
         temps: temps_in(harness, &[AGENTS]),
+        mcp: Ok(Default::default()),
     }
 }
 

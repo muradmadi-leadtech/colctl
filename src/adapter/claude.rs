@@ -55,6 +55,7 @@ pub fn scan(harness: &Path, source: &Path) -> Scan {
         generated: Default::default(),
         plugins: read_plugins(harness),
         temps: temps_in(harness, &[SKILLS, AGENTS]),
+        mcp: Ok(Default::default()),
     }
 }
 

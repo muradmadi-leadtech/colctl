@@ -338,13 +338,32 @@ pub(crate) fn plan_all(
         .iter()
         .filter(|h| filter.is_none_or(|f| f == h.name))
         .map(|h| {
-            let scan = adapter::scan_harness(h.kind, &h.path, &ctx.source);
+            let mut scan = adapter::scan_harness(h.kind, &h.path, &ctx.source);
+            if scan.root == Root::Ok {
+                scan.mcp = read_mcp(ctx, h);
+            }
             Planned {
                 harness: h.clone(),
                 plan: plan::plan(h, &scan, &ws.state.harness(&h.name), &inputs),
             }
         })
         .collect())
+}
+
+/// A profile's MCP servers, from the file its tool keeps them in (cycle 10).
+pub(crate) fn read_mcp(
+    ctx: &Ctx,
+    h: &crate::config::Harness,
+) -> Result<crate::mcp::Entries, String> {
+    match crate::tool::Tool::for_kind(h.kind) {
+        Some(t @ crate::tool::Tool::Claude) => crate::mcp::read_claude(&crate::mcp::claude_file(
+            &ctx.home,
+            &h.path,
+            t.is_native(ctx, h),
+        )),
+        Some(crate::tool::Tool::Codex) => crate::mcp::read_codex(&h.path),
+        None => Ok(Default::default()),
+    }
 }
 
 /// Every source agent rendered as Codex TOML, or why it can't be.
@@ -1508,6 +1527,8 @@ fn adopt_item(ctx: &Ctx, harness: &Harness, item: &Item) -> Adoption {
             Adoption::Refused("marketplaces are adopted with their plugins".into())
         }
         ItemKind::Source => Adoption::Refused("source plugins are already colctl's".into()),
+        // Cycle 10, T3: adopt reads every profile's servers at once.
+        ItemKind::Mcp => Adoption::Refused("MCP servers are adopted with colctl adopt".into()),
     }
 }
 
