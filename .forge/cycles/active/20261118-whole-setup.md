@@ -68,37 +68,40 @@ Findings that shaped the spec: Claude expands `${VAR}` in user-scope MCP env and
 
 ---
 
-<!-- FORGE_PHASE:Generate:Active -->
+<!-- FORGE_PHASE:Generate:Complete -->
 ## Phase 4: Generate
 
 **Purpose**: AI writes code following TDD.
 
 ### Process
-- [ ] RED: Write failing tests
-- [ ] GREEN: Minimal code to pass
-- [ ] REFACTOR: Improve while green
-- [ ] Code review: Linter and type checks pass
-- [ ] Code review: TDD compliance verified
-- [ ] Code review: Acceptance criteria alignment checked
+- [x] RED: Write failing tests
+- [x] GREEN: Minimal code to pass
+- [x] REFACTOR: Improve while green
+- [x] Code review: Linter and type checks pass
+- [x] Code review: TDD compliance verified
+- [x] Code review: Acceptance criteria alignment checked
 
 ### Implementation Notes
 
-<!-- Document implementation progress here -->
+T1 #144, T2 #146, T3 #147, T4 #148, T5 #149, T6 #150, T7 #151, T8 (docs, smoke test, review). Each task opened on a
+RED commit, then GREEN. Changed from the spec: Codex commands go to `~/.agents/skills` (T5); hooks show as
+`source colctl-setup` (T6); `colctl adopt mcp <name>` added in the smoke test. Not done: EC10-07's status note,
+EC10-21's not-executable flag, AC10-50's "runs code" mark. Details: `docs/whole-setup/cycle-review.md`.
 
 ---
 
-<!-- FORGE_PHASE:Evaluate:Pending -->
+<!-- FORGE_PHASE:Evaluate:Active -->
 ## Phase 5: Evaluate
 
 **Purpose**: Verify output matches intent.
 
 ### Checklist
-- [ ] Criteria verified line-by-line
-- [ ] Edge cases tested
-- [ ] Code review: Full test suite passes with coverage threshold met
-- [ ] Code review: Security review completed
-- [ ] Code review: Integration and interface contracts verified
-- [ ] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
+- [x] Criteria verified line-by-line
+- [x] Edge cases tested
+- [x] Code review: Full test suite passes with coverage threshold met
+- [x] Code review: Security review completed
+- [x] Code review: Integration and interface contracts verified
+- [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
 - [ ] Disposition decision made
 
 ### Disposition

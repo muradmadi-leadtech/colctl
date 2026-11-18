@@ -37,7 +37,7 @@ Harnesses link to that source instead of keeping their own copies. Public repo:
 
 ## Operating policy (autonomous)
 
-Set by the user on 2026-11-12 for cycle 1, and extended to cycle 2 (codex-cli-support), cycle 3 (plugins-from-source) the same day, cycle 4 (quarantine, v2.0.0) the same day, cycle 5 (discovery, v2.1.0) on 2026-11-13, cycle 6 (CLI output design, v2.1.1 for T0 then v2.2.0) on 2026-11-13, cycle 7 (convert, v2.3.0) on 2026-11-13, and cycle 8 (TUI, v2.4.0) on 2026-11-14: run Generate to
+Set by the user on 2026-11-12 for cycle 1, and extended to cycle 2 (codex-cli-support), cycle 3 (plugins-from-source) the same day, cycle 4 (quarantine, v2.0.0) the same day, cycle 5 (discovery, v2.1.0) on 2026-11-13, cycle 6 (CLI output design, v2.1.1 for T0 then v2.2.0) on 2026-11-13, cycle 7 (convert, v2.3.0) on 2026-11-13, cycle 8 (TUI, v2.4.0) on 2026-11-14, and cycle 10 (whole setup, v2.7.0) on 2026-11-18: run Generate to
 completion without pausing, open PRs and squash-auto-merge them once `check` passes, and cut the release (v1.0.0 for
 cycle 1, v1.1.0 for cycle 2, v1.2.0 for cycle 3, v2.0.0 for cycle 4, v2.1.0 for cycle 5, v2.1.1 and v2.2.0 for cycle 6, v2.3.0 for cycle 7, v2.4.0 for cycle 8). The owner then evaluates.
 
@@ -60,5 +60,5 @@ The TUI only displays logic the CLI already has.
 | 7 | convert | Done, v2.3.0. Repackage plugins, skills, agents and hooks for a tool their repo doesn't package (e.g. a Claude-only plugin into Codex) |
 | 8 | TUI | Done, v2.5.0 (accepted after one Revise). `colctl` with no arguments in a terminal opens a full-screen UI (piped, it stays the welcome help) over everything above. Claude Code-level polish: ratatui + tachyonfx transitions, nucleo fuzzy search, a design spec (tokens, keymap, components, motion) before code, snapshot tests per screen; followed by a refinement pass |
 | 9 | solid | Done, v2.6.0, then v2.6.1 (every source plugin from a `colctl-` marketplace) |
-| 10 | whole setup | **In progress** (Focus, Orchestrate, Refine confirmed 2026-11-18; Generate autonomous, as cycles 1–9). MCP servers, commands and hooks from one place |
+| 10 | whole setup | Done, v2.7.0, awaiting the owner's disposition. MCP servers (declared once, per-profile overrides, secret references), commands and hooks from one place |
 | 11–13 | sets and cost · machines · autopilot | **Proposed** 2026-11-15, not agreed yet. Outlined in [roadmap.md](roadmap.md) |

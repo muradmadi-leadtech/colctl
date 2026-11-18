@@ -20,3 +20,9 @@ With `--codex`, the plugin leaves `[codex.plugins]`, is committed as `colctl: rm
 `colctl rm source <name>` removes the `[[source]]` entry (`colctl: rm source <name>`). Sync then uninstalls its plugin
 and removes its local marketplace wherever colctl installed them, and deletes its clone (and any manifest colctl
 wrote for it).
+
+`colctl rm mcp <name>` removes the `[[mcp]]` entry (`colctl: rm mcp <name>`); sync runs `claude mcp remove -s user`
+and `codex mcp remove` wherever colctl added it. A server colctl didn't add is refused: "<name> wasn't added by colctl".
+
+`colctl rm command <name>` removes `~/.colctl/commands/<name>.md`; sync removes its links and its skill in
+`~/.agents`.

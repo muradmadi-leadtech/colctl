@@ -61,3 +61,16 @@ source can't be found is adopted into the plugin list as before.
 can be found, `status` adds the hint `source available: <repo>; colctl adopt <harness> plugin <id>`. Adopting it (or
 `colctl adopt` with no arguments) moves it to its source in one step: the `[[source]]` is added and the list entry
 removed in one commit, and one sync swaps the plugin in every profile, uninstalling the old copy once per profile.
+
+## MCP servers, commands and hooks
+
+- `colctl adopt` with no item also adopts the MCP servers profiles have that `config.toml` doesn't: one entry per
+  name, with what every profile shares in the entry and the rest (such as `TOOLPORT_CLIENT_ID`) as per-profile
+  overrides. They're recorded as colctl's, so nothing is re-added. A profile whose server of that name runs a
+  different command keeps its own (it's then `taken`). A value that looks like a secret becomes `{ env = "<KEY>" }`,
+  and adopt says to set it in your shell or store it in the keychain.
+- `colctl adopt mcp <name>`: one server, from every profile that has it. `colctl adopt <profile> mcp <name>`: from
+  that profile only.
+- `colctl adopt <claude profile> commands/<name>.md`: moves the command into `~/.colctl/commands`.
+- `colctl adopt <claude profile> hooks`: copies the hooks in that profile's `settings.json` into
+  `~/.colctl/hooks/hooks.json`. colctl doesn't edit `settings.json`: remove them there yourself, or they run twice.

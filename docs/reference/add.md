@@ -5,6 +5,10 @@ colctl add skill <path | git-url> [--subdir <path>] [--name <name>] [--dry-run]
 colctl add agent <file.md> [--dry-run]
 colctl add plugin <name@marketplace> [--codex] [--marketplace <source>] [--dry-run]
 colctl add source <repo-or-id> [--rev <commit-ish>] [--name <name>] [--plugin <plugin>] [--dry-run]
+colctl add command <file.md> [--dry-run]
+colctl add mcp <name> [--only claude|codex] [--env K=V]... [--env-from K=NAME]... [--keychain K=ITEM]...
+               (-- <command> [args]... | --url <url> [--header K=V]... [--bearer-from NAME | --bearer-keychain ITEM])
+               [--dry-run]
 ```
 
 Each adds one item to the source, commits (`colctl: add <kind> <name>`), then runs [sync](sync.md).
@@ -65,3 +69,34 @@ An argument that is a valid repo (a URL, `git@host:path`, an absolute path or `g
 never looked up. Refused with exit 2: an id the catalogs don't have, a plugin with no repo to clone (use
 `colctl add plugin <id>` to keep it on the marketplace list), and a plugin that's already a source plugin.
 Adding from a result is a first-time add, so it isn't held for review.
+
+## add command
+
+Copies `<name>.md` to `~/.colctl/commands/<name>.md` (the name must match `[a-z0-9][a-z0-9_-]*`). Sync links it into
+every Claude profile's `commands/`, so it's `/<name>` there, and writes it as a skill in `~/.agents/skills/<name>/`
+for Codex, which has no commands of its own: the skill's description is the command's `description:` (or its first
+line), and `$ARGUMENTS` reads "the user's request". Edit the command, not the skill: sync rewrites the skill when the
+command changes, and leaves it alone once you've edited it.
+
+## add mcp
+
+Adds an `[[mcp]]` entry to `config.toml` (see [config](config.md#mcp-servers)), commits it (`colctl: add mcp <name>`)
+and syncs, which runs `claude mcp add -s user` and `codex mcp add` in each profile. A server goes to every Claude and
+Codex profile unless `--only` says one tool.
+
+- `-- <command> [args]`: a server colctl's tools start. Everything after `--` is the command, so flags like
+  `--stdio` are the server's.
+- `--url <url>`: a streamable HTTP server. `--header` is Claude only (`codex mcp add` can't set headers).
+- `--env K=V`: a plain value. A value that looks like a secret is refused: "That looks like a secret. Use --env-from
+  K=NAME or --keychain K=ITEM."
+- `--env-from K=NAME`: `K` gets your `$NAME`. Claude keeps it as `${NAME}` and reads it when it starts the server;
+  Codex gets the value colctl sees when it syncs.
+- `--keychain K=ITEM`: `K` gets the macOS keychain item's value (`security find-generic-password -s ITEM -w`), read
+  at sync and passed to the tool.
+- `--bearer-from NAME` / `--bearer-keychain ITEM`: `Authorization: Bearer …` for a URL server. Codex takes the token
+  from an environment variable only.
+
+```sh
+colctl add mcp github --env-from GITHUB_TOKEN=GH_TOKEN -- npx -y @modelcontextprotocol/server-github
+colctl add mcp docs --url https://docs.example/mcp --bearer-from DOCS_TOKEN
+```

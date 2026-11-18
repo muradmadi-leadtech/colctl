@@ -47,6 +47,12 @@ invalid config, corrupt state, unknown `--harness`).
 
 ## Item states
 
+Cycle 10 adds `mcp` and `command` items, and three states: `differs` (an MCP server's entry in config and in the
+profile aren't the same: config changed, or someone edited the profile's), `taken` (the profile has its own server
+under a name config uses; see [sync --replace-mcp](sync.md)) and `unreadable` (the profile's `.claude.json` or
+`config.toml` doesn't parse). A `foreign` MCP server is the profile's own and doesn't need attention. Hooks show as
+the `colctl-setup` source.
+
 | State | Meaning | Fix |
 |---|---|---|
 | `ok` | As it should be | — |

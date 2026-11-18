@@ -175,6 +175,7 @@ fn defined_ids() -> BTreeSet<String> {
         ("reserved-marketplace-names", "ACH1", "ECH1"),
         ("solid", "AC9", "EC9"),
         ("colctl-marketplace-names", "ACH2", "ECH2"),
+        ("whole-setup", "AC10", "EC10"),
     ] {
         for (file, prefix, id) in [
             ("acceptance-criteria.md", format!("**{ac}-"), ac),
@@ -223,7 +224,7 @@ fn tested_ids() -> BTreeSet<String> {
                 if [
                     "ac", "ec", "ac2", "ec2", "ac3", "ec3", "ac4", "ec4", "ac5", "ec5", "ac6",
                     "ec6", "ac7", "ec7", "ac8", "ec8", "ach1", "ech1", "ac9", "ec9", "ach2",
-                    "ech2",
+                    "ech2", "ac10", "ec10",
                 ]
                 .contains(&pair[0])
                     && pair[1].len() == 2
@@ -264,6 +265,8 @@ fn ac_35_ac2_23_ac3_28_ac4_33_ac5_28_ac6_30_ac8_31_every_criterion_and_edge_case
         ("EC9-", 17),
         ("ACH2-", 3),
         ("ECH2-", 4),
+        ("AC10-", 32),
+        ("EC10-", 30),
     ] {
         assert_eq!(
             defined.iter().filter(|i| i.starts_with(prefix)).count(),
@@ -475,4 +478,35 @@ fn ac9_01_ac9_32_the_measure_is_recorded_and_the_docs_cover_what_changed() {
     assert!(r.contains("allowed-tools ("));
     assert!(read("docs/explanation/saved-checks.md").contains("Never stale"));
     assert!(read("README.md").contains("docs/explanation/saved-checks.md"));
+}
+
+#[test]
+fn ac10_70_ac10_71_ec10_16_the_smoke_test_is_recorded_and_the_docs_cover_the_whole_setup() {
+    let review = read("docs/whole-setup/cycle-review.md");
+    assert!(
+        review.contains("unchanged in all four"),
+        "toolport compared"
+    );
+    assert!(review.contains("0 changes"), "the second sync");
+    for page in [
+        "docs/reference/hooks.md",
+        "docs/how-to/share-an-mcp-server.md",
+        "docs/how-to/keep-a-secret-out-of-colctl.md",
+        "docs/explanation/hooks-travel-as-a-plugin.md",
+    ] {
+        assert!(repo().join(page).is_file(), "{page}");
+        assert!(read("README.md").contains(page), "README links {page}");
+    }
+    let add = read("docs/reference/add.md");
+    assert!(add.contains("## add mcp") && add.contains("## add command"));
+    assert!(read("docs/reference/rm.md").contains("rm mcp"));
+    assert!(read("docs/reference/rm.md").contains("rm command"));
+    assert!(read("docs/reference/config.md").contains("## MCP servers"));
+    assert!(read("docs/reference/sync.md").contains("--replace-mcp"));
+    assert!(read("docs/reference/adopt.md").contains("colctl adopt mcp <name>"));
+    assert!(read("docs/reference/status.md").contains("`taken`"));
+    // EC10-16: a running session picks up a changed server when it starts again.
+    assert!(
+        read("docs/how-to/share-an-mcp-server.md").contains("Start a new Claude or Codex session")
+    );
 }
