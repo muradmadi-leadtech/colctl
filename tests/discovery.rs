@@ -899,6 +899,7 @@ fn ec5_24_a_closed_pipe_ends_quietly() {
     let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("colctl"))
         .args(["search", "--limit", "0"])
         .env_clear()
+        .envs(support::coverage_vars())
         .env("HOME", &env.home)
         .env("PATH", &env.path)
         .current_dir(&env.home)

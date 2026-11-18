@@ -125,6 +125,7 @@ fn ac8_06_piped_colctl_is_the_welcome_help() {
     let out = assert_cmd::Command::new(env!("CARGO_BIN_EXE_colctl"))
         .env_clear()
         .env("HOME", std::env::temp_dir())
+        .envs(support::coverage_vars())
         .output()
         .unwrap();
     assert!(out.status.success());

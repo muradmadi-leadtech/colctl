@@ -334,17 +334,8 @@ impl Env {
             .env("PATH", &self.path)
             .env("FAKE_CLAUDE_LOG", &self.log)
             .env("FAKE_CODEX_LOG", &self.codex_log)
-            .current_dir(&self.home);
-        // Coverage runs write their profiles where this says.
-        for key in [
-            "LLVM_PROFILE_FILE",
-            "CARGO_LLVM_COV",
-            "CARGO_LLVM_COV_TARGET_DIR",
-        ] {
-            if let Some(v) = std::env::var_os(key) {
-                c.env(key, v);
-            }
-        }
+            .current_dir(&self.home)
+            .envs(coverage_vars());
         for (k, v) in &self.vars {
             c.env(k, v);
         }
@@ -479,4 +470,18 @@ impl Env {
     pub fn write_config(&self, text: &str) {
         fs::write(self.source.join("config.toml"), text).unwrap();
     }
+}
+
+/// The coverage variables to pass on to a colctl started with `env_clear()`. Without them a
+/// coverage run's binary writes `default_*.profraw` into its working directory instead of
+/// `target/llvm-cov-target`, and its coverage is lost.
+pub fn coverage_vars() -> Vec<(&'static str, std::ffi::OsString)> {
+    [
+        "LLVM_PROFILE_FILE",
+        "CARGO_LLVM_COV",
+        "CARGO_LLVM_COV_TARGET_DIR",
+    ]
+    .into_iter()
+    .filter_map(|key| std::env::var_os(key).map(|v| (key, v)))
+    .collect()
 }
