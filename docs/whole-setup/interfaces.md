@@ -118,9 +118,13 @@ leak_check(config_text) -> Vec<Finding>        // literal values for which looks
 
 - Source: `~/.colctl/commands/<name>.md`; `name` is `[a-z0-9][a-z0-9_-]*`.
 - Claude profile: a link `commands/<name>.md` → the source file (ownership by link target, as for skills).
-- Codex profiles: inside the generated `colctl-setup` plugin as `skills/<name>/SKILL.md`. Frontmatter
-  `name: <name>`, and `description` from the command's `description:` or its first line. The body is the command's
-  text; `$ARGUMENTS` becomes "the user's request".
+- Codex profiles: a generated skill in `~/.agents/skills/<name>/SKILL.md`, the folder every Codex profile already
+  reads skills from (changed in Generate, T5: simpler than carrying them in `colctl-setup`, and the same path as
+  every other skill Codex gets). Frontmatter `name: <name>`, and `description` from the command's `description:`, its
+  first line, or "Command <name>". The body is the command's text; `$ARGUMENTS` becomes "the user's request".
+  Recorded in `.state` like generated agents: rewritten when the command changes, left alone once edited, removed
+  with the command. A command and a skill with the same name: Codex keeps the skill, and the command is `invalid`
+  in `~/.agents` with the reason (EC10-19).
 - Adopt: a file in a Claude profile's `commands/` that isn't a colctl link.
 
 ## Hooks (T6) and the `colctl-setup` plugin
@@ -130,7 +134,7 @@ leak_check(config_text) -> Vec<Finding>        // literal values for which looks
 - colctl builds `colctl-setup` in its marketplace folder on every sync when there's anything to carry. The marketplace
   is `colctl-setup` and the plugin id is `setup@colctl-setup`:
   - Claude: `hooks/hooks.json` and the scripts.
-  - Codex: the same hooks passed through `repackage::hooks` (cycle 7), plus `skills/` from commands.
+  - Codex: the same hooks passed through `repackage::hooks` (cycle 7).
 - The plugin's version is the content hash, so a change reinstalls it (the 2.5 lesson: Claude ignores an update whose
   version didn't change).
 - Adopt: hooks in a profile's `settings.json` (`hooks` key) are copied into `hooks/hooks.json` and merged by event and

@@ -324,6 +324,17 @@ pub(crate) fn plan_all(
     let display = ctx.source_display();
     let generated = adapter::generated_claude_md(&display);
     let codex_agents = codex_agents(ctx, &ws.source, &display);
+    let command_skills: BTreeMap<String, Vec<u8>> = ws
+        .source
+        .commands
+        .iter()
+        .filter_map(|name| {
+            let path = ctx.source.join(source::COMMANDS).join(format!("{name}.md"));
+            fs::read_to_string(path)
+                .ok()
+                .map(|md| (name.clone(), crate::convert::command_skill(&md, name)))
+        })
+        .collect();
     let inputs = Inputs {
         config: &ws.config,
         source: &ws.source,
@@ -333,6 +344,7 @@ pub(crate) fn plan_all(
         codex_agents: &codex_agents,
         sources: &ws.sources,
         replace_mcp: &ctx.replace_mcp,
+        command_skills: &command_skills,
     };
     Ok(ws
         .config
@@ -1056,6 +1068,50 @@ pub fn add_agent(ctx: &Ctx, file: &Path, dry_run: bool) -> Result<i32, CliError>
     )
 }
 
+/// `colctl add command` (AC10-41): copies `<name>.md` into `~/.colctl/commands`, commits and syncs.
+pub fn add_command(ctx: &Ctx, file: &Path, dry_run: bool) -> Result<i32, CliError> {
+    let git = Git::for_ctx(ctx)?;
+    load(ctx)?;
+    let stem = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_suffix(".md"))
+        .ok_or_else(|| CliError::usage(format!("{} must be a .md file", file.display())))?;
+    if !crate::mcp::valid_name(stem) {
+        return Err(CliError::usage(format!(
+            "command name \"{stem}\" must match [a-z0-9][a-z0-9_-]*"
+        )));
+    }
+    if !file.is_file() {
+        return Err(CliError::usage(format!("{} isn't a file", file.display())));
+    }
+    let dest = ctx.source.join(source::COMMANDS).join(format!("{stem}.md"));
+    if fsx::exists_any(&dest) {
+        return Err(CliError::usage(format!(
+            "command \"{stem}\" is already managed"
+        )));
+    }
+    if dry_or_write(
+        ctx,
+        dry_run,
+        &format!("add command {stem} from {}", file.display()),
+    ) {
+        return Ok(0);
+    }
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
+    commit_pending(&git, ctx)?;
+    fs::create_dir_all(dest.parent().unwrap_or(&ctx.source))
+        .and_then(|_| fs::copy(file, &dest))
+        .map_err(|e| CliError::usage(format!("copying {}: {e}", file.display())))?;
+    commit(&git, ctx, &format!("colctl: add command {stem}"))?;
+    run_sync_led(
+        ctx,
+        &git,
+        None,
+        &lead(ctx, &format!("Added command {stem}"), &[]),
+    )
+}
+
 fn write_config(ctx: &Ctx, text: &str) -> Result<(), CliError> {
     config::parse(text, &ctx.home).map_err(CliError::usage)?;
     fsx::atomic_write(&ctx.source.join(CONFIG_FILE), text.as_bytes())
@@ -1140,6 +1196,7 @@ pub enum RmKind {
     Plugin,
     Source,
     Mcp,
+    Command,
 }
 
 /// `colctl rm` (AC-23).
@@ -1166,6 +1223,10 @@ pub fn rm(
         ),
         RmKind::Plugin => (plugin_label(list), None),
         RmKind::Source => ("source", None),
+        RmKind::Command => (
+            "command",
+            Some(ctx.source.join(source::COMMANDS).join(format!("{name}.md"))),
+        ),
         RmKind::Mcp => unreachable!("handled above"),
     };
     let known = match (&path, kind) {
@@ -1216,7 +1277,7 @@ pub fn rm(
         RmKind::Skill => Some(format!("{SKILLS}/{name}")),
         RmKind::Agent => Some(format!("{AGENTS}/{name}.md")),
         RmKind::Source => Some(quarantine::source_key(name)),
-        RmKind::Plugin | RmKind::Mcp => None,
+        RmKind::Plugin | RmKind::Mcp | RmKind::Command => None,
     };
     if let Some(key) = key {
         quarantine::forget(ctx, &git, &key)?;
@@ -1546,6 +1607,20 @@ fn adopt_item(ctx: &Ctx, harness: &Harness, item: &Item) -> Adoption {
             Adoption::Refused("marketplaces are adopted with their plugins".into())
         }
         ItemKind::Source => Adoption::Refused("source plugins are already colctl's".into()),
+        ItemKind::Command if harness.kind == Kind::Claude => adopt_entry(
+            &harness
+                .path
+                .join(source::COMMANDS)
+                .join(format!("{}.md", item.name)),
+            &ctx.source
+                .join(source::COMMANDS)
+                .join(format!("{}.md", item.name)),
+            false,
+            &real_copy(false),
+        ),
+        ItemKind::Command => Adoption::Refused(
+            "this skill isn't a command; adopt it as skills/<name> instead".into(),
+        ),
         // Cycle 10, T3: adopt reads every profile's servers at once.
         ItemKind::Mcp => Adoption::Refused("MCP servers are adopted with colctl adopt".into()),
     }
@@ -1558,7 +1633,8 @@ fn parse_item(words: &[String]) -> Result<Option<String>, CliError> {
             if one == CLAUDE_MD
                 || one == AGENTS_MD
                 || one.starts_with("skills/")
-                || one.starts_with("agents/") =>
+                || one.starts_with("agents/")
+                || one.starts_with("commands/") =>
         {
             Ok(Some(one.clone()))
         }

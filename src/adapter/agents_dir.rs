@@ -20,6 +20,20 @@ pub fn scan(harness: &Path, source: &Path) -> Scan {
         &owned,
         |p| p.is_dir(),
     );
+    // Real skill folders' SKILL.md: a command's generated skill is one of them (cycle 10).
+    for (name, entry) in &scan.skills {
+        if matches!(entry, super::Entry::Real)
+            && let Ok(content) = std::fs::read(harness.join(SKILLS).join(name).join("SKILL.md"))
+        {
+            scan.generated.insert(
+                name.clone(),
+                super::Generated::File {
+                    hash: crate::fsx::hash_bytes(&content),
+                    content,
+                },
+            );
+        }
+    }
     scan.temps = temps_in(harness, &[SKILLS]);
     scan
 }

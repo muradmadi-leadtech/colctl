@@ -28,6 +28,7 @@ fn subject(action: &Action) -> Option<(&'static str, String)> {
             .and_then(|n| n.to_str())
         {
             Some("skills") => ("skill", name),
+            Some("commands") => ("command", name.trim_end_matches(".md").to_string()),
             Some("agents") => ("agent", name.trim_end_matches(".md").to_string()),
             _ => ("file", name),
         }
