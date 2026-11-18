@@ -60,6 +60,7 @@ impl HarnessState {
             && self.marketplaces.is_empty()
             && self.plugins.is_empty()
             && self.sources.is_empty()
+            && self.mcp.is_empty()
     }
 }
 

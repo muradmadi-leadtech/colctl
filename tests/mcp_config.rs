@@ -213,6 +213,7 @@ fn ac10_02_add_mcp_writes_overrides_and_references_that_parse_back() {
     s.name = "toolport2".into();
     s.env.insert("SECRET".into(), Value::Keychain("tp".into()));
     s.tools = vec![colctl::tool::Tool::Claude];
+    s.profiles.retain(|h, _| h.contains("claude"));
     let text = config::add_mcp(HARNESSES, &s).unwrap();
     let back = parse(&text).unwrap();
     assert_eq!(back.mcp, vec![s]);

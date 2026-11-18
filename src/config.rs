@@ -168,6 +168,8 @@ struct Raw {
     codex: Option<RawCodex>,
     #[serde(default)]
     source: Vec<RawSource>,
+    #[serde(default)]
+    mcp: Vec<Spanned<toml::Table>>,
 }
 
 #[derive(Deserialize)]
@@ -492,6 +494,17 @@ pub fn parse(text: &str, home: &Path) -> Result<Config, String> {
             convert,
         });
     }
+    for entry in &raw.mcp {
+        let server = crate::mcp::parse_entry(entry.get_ref(), &config.harnesses)
+            .map_err(|msg| at(entry.span(), msg))?;
+        if config.mcp.iter().any(|s| s.name == server.name) {
+            return Err(at(
+                entry.span(),
+                format!("duplicate mcp server \"{}\"", server.name),
+            ));
+        }
+        config.mcp.push(server);
+    }
     Ok(config)
 }
 
@@ -765,14 +778,45 @@ pub fn set_source_convert(text: &str, name: &str, on: bool) -> Result<String, St
 
 /// Appends an `[[mcp]]` entry (with its `[mcp.profile.*]` overrides), leaving every other line as it was.
 pub fn add_mcp(text: &str, server: &crate::mcp::Server) -> Result<String, String> {
-    let _ = (text, server);
-    todo!()
+    let doc = document(text)?;
+    let taken = doc
+        .get("mcp")
+        .and_then(Item::as_array_of_tables)
+        .is_some_and(|t| {
+            t.iter()
+                .any(|t| t.get("name").and_then(|v| v.as_str()) == Some(server.name.as_str()))
+        });
+    if taken {
+        return Err(format!(
+            "{CONFIG_FILE}: there's already an [[mcp]] named \"{}\"",
+            server.name
+        ));
+    }
+    let mut out = text.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&crate::mcp::render(server));
+    Ok(out)
 }
 
 /// Removes an `[[mcp]]` entry and its overrides.
 pub fn remove_mcp(text: &str, name: &str) -> Result<String, String> {
-    let _ = (text, name);
-    todo!()
+    let mut doc = document(text)?;
+    let missing = || format!("{CONFIG_FILE}: no [[mcp]] named \"{name}\"");
+    let tables = doc
+        .get_mut("mcp")
+        .and_then(Item::as_array_of_tables_mut)
+        .ok_or_else(missing)?;
+    let index = tables
+        .iter()
+        .position(|t| t.get("name").and_then(|v| v.as_str()) == Some(name))
+        .ok_or_else(missing)?;
+    tables.remove(index);
+    if tables.is_empty() {
+        doc.remove("mcp");
+    }
+    Ok(doc.to_string())
 }
 
 /// Removes a `[[source]]` table.
