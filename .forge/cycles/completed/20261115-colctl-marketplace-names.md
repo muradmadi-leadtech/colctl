@@ -55,17 +55,17 @@
 **Purpose**: Verify output matches intent.
 
 ### Checklist
-- [ ] Criteria verified line-by-line
-- [ ] Edge cases tested
-- [ ] Code review: Full test suite passes with coverage threshold met
-- [ ] Code review: Security review completed
-- [ ] Code review: Integration and interface contracts verified
-- [ ] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
-- [ ] Disposition decision made
+- [x] Criteria verified line-by-line
+- [x] Edge cases tested
+- [x] Code review: Full test suite passes with coverage threshold met
+- [x] Code review: Security review completed
+- [x] Code review: Integration and interface contracts verified
+- [x] Cycle review summary emitted (docs/<cycle>/cycle-review.md + HTML sibling)
+- [x] Disposition decision made
 
 ### Disposition
 
-<!-- Accept / Accept with issues / Revise / Reject -->
+**Accept** (owner, 2026-11-18). v2.6.1 (#137, release #138, review #139). The owner accepted without running the reviewer checklist on the real profiles yet; anything found later is a new fix.
 
 ---
 
