@@ -30,6 +30,19 @@ pub struct HarnessState {
     /// Source plugins colctl installed here (cycle 3).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sources: BTreeMap<String, InstalledSource>,
+    /// MCP servers colctl added here (cycle 10), by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mcp: BTreeMap<String, McpRecord>,
+}
+
+/// An MCP server colctl added to one harness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpRecord {
+    /// `sha256:` of the entry as configured for this harness, references unresolved.
+    pub config: String,
+    /// `sha256:` of what the profile's file held right after colctl added it.
+    pub written: String,
 }
 
 /// A source plugin as installed in one harness.

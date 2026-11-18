@@ -144,6 +144,8 @@ pub struct Config {
     pub codex_plugins: Vec<String>,
     /// `[[source]]` entries, in file order.
     pub sources: Vec<Source>,
+    /// `[[mcp]]` entries, in file order (cycle 10).
+    pub mcp: Vec<crate::mcp::Server>,
 }
 
 impl Config {
@@ -759,6 +761,18 @@ pub fn set_source_convert(text: &str, name: &str, on: bool) -> Result<String, St
             }
         }
     })
+}
+
+/// Appends an `[[mcp]]` entry (with its `[mcp.profile.*]` overrides), leaving every other line as it was.
+pub fn add_mcp(text: &str, server: &crate::mcp::Server) -> Result<String, String> {
+    let _ = (text, server);
+    todo!()
+}
+
+/// Removes an `[[mcp]]` entry and its overrides.
+pub fn remove_mcp(text: &str, name: &str) -> Result<String, String> {
+    let _ = (text, name);
+    todo!()
 }
 
 /// Removes a `[[source]]` table.
