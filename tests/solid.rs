@@ -332,16 +332,8 @@ fn ec9_05_processes_checking_at_once_never_read_half_a_file() {
                     .env("PATH", &env.path)
                     .current_dir(&env.home)
                     .arg("review")
-                    .stdout(std::process::Stdio::null());
-                for key in [
-                    "LLVM_PROFILE_FILE",
-                    "CARGO_LLVM_COV",
-                    "CARGO_LLVM_COV_TARGET_DIR",
-                ] {
-                    if let Some(v) = std::env::var_os(key) {
-                        c.env(key, v);
-                    }
-                }
+                    .stdout(std::process::Stdio::null())
+                    .envs(support::coverage_vars());
                 c.spawn().unwrap()
             })
             .collect();
