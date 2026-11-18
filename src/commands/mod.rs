@@ -190,6 +190,15 @@ fn prepare_sources(
             codex_rev,
         });
     }
+    // Cycle 10: hooks travel in colctl's own plugin, planned like a source.
+    if let Some(setup) = crate::setup::input(
+        &ctx.source,
+        &plugins_dir(ctx),
+        &manifests_dir(ctx, crate::setup::SOURCE),
+        false,
+    ) {
+        inputs.push(setup);
+    }
     (inputs, clones)
 }
 
@@ -586,6 +595,13 @@ fn run_sync_led(
         ws.config = config;
         ws.config_text = text;
     }
+    // Build colctl-setup before planning, so the plan sees it built (cycle 10).
+    crate::setup::input(
+        &ctx.source,
+        &plugins_dir(ctx),
+        &manifests_dir(ctx, crate::setup::SOURCE),
+        true,
+    );
     (ws.sources, ws.clones) = prepare_sources(ctx, &ws.config, Some(git), &errors);
     let mut lead = lead.to_vec();
     for n in &notes {
@@ -696,8 +712,14 @@ fn remove_stale_clones(ctx: &Ctx, config: &Config) {
             let _ = fsx::remove_any(&plugins_dir(ctx).join(&name));
         }
     }
+    // colctl-setup's marketplace stays while there are hooks to carry (cycle 10).
+    let hooks = ctx
+        .source
+        .join(crate::setup::HOOKS)
+        .join(crate::setup::HOOKS_FILE)
+        .is_file();
     for name in source::visible_entries(&plugins_dir(ctx).join(MANIFESTS)) {
-        if !declared.contains(&name.as_str()) {
+        if !declared.contains(&name.as_str()) && !(hooks && name == crate::setup::SOURCE) {
             let _ = fsx::remove_any(&manifests_dir(ctx, &name));
         }
     }
@@ -1066,6 +1088,95 @@ pub fn add_agent(ctx: &Ctx, file: &Path, dry_run: bool) -> Result<i32, CliError>
         None,
         &lead(ctx, &format!("Added agent {stem}"), &[]),
     )
+}
+
+/// `colctl adopt <profile> hooks` (AC10-53): copies the hooks in a Claude profile's `settings.json`
+/// into `~/.colctl/hooks/hooks.json`, merged by event, leaving `settings.json` as it was.
+fn adopt_hooks(ctx: &Ctx, git: &Git, harness: &str, dry_run: bool) -> Result<i32, CliError> {
+    let ws = load(ctx)?;
+    let h = ws
+        .config
+        .harness(harness)
+        .filter(|h| h.kind == Kind::Claude)
+        .ok_or_else(|| CliError::usage("hooks are adopted from a Claude profile"))?;
+    let settings = h.path.join("settings.json");
+    let theirs: Value = fs::read_to_string(&settings)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(Value::Null);
+    let Some(events) = theirs
+        .get("hooks")
+        .and_then(Value::as_object)
+        .filter(|e| !e.is_empty())
+    else {
+        ctx.out.line(render::verdict(
+            &ctx.out.caps,
+            Token::Info,
+            &format!("No hooks in {}", settings.display()),
+            &[],
+        ));
+        return Ok(0);
+    };
+    let file = ctx
+        .source
+        .join(crate::setup::HOOKS)
+        .join(crate::setup::HOOKS_FILE);
+    let mut ours: Value = fs::read_to_string(&file)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| json!({"hooks": {}}));
+    if !ours["hooks"].is_object() {
+        ours["hooks"] = json!({});
+    }
+    let mut added = 0;
+    for (event, groups) in events {
+        let list = ours["hooks"]
+            .as_object_mut()
+            .map(|m| m.entry(event.clone()).or_insert_with(|| json!([])))
+            .and_then(Value::as_array_mut);
+        if let (Some(list), Some(groups)) = (list, groups.as_array()) {
+            for g in groups {
+                if !list.contains(g) {
+                    list.push(g.clone());
+                    added += 1;
+                }
+            }
+        }
+    }
+    let shown = settings
+        .display()
+        .to_string()
+        .replace(&format!("{}/", ctx.home.display()), "~/");
+    if dry_run {
+        ctx.out.line(render::verdict(
+            &ctx.out.caps,
+            Token::Info,
+            &format!("Would adopt {} from {shown}", plural(added, "hook group")),
+            &[],
+        ));
+        return Ok(0);
+    }
+    let _lock = Lock::acquire_with(&ctx.source, &ctx.out)?;
+    commit_pending(git, ctx)?;
+    let text = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&ours).unwrap_or_default()
+    );
+    fsx::atomic_write(&file, text.as_bytes()).map_err(|e| CliError::usage(format!("{e:#}")))?;
+    commit(git, ctx, &format!("colctl: adopt hooks from {harness}"))?;
+    let lead = item_lines(
+        ctx,
+        Token::Ok,
+        &format!("Adopted {} from {shown}", plural(added, "hook group")),
+        &[],
+        &[(
+            Token::Attention,
+            format!(
+                "Remove these from {shown} yourself; colctl doesn't edit it. Until you do, they run twice."
+            ),
+        )],
+    );
+    run_sync_led(ctx, git, None, &lead)
 }
 
 /// `colctl add command` (AC10-41): copies `<name>.md` into `~/.colctl/commands`, commits and syncs.
@@ -1634,7 +1745,8 @@ fn parse_item(words: &[String]) -> Result<Option<String>, CliError> {
                 || one == AGENTS_MD
                 || one.starts_with("skills/")
                 || one.starts_with("agents/")
-                || one.starts_with("commands/") =>
+                || one.starts_with("commands/")
+                || one == crate::setup::HOOKS =>
         {
             Ok(Some(one.clone()))
         }
@@ -1704,6 +1816,9 @@ pub fn adopt(
         return Err(CliError::usage(
             "name the harness before the item: colctl adopt <harness> <item>",
         ));
+    }
+    if wanted.as_deref() == Some(crate::setup::HOOKS) {
+        return adopt_hooks(ctx, &git, harness.unwrap_or_default(), dry_run);
     }
     let matches = |i: &Item| wanted.as_ref().is_none_or(|w| *w == i.address());
     let mut said: Vec<(Token, String)> = Vec::new();

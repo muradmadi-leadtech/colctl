@@ -26,6 +26,7 @@ pub mod risk;
 pub mod runner;
 pub mod search;
 pub mod secret;
+pub mod setup;
 pub mod source;
 pub mod state;
 pub mod tool;
