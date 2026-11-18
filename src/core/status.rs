@@ -8,7 +8,7 @@ use crate::config::Kind;
 use crate::ctx::Ctx;
 use crate::error::{CliError, EXIT_DRIFT};
 use crate::git::Git;
-use crate::plan::{ItemKind, ItemState};
+use crate::plan::{Item, ItemKind, ItemState};
 use crate::state::Candidate;
 use crate::vault;
 use std::path::PathBuf;
@@ -262,11 +262,13 @@ fn verdict(profiles: usize, problems: usize, sources: usize) -> Verdict {
     }
 }
 
-/// How a state reads in status.
-pub(crate) fn tone(state: ItemState) -> Tone {
-    match state {
+/// How an item's state reads in status. A foreign MCP server is the profile's own business, so it's
+/// informational (cycle 10).
+pub(crate) fn tone(item: &Item) -> Tone {
+    match item.state {
         ItemState::Ok => Tone::Ok,
         ItemState::Unsupported | ItemState::Unreviewed => Tone::Info,
+        ItemState::Foreign if item.kind == ItemKind::Mcp => Tone::Info,
         _ => Tone::Attention,
     }
 }
@@ -275,12 +277,7 @@ fn profile(ctx: &Ctx, p: &Planned, agents: Option<&str>) -> Profile {
     let usable = p.plan.root == Root::Ok;
     let mark = if !usable {
         Tone::Failed
-    } else if p
-        .plan
-        .items
-        .iter()
-        .any(|i| tone(i.state) == Tone::Attention)
-    {
+    } else if p.plan.items.iter().any(|i| tone(i) == Tone::Attention) {
         Tone::Attention
     } else {
         Tone::Ok
@@ -311,7 +308,7 @@ fn profile(ctx: &Ctx, p: &Planned, agents: Option<&str>) -> Profile {
                 kind: i.kind.as_str().to_string(),
                 name: i.name.clone(),
                 state: i.state.as_str().to_string(),
-                tone: tone(i.state),
+                tone: tone(i),
                 hint: i.hint.clone(),
                 address: i.address.clone(),
             })
@@ -354,6 +351,9 @@ fn contents(p: &Planned, agents: Option<&str>) -> Vec<(String, Option<Tone>)> {
     let order = [
         ItemState::Missing,
         ItemState::Broken,
+        ItemState::Differs,
+        ItemState::Taken,
+        ItemState::Unreadable,
         ItemState::Orphaned,
         ItemState::Foreign,
         ItemState::ForeignLink,
@@ -381,7 +381,15 @@ fn contents(p: &Planned, agents: Option<&str>) -> Vec<(String, Option<Tone>)> {
             }
             s => s.as_str(),
         };
-        parts.push((format!("{n} {words}"), Some(tone(state))));
+        let tone = if items
+            .iter()
+            .any(|i| i.state == state && tone(i) == Tone::Attention)
+        {
+            Tone::Attention
+        } else {
+            Tone::Info
+        };
+        parts.push((format!("{n} {words}"), Some(tone)));
     }
     if parts.is_empty() {
         parts.push(("nothing yet".into(), Some(Tone::Info)));
@@ -402,12 +410,7 @@ pub(crate) fn attention(
     let mut out: Vec<Attention> = Vec::new();
     let source = ctx.tilde(&ctx.source);
     for p in planned.iter().filter(|p| p.plan.root == Root::Ok) {
-        for i in p
-            .plan
-            .items
-            .iter()
-            .filter(|i| tone(i.state) == Tone::Attention)
-        {
+        for i in p.plan.items.iter().filter(|i| tone(i) == Tone::Attention) {
             out.push(Attention {
                 place: p.harness.name.clone(),
                 kind: i.kind.as_str().to_string(),

@@ -47,7 +47,10 @@ fn subject(action: &Action) -> Option<(&'static str, String)> {
         | Action::UpdateSource { id, .. }
         | Action::Uninstall { id }
         | Action::UninstallSource { id, .. } => plugin(id),
+        Action::AddMcp { entry, .. } => ("MCP server", entry.name.clone()),
+        Action::RemoveMcp { name } => ("MCP server", name.clone()),
         Action::CleanupTemp(_)
+        | Action::ForgetMcp { .. }
         | Action::RecordGenerated { .. }
         | Action::ForgetMarketplace { .. }
         | Action::ForgetPlugin { .. }
@@ -71,6 +74,8 @@ fn verb(action: &Action) -> (&'static str, &'static str, &'static str) {
             ("installed", "installing", "install")
         }
         Action::UpdateSource { .. } => ("updated", "updating", "update"),
+        Action::AddMcp { .. } => ("added", "adding", "add"),
+        Action::RemoveMcp { .. } => ("removed", "removing", "remove"),
         Action::Uninstall { .. } | Action::UninstallSource { .. } => {
             ("uninstalled", "uninstalling", "uninstall")
         }

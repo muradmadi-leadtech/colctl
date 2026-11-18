@@ -20,6 +20,8 @@ pub enum ItemKind {
     Plugin,
     /// A source plugin (cycle 3), named by its source.
     Source,
+    /// An MCP server (cycle 10).
+    Mcp,
 }
 
 impl ItemKind {
@@ -31,6 +33,7 @@ impl ItemKind {
             ItemKind::Marketplace => "marketplace",
             ItemKind::Plugin => "plugin",
             ItemKind::Source => "source",
+            ItemKind::Mcp => "mcp",
         }
     }
 }
@@ -58,6 +61,12 @@ pub enum ItemState {
     /// A list plugin: its updates come from its marketplace, not through `colctl review`.
     /// Informational (AC4-30).
     Unreviewed,
+    /// Colctl's entry and the profile's differ (cycle 10: an MCP server).
+    Differs,
+    /// The profile has its own entry under a name colctl's config uses (cycle 10).
+    Taken,
+    /// The profile's file that lists these items can't be read (EC10-03).
+    Unreadable,
 }
 
 impl ItemState {
@@ -77,6 +86,9 @@ impl ItemState {
             ItemState::Unsupported => "unsupported",
             ItemState::FromAggregator => "from-aggregator",
             ItemState::Unreviewed => "unreviewed",
+            ItemState::Differs => "differs",
+            ItemState::Taken => "taken",
+            ItemState::Unreadable => "unreadable",
         }
     }
 }
@@ -115,6 +127,7 @@ impl Item {
             ItemKind::Plugin => format!("plugin {name}"),
             ItemKind::Marketplace => format!("marketplace {name}"),
             ItemKind::Source => format!("sources/{name}"),
+            ItemKind::Mcp => format!("mcp {name}"),
         }
     }
 
@@ -202,6 +215,18 @@ pub enum Action {
     ForgetSource {
         source: String,
     },
+    /// Add an MCP server through the tool's CLI (cycle 10); `config` is recorded with it.
+    AddMcp {
+        entry: crate::mcp::Effective,
+        config: String,
+    },
+    RemoveMcp {
+        name: String,
+    },
+    /// Drop an MCP server from the state; it's already gone from the profile.
+    ForgetMcp {
+        name: String,
+    },
 }
 
 impl Action {
@@ -240,6 +265,9 @@ impl Action {
             Action::UninstallSource { id, .. } => format!("uninstall plugin {id}"),
             Action::RemoveSourceMarketplace { name } => format!("remove marketplace {name}"),
             Action::ForgetSource { source } => format!("forget source {source}"),
+            Action::AddMcp { entry, .. } => format!("add MCP server {}", entry.name),
+            Action::RemoveMcp { name } => format!("remove MCP server {name}"),
+            Action::ForgetMcp { name } => format!("forget MCP server {name}"),
         }
     }
 
@@ -256,6 +284,8 @@ impl Action {
                 | Action::UpdateSource { .. }
                 | Action::UninstallSource { .. }
                 | Action::RemoveSourceMarketplace { .. }
+                | Action::AddMcp { .. }
+                | Action::RemoveMcp { .. }
         )
     }
 }
@@ -281,7 +311,7 @@ impl HarnessPlan {
                 matches!(
                     i.state,
                     ItemState::Ok | ItemState::Unsupported | ItemState::Unreviewed
-                )
+                ) || (i.kind == ItemKind::Mcp && i.state == ItemState::Foreign)
             })
     }
 }
@@ -352,7 +382,11 @@ fn hint(item: &Item, harness: &str, source_display: &str) -> Option<String> {
         | ItemState::Orphaned
         | ItemState::PluginMissing
         | ItemState::MarketplaceMissing
-        | ItemState::Outdated => "colctl sync".to_string(),
+        | ItemState::Outdated
+        | ItemState::Differs => "colctl sync".to_string(),
+        ItemState::Taken => format!("colctl adopt, or colctl sync --replace-mcp {}", item.name),
+        ItemState::Unreadable => return None,
+        ItemState::Foreign if item.kind == ItemKind::Mcp => format!("colctl adopt {harness}"),
         ItemState::Unsupported | ItemState::Unreviewed => return None,
         ItemState::FromAggregator => format!(
             "source: {}; colctl adopt {harness} {address}",
@@ -399,6 +433,93 @@ impl Builder<'_> {
         };
         item.hint = hint(&item, &self.harness.name, self.inputs.source_display);
         self.items.push(item);
+    }
+
+    /// An item whose hint says why, instead of the usual one.
+    fn item_why(&mut self, kind: ItemKind, name: &str, state: ItemState, why: &str) {
+        self.item(kind, name, state);
+        if let Some(item) = self.items.last_mut() {
+            item.hint = Some(why.to_string());
+        }
+    }
+
+    /// MCP servers (cycle 10, interfaces.md § .state): config against the profile's file and what
+    /// colctl recorded. Foreign servers are listed and left alone; a name the profile already uses
+    /// is `taken`, never overwritten here.
+    fn mcp(&mut self, scan: &Result<crate::mcp::Entries, String>, state: &HarnessState) {
+        let Some(tool) = Tool::for_kind(self.harness.kind) else {
+            return;
+        };
+        let wanted: Vec<crate::mcp::Effective> = self
+            .inputs
+            .config
+            .mcp
+            .iter()
+            .filter_map(|s| s.for_harness(self.harness))
+            .collect();
+        let actual = match scan {
+            Ok(a) => a,
+            Err(reason) => {
+                for e in &wanted {
+                    self.item_why(ItemKind::Mcp, &e.name, ItemState::Unreadable, reason);
+                }
+                return;
+            }
+        };
+        for e in &wanted {
+            if let Some(why) = crate::mcp::unsupported(e, tool) {
+                self.item_why(ItemKind::Mcp, &e.name, ItemState::Unsupported, &why);
+                continue;
+            }
+            let config = e.config_hash();
+            let add = Action::AddMcp {
+                entry: e.clone(),
+                config: config.clone(),
+            };
+            match (actual.get(&e.name), state.mcp.get(&e.name)) {
+                (None, _) => {
+                    self.item(ItemKind::Mcp, &e.name, ItemState::Missing);
+                    self.actions.push(add);
+                }
+                (Some(_), None) => self.item(ItemKind::Mcp, &e.name, ItemState::Taken),
+                (Some(have), Some(record)) => {
+                    let edited = crate::mcp::written_hash(have) != record.written;
+                    if record.config == config && !edited {
+                        self.item(ItemKind::Mcp, &e.name, ItemState::Ok);
+                    } else {
+                        if edited {
+                            self.item_why(
+                                ItemKind::Mcp,
+                                &e.name,
+                                ItemState::Differs,
+                                "changed outside colctl; colctl sync puts config's back",
+                            );
+                        } else {
+                            self.item(ItemKind::Mcp, &e.name, ItemState::Differs);
+                        }
+                        self.actions.push(Action::RemoveMcp {
+                            name: e.name.clone(),
+                        });
+                        self.actions.push(add);
+                    }
+                }
+            }
+        }
+        let wants = |n: &str| wanted.iter().any(|e| e.name == n);
+        for name in state.mcp.keys().filter(|n| !wants(n)) {
+            self.item(ItemKind::Mcp, name, ItemState::Orphaned);
+            self.actions.push(if actual.contains_key(name) {
+                Action::RemoveMcp { name: name.clone() }
+            } else {
+                Action::ForgetMcp { name: name.clone() }
+            });
+        }
+        for name in actual
+            .keys()
+            .filter(|n| !wants(n) && !state.mcp.contains_key(*n))
+        {
+            self.item(ItemKind::Mcp, name, ItemState::Foreign);
+        }
     }
 
     fn linked_elsewhere(&mut self, kind: ItemKind, name: &str, target: &std::path::Path) {
@@ -1010,12 +1131,14 @@ pub fn plan(harness: &Harness, scan: &Scan, state: &HarnessState, inputs: &Input
                 b.links(ItemKind::Agent, &scan.agents);
                 b.plugins(&scan.plugins, state, PluginList::Claude);
                 b.sources(&scan.plugins, state, PluginList::Claude);
+                b.mcp(&scan.mcp, state);
             }
             Kind::Codex => {
                 b.instructions_link(&scan.instructions);
                 b.generated_agents(&scan.generated, state);
                 b.plugins(&scan.plugins, state, PluginList::Codex);
                 b.sources(&scan.plugins, state, PluginList::Codex);
+                b.mcp(&scan.mcp, state);
             }
             Kind::Agents => b.links(ItemKind::Skill, &scan.skills),
         }
@@ -1056,6 +1179,7 @@ mod tests {
             generated: BTreeMap::new(),
             plugins: Ok(Plugins::default()),
             temps: Vec::new(),
+            mcp: Ok(Default::default()),
         }
     }
 

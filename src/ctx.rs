@@ -22,6 +22,9 @@ pub struct Ctx {
     pub path_var: OsString,
     /// Names of every environment variable set for this process.
     pub env_keys: Vec<String>,
+    /// Values of the environment variables that are valid UTF-8, read when an MCP server's
+    /// `{ env = "NAME" }` must be resolved (cycle 10).
+    pub env_values: EnvValues,
     /// How long one `claude` or `codex` call may run.
     pub tool_timeout: Duration,
     /// Where human-readable output goes, and what the terminal allows (cycle 6).
@@ -60,6 +63,11 @@ impl Ctx {
             default_source,
             path_var: get("PATH").unwrap_or_default(),
             env_keys: vars.iter().map(|(k, _)| k.clone()).collect(),
+            env_values: EnvValues(
+                vars.iter()
+                    .filter_map(|(k, v)| v.to_str().map(|v| (k.clone(), v.to_string())))
+                    .collect(),
+            ),
             tool_timeout,
             out: crate::ui::Out::default(),
         })
@@ -149,5 +157,21 @@ mod tests {
     fn from_process_reads_the_real_environment() {
         // HOME is set wherever the test suite runs.
         assert!(Ctx::from_process().is_ok());
+    }
+}
+
+/// Environment variable values. Its `Debug` shows names only, so a value never reaches a log.
+#[derive(Clone, Default)]
+pub struct EnvValues(std::collections::BTreeMap<String, String>);
+
+impl EnvValues {
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.0.get(name).map(String::as_str)
+    }
+}
+
+impl std::fmt::Debug for EnvValues {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.0.keys()).finish()
     }
 }

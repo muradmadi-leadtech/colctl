@@ -151,6 +151,8 @@ pub struct Scan {
     pub plugins: Result<Plugins, String>,
     /// Leftovers from an interrupted run (EC-21).
     pub temps: Vec<PathBuf>,
+    /// The profile's MCP servers (cycle 10), filled in by the caller, which knows the home folder.
+    pub mcp: Result<crate::mcp::Entries, String>,
 }
 
 impl Scan {
@@ -163,6 +165,7 @@ impl Scan {
             generated: BTreeMap::new(),
             plugins: Ok(Plugins::default()),
             temps: Vec::new(),
+            mcp: Ok(Default::default()),
         }
     }
 }
