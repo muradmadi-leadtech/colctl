@@ -39,7 +39,9 @@ replaces = ["superpowers@anthropic-plugin-directory"]   # optional: ids uninstal
   .agents/plugins/marketplace.json            {"name": "colctl-<name>", "plugins": [{"name": "<plugin>",
                                                "source": {"source": "url", "url": "./plugin"},
                                                "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}}]}
-  plugin -> ../../<name>[/<subpath>]          symlink to the clone (or its plugin subfolder)
+  plugin/                                     copy of the clone (or its plugin subfolder), links inside
+                                               the clone resolved (ECH3-01); a link would resolve outside
+                                               the marketplace, which Claude refuses
 ~/.colctl/.gitignore                          gains "plugins/"
 ```
 

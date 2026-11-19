@@ -71,9 +71,13 @@ fn ach2_01_every_source_installs_from_colctls_own_marketplace() {
     assert_eq!(entry["source"], "./plugin");
     assert_eq!(entry["description"], "Skills", "the repo's fields are kept");
     assert_eq!(entry["category"], "dev");
-    assert_eq!(
-        fs::read_link(manifests.join("plugin")).unwrap(),
-        env.source.join("plugins/superpowers")
+    // ECH3-01: a copy of the clone, not a link into it, so no plugin path resolves outside.
+    let plugin = manifests.join("plugin");
+    assert!(!fs::symlink_metadata(&plugin).unwrap().is_symlink());
+    assert!(plugin.join(".claude-plugin/marketplace.json").is_file());
+    assert!(
+        !plugin.join(".git").exists(),
+        "the clone's git folder isn't copied"
     );
     assert_eq!(
         env.item_state("claude", "source", "superpowers").as_deref(),
