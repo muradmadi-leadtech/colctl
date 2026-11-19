@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.1](https://github.com/muradmadi-leadtech/colctl/compare/v2.7.0...v2.7.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **packaging:** copy wrapped plugins instead of linking them ([#153](https://github.com/muradmadi-leadtech/colctl/issues/153)) ([a85884e](https://github.com/muradmadi-leadtech/colctl/commit/a85884e0d362d5e8a236a87d13c8fcfbff7133e1))
+
 ## [2.7.0](https://github.com/muradmadi-leadtech/colctl/compare/v2.6.1...v2.7.0) (2026-11-18)
 
 
