@@ -87,6 +87,77 @@ pub fn copy_tree(from: &Path, to: &Path, skip_git: bool) -> Result<()> {
     Ok(())
 }
 
+/// Makes `to` a real copy of `from` with every link resolved: a link to something inside `bound` is
+/// copied as what it points to, and one that leads outside `bound`, dangles or loops back into the
+/// tree is left out, as are `.git` entries. Claude refuses a plugin path that resolves outside the
+/// plugin or its marketplace folder, so a plugin folder handed to it can't hold links. `to` (a link
+/// or a folder from an earlier run) is replaced only when the copy differs, and atomically: a failed
+/// copy leaves it as it was.
+pub fn mirror_tree(from: &Path, to: &Path, bound: &Path) -> Result<()> {
+    let bound = fs::canonicalize(bound).with_context(|| format!("reading {}", bound.display()))?;
+    let root = fs::canonicalize(from).with_context(|| format!("reading {}", from.display()))?;
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let tmp = temp_sibling(to, "mirror-")?;
+    if exists_any(&tmp) {
+        remove_any(&tmp)?;
+    }
+    if let Err(e) = copy_resolved(&root, &tmp, &bound, &mut vec![root.clone()]) {
+        let _ = remove_any(&tmp);
+        return Err(e);
+    }
+    if !is_symlink(to) && to.is_dir() && hash_tree(to).ok() == hash_tree(&tmp).ok() {
+        return remove_any(&tmp);
+    }
+    if !exists_any(to) {
+        return fs::rename(&tmp, to)
+            .with_context(|| format!("moving a copy into {}", to.display()));
+    }
+    let aside = temp_sibling(to, "old-")?;
+    fs::rename(to, &aside).with_context(|| format!("moving {} aside", to.display()))?;
+    if let Err(e) = fs::rename(&tmp, to) {
+        fs::rename(&aside, to).ok();
+        let _ = remove_any(&tmp);
+        return Err(e).with_context(|| format!("moving a copy into {}", to.display()));
+    }
+    remove_any(&aside)
+}
+
+/// Copies the real folder `dir` into `to`, following links as [`mirror_tree`] describes. `stack`
+/// holds the real folders being copied, so a link back into one of them is left out.
+fn copy_resolved(dir: &Path, to: &Path, bound: &Path, stack: &mut Vec<PathBuf>) -> Result<()> {
+    fs::create_dir_all(to).with_context(|| format!("creating {}", to.display()))?;
+    for entry in fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let entry = entry?;
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        let real = if is_symlink(&src) {
+            match fs::canonicalize(&src) {
+                Ok(real) if real.starts_with(bound) => real,
+                _ => continue,
+            }
+        } else {
+            src
+        };
+        if real.is_dir() {
+            if stack.iter().any(|d| d.starts_with(&real)) {
+                continue;
+            }
+            stack.push(real.clone());
+            let copied = copy_resolved(&real, &dst, bound, stack);
+            stack.pop();
+            copied?;
+        } else {
+            fs::copy(&real, &dst).with_context(|| format!("copying {}", real.display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// True when `path` itself (not what it points to) is a symlink.
 pub fn is_symlink(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
@@ -273,6 +344,66 @@ mod tests {
         assert!(b.join("SKILL.md").is_file());
         assert!(!b.join(".git").exists());
         assert!(copy_tree(&t.path().join("missing"), &t.path().join("c"), false).is_err());
+    }
+
+    #[test]
+    fn mirror_tree_resolves_links_inside_the_bound_and_drops_the_rest() {
+        use std::os::unix::fs::MetadataExt;
+        let t = tmp();
+        let repo = t.path().join("repo");
+        let plugin = repo.join("plugins/x/claude");
+        fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
+        fs::write(plugin.join(".claude-plugin/plugin.json"), "{}").unwrap();
+        fs::create_dir_all(repo.join("skills/a/scripts")).unwrap();
+        fs::write(repo.join("skills/a/SKILL.md"), "a").unwrap();
+        fs::write(repo.join("skills/a/scripts/run.sh"), "echo").unwrap();
+        fs::set_permissions(
+            repo.join("skills/a/scripts/run.sh"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        fs::write(repo.join("README.md"), "r").unwrap();
+        fs::write(t.path().join("secret"), "s").unwrap();
+        symlink("../../../skills", plugin.join("skills")).unwrap();
+        symlink("../../../README.md", plugin.join("README.md")).unwrap();
+        symlink(t.path().join("secret"), plugin.join("escapes")).unwrap();
+        symlink("nowhere", plugin.join("dangling")).unwrap();
+        symlink("..", plugin.join("loop")).unwrap();
+        fs::create_dir_all(plugin.join(".git")).unwrap();
+
+        let to = t.path().join("manifests/plugin");
+        // An older colctl left a link here; it's replaced by a real folder.
+        fs::create_dir_all(to.parent().unwrap()).unwrap();
+        symlink(&plugin, &to).unwrap();
+        mirror_tree(&plugin, &to, &repo).unwrap();
+
+        assert!(!is_symlink(&to) && to.is_dir());
+        assert!(!is_symlink(&to.join("skills")));
+        assert_eq!(fs::read(to.join("skills/a/SKILL.md")).unwrap(), b"a");
+        let mode = fs::metadata(to.join("skills/a/scripts/run.sh"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_ne!(mode & 0o111, 0, "executable bits kept");
+        assert!(!is_symlink(&to.join("README.md")) && to.join("README.md").is_file());
+        for gone in ["escapes", "dangling", "loop", ".git"] {
+            assert!(!exists_any(&to.join(gone)), "{gone} is left out");
+        }
+        assert!(find_temps(to.parent().unwrap()).is_empty());
+
+        // Unchanged: the copy isn't rewritten. Changed: it's replaced.
+        let ino = fs::metadata(&to).unwrap().ino();
+        mirror_tree(&plugin, &to, &repo).unwrap();
+        assert_eq!(fs::metadata(&to).unwrap().ino(), ino);
+        fs::write(repo.join("skills/a/SKILL.md"), "b").unwrap();
+        mirror_tree(&plugin, &to, &repo).unwrap();
+        assert_eq!(fs::read(to.join("skills/a/SKILL.md")).unwrap(), b"b");
+        assert!(find_temps(to.parent().unwrap()).is_empty());
+        assert!(mirror_tree(&t.path().join("missing"), &to, &repo).is_err());
+        assert!(
+            to.join("skills/a/SKILL.md").is_file(),
+            "a failed copy keeps the old one"
+        );
     }
 
     #[test]

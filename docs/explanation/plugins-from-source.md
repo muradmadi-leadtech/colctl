@@ -13,7 +13,9 @@ Many plugin repos ship packaging for several tools side by side (`.claude-plugin
 `.agents/plugins/marketplace.json`). colctl reads them to find each tool's plugin folder and keeps every field the
 author wrote for it, so each tool installs exactly what the author published. The marketplace it installs from is
 always `colctl-<name>`, a one-plugin manifest colctl writes next to the clone (in `plugins/.manifests/`, never in the
-clone) that points at the plugin's folder: `superpowers@colctl-superpowers`. One name for every source tells you at a
+clone) that points at a copy of the plugin's folder: `superpowers@colctl-superpowers`. It's a copy, not a link into
+the clone, because Claude refuses a plugin path that resolves outside the plugin and its marketplace folder; any link
+the plugin itself makes to elsewhere in the repo (a shared `skills/`) is copied as what it points to. One name for every source tells you at a
 glance which marketplaces colctl manages, and it works where an author's name can't be used (Claude reserves
 `claude-plugins-official` for Anthropic). Until 2.6.1 a repo's own marketplace name was used when it had one; the next
 `colctl sync` moves such an install over once. A tool the repo doesn't package for gets nothing; converting packaging between tools is a possible later

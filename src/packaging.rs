@@ -1,6 +1,8 @@
 //! Which tools a source plugin's clone has packaging for, and the marketplace each tool installs it
 //! from (AC3-07…09). When the repo has only plugin manifests, colctl writes a one-plugin marketplace
-//! manifest in `~/.colctl/plugins/.manifests/<name>/`, never inside the clone.
+//! manifest in `~/.colctl/plugins/.manifests/<name>/`, never inside the clone, next to a copy of
+//! the plugin's folder (ECH3-01: a link there would resolve outside the marketplace, which Claude
+//! refuses for any component path the plugin names).
 
 use crate::fsx;
 use serde_json::{Value, json};
@@ -231,7 +233,7 @@ fn plan(tool: &Tool, clone: &Path, plugin: &str, subpath: Option<&str>) -> Plan 
     }
 }
 
-/// The `colctl-<name>` marketplace entry Codex installs a converted package from (cycle 7): linked
+/// The `colctl-<name>` marketplace entry Codex installs a converted package from (cycle 7): copied
 /// as `plugin-codex` in the wrapper folder.
 pub fn wrap_converted(
     write: bool,
@@ -246,6 +248,7 @@ pub fn wrap_converted(
         manifests,
         name,
         package,
+        package,
         plugin_name,
         CONVERTED_LINK,
         None,
@@ -253,7 +256,7 @@ pub fn wrap_converted(
 }
 
 /// The `colctl-<name>` marketplace entry Claude installs a package colctl built from (cycle 10's
-/// `colctl-setup`): linked as `plugin` in the wrapper folder.
+/// `colctl-setup`): copied as `plugin` in the wrapper folder.
 pub fn wrap_claude(
     write: bool,
     manifests: &Path,
@@ -267,19 +270,20 @@ pub fn wrap_claude(
         manifests,
         name,
         package,
+        package,
         plugin_name,
         "plugin",
         None,
     )
 }
 
-/// Removes a converted package's Codex marketplace manifest and link from the wrapper folder.
+/// Removes a converted package's Codex marketplace manifest and copy from the wrapper folder.
 pub fn unwrap_converted(manifests: &Path) {
     let manifest = manifests.join(CODEX.marketplace);
     if fs::read_to_string(&manifest).is_ok_and(|t| t.contains(CONVERTED_LINK)) {
         let _ = fs::remove_file(&manifest);
     }
-    let _ = fsx::remove_link(&manifests.join(CONVERTED_LINK));
+    let _ = fsx::remove_any(&manifests.join(CONVERTED_LINK));
 }
 
 const CONVERTED_LINK: &str = "plugin-codex";
@@ -317,7 +321,7 @@ pub fn claude_folder(clone: &Path, plugin: &str, subpath: Option<&str>) -> Optio
 }
 
 /// Writes (or, without `write`, only describes) colctl's one-plugin marketplace for `tool`, whose plugin
-/// entry points at `./<link>`, a symlink to `folder`.
+/// entry points at `./<link>`, a copy of `folder` with its links inside `bound` resolved (ECH3-01).
 #[allow(clippy::too_many_arguments)]
 fn wrap(
     write: bool,
@@ -325,6 +329,7 @@ fn wrap(
     manifests: &Path,
     name: &str,
     folder: &Path,
+    bound: &Path,
     plugin_name: &str,
     link: &str,
     entry: Option<&Value>,
@@ -355,12 +360,12 @@ fn wrap(
     } else {
         fsx::atomic_write(&path, text.as_bytes())
     };
-    let linked = match fs::read_link(manifests.join(link)) {
-        _ if !write => Ok(()),
-        Ok(target) if target == folder => Ok(()),
-        _ => fsx::atomic_symlink(folder, &manifests.join(link)),
+    let copied = if write {
+        fsx::mirror_tree(folder, &manifests.join(link), bound)
+    } else {
+        Ok(())
     };
-    if let Err(e) = written.and(linked) {
+    if let Err(e) = written.and(copied) {
         return ToolPackaging::Invalid(format!("writing {}: {e:#}", manifests.display()));
     }
     ToolPackaging::Supported(Target {
@@ -373,6 +378,7 @@ fn wrap(
 fn finish(
     write: bool,
     tool: &Tool,
+    clone: &Path,
     manifests: &Path,
     name: &str,
     plan: Plan,
@@ -390,6 +396,7 @@ fn finish(
             manifests,
             name,
             &folder,
+            clone,
             &plugin_name,
             link,
             entry.as_ref(),
@@ -421,15 +428,15 @@ pub fn inspect_with(
 ) -> Packaging {
     let claude = plan(&CLAUDE, clone, plugin, subpath);
     let codex = plan(&CODEX, clone, plugin, subpath);
-    // Both tools share one wrapper folder; Codex gets its own link when its plugin lives elsewhere
+    // Both tools share one wrapper folder; Codex gets its own copy when its plugin lives elsewhere
     // (EC6-21: e.g. plugins/x/claude and plugins/x/codex).
     let codex_link = match (&claude, &codex) {
         (Plan::Wrap { folder: a, .. }, Plan::Wrap { folder: b, .. }) if a != b => "plugin-codex",
         _ => "plugin",
     };
     Packaging {
-        claude: finish(write, &CLAUDE, manifests, name, claude, "plugin"),
-        codex: finish(write, &CODEX, manifests, name, codex, codex_link),
+        claude: finish(write, &CLAUDE, clone, manifests, name, claude, "plugin"),
+        codex: finish(write, &CODEX, clone, manifests, name, codex, codex_link),
     }
 }
 
@@ -469,6 +476,12 @@ mod tests {
 
     fn read(path: &Path) -> Value {
         serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    /// `at` is a real copy of `from` (ECH3-01), not a link to it.
+    fn copied(at: &Path, from: &Path) {
+        assert!(!fsx::is_symlink(at), "{} is a link", at.display());
+        assert_eq!(fsx::hash_tree(at).unwrap(), fsx::hash_tree(from).unwrap());
     }
 
     /// A databricks-style repo: per-tool plugin folders, and marketplace manifests whose entries send
@@ -519,9 +532,9 @@ mod tests {
         assert_eq!(t.marketplace, "colctl-ts");
         assert_eq!(t.id, "typescript-lsp@colctl-ts");
         assert_eq!(t.marketplace_dir, f.manifests);
-        assert_eq!(
-            fs::read_link(f.manifests.join("plugin")).unwrap(),
-            f.clone.join("plugins/typescript-lsp")
+        copied(
+            &f.manifests.join("plugin"),
+            &f.clone.join("plugins/typescript-lsp"),
         );
         // Any other name gets colctl's own too (ACH2-01).
         let g = fixture();
@@ -556,13 +569,13 @@ mod tests {
             assert_eq!(t.id, "dbx@colctl-dbx");
         }
         // Each tool's wrapper entry points at its own folder of the clone.
-        assert_eq!(
-            fs::read_link(f.manifests.join("plugin")).unwrap(),
-            f.clone.join("plugins/dbx/claude")
+        copied(
+            &f.manifests.join("plugin"),
+            &f.clone.join("plugins/dbx/claude"),
         );
-        assert_eq!(
-            fs::read_link(f.manifests.join("plugin-codex")).unwrap(),
-            f.clone.join("plugins/dbx/codex")
+        copied(
+            &f.manifests.join("plugin-codex"),
+            &f.clone.join("plugins/dbx/codex"),
         );
         assert_eq!(
             read(&f.manifests.join(".agents/plugins/marketplace.json"))["plugins"][0]["source"],
@@ -597,14 +610,13 @@ mod tests {
         assert_eq!(supported(&p.claude).id, "dbx@colctl-dbx");
         assert_eq!(supported(&p.claude).marketplace_dir, f.manifests);
         assert_eq!(supported(&p.codex).id, "dbx@colctl-dbx");
-        assert_eq!(
-            fs::read_link(f.manifests.join("plugin")).unwrap(),
-            f.clone.join("plugins/dbx/claude")
+        copied(
+            &f.manifests.join("plugin"),
+            &f.clone.join("plugins/dbx/claude"),
         );
-        assert_eq!(
-            fs::read_link(f.manifests.join("plugin-codex")).unwrap(),
-            f.clone.join("plugins/dbx/codex"),
-            "each tool's own folder"
+        copied(
+            &f.manifests.join("plugin-codex"),
+            &f.clone.join("plugins/dbx/codex"),
         );
         assert!(is_local(&json!({"source": "local", "path": "x"})));
         assert!(!is_local(&json!("https://x/y")));
@@ -631,7 +643,7 @@ mod tests {
             assert_eq!(t.id, "superpowers@colctl-superpowers");
         }
         assert!(p.any_supported());
-        assert_eq!(fs::read_link(f.manifests.join("plugin")).unwrap(), f.clone);
+        copied(&f.manifests.join("plugin"), &f.clone);
         assert!(
             !f.manifests.join("plugin-codex").exists(),
             "one folder, one link"
@@ -662,7 +674,7 @@ mod tests {
             before,
             "the clone is never written"
         );
-        assert_eq!(fs::read_link(f.manifests.join("plugin")).unwrap(), f.clone);
+        copied(&f.manifests.join("plugin"), &f.clone);
         let claude = read(&f.manifests.join(".claude-plugin/marketplace.json"));
         assert_eq!(claude["name"], "colctl-sp");
         assert_eq!(
@@ -761,10 +773,77 @@ mod tests {
         );
         let p = inspect(&f.clone, &f.manifests, "sp", "x", Some("plugins/x"));
         assert_eq!(supported(&p.claude).id, "x@colctl-sp");
-        assert_eq!(
-            fs::read_link(f.manifests.join("plugin")).unwrap(),
-            f.clone.join("plugins/x")
+        copied(&f.manifests.join("plugin"), &f.clone.join("plugins/x"));
+    }
+
+    #[test]
+    fn ech3_01_component_paths_resolve_inside_the_wrapper() {
+        // databricks: `commands`/`skills` paths in plugin.json, in a per-tool folder of the repo.
+        let f = fixture();
+        remote_manifests(&f);
+        let plugin = f.clone.join("plugins/dbx/claude");
+        write(
+            &plugin.join(".claude-plugin/plugin.json"),
+            &json!({"name": "dbx", "skills": "./skills/", "commands": "./commands/"}),
         );
+        fs::create_dir_all(plugin.join("commands")).unwrap();
+        fs::write(plugin.join("commands/setup.md"), "x").unwrap();
+        inspect(
+            &f.clone,
+            &f.manifests,
+            "dbx",
+            "dbx",
+            Some("plugins/dbx/claude"),
+        );
+        let wrapper = fs::canonicalize(&f.manifests).unwrap();
+        let commands = fs::canonicalize(f.manifests.join("plugin/commands")).unwrap();
+        assert!(commands.starts_with(&wrapper), "{}", commands.display());
+    }
+
+    #[test]
+    fn ech3_02_a_link_to_the_repos_shared_skills_is_copied() {
+        // signalbeacon: each tool's folder links `skills` to the repo's one copy.
+        use std::os::unix::fs::symlink;
+        let f = fixture();
+        write(
+            &f.clone.join(".claude-plugin/marketplace.json"),
+            &json!({"name": "sb", "plugins": [{"name": "sb", "source": "./plugins/sb/claude"}]}),
+        );
+        write(
+            &f.clone.join("plugins/sb/claude/.claude-plugin/plugin.json"),
+            &json!({"name": "sb", "skills": "./skills/"}),
+        );
+        fs::create_dir_all(f.clone.join("skills/review")).unwrap();
+        fs::write(f.clone.join("skills/review/SKILL.md"), "x").unwrap();
+        symlink("../../../skills", f.clone.join("plugins/sb/claude/skills")).unwrap();
+        let before = fsx::hash_tree(&f.clone).unwrap();
+        let p = inspect(&f.clone, &f.manifests, "sb", "sb", None);
+        assert_eq!(supported(&p.claude).id, "sb@colctl-sb");
+        let skills = f.manifests.join("plugin/skills");
+        assert!(!fsx::is_symlink(&skills));
+        assert!(skills.join("review/SKILL.md").is_file());
+        assert_eq!(
+            fsx::hash_tree(&f.clone).unwrap(),
+            before,
+            "the clone is never written"
+        );
+    }
+
+    #[test]
+    fn ech3_03_unwrapping_removes_a_copied_package() {
+        let t = tempfile::tempdir().unwrap();
+        let pkg = t.path().join("converted/x");
+        write(
+            &pkg.join(".codex-plugin/plugin.json"),
+            &json!({"name": "x"}),
+        );
+        let manifests = t.path().join("manifests/x");
+        let p = wrap_converted(true, &manifests, "x", &pkg, "x");
+        assert!(matches!(p, ToolPackaging::Supported(_)));
+        copied(&manifests.join("plugin-codex"), &pkg);
+        unwrap_converted(&manifests);
+        assert!(!fsx::exists_any(&manifests.join("plugin-codex")));
+        assert!(!manifests.join(".agents/plugins/marketplace.json").exists());
     }
 }
 
@@ -775,6 +854,12 @@ mod colctl_names {
     fn write(path: &Path, value: &Value) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, value.to_string()).unwrap();
+    }
+
+    /// `at` is a real copy of `from` (ECH3-01), not a link to it.
+    fn copied(at: &Path, from: &Path) {
+        assert!(!fsx::is_symlink(at), "{} is a link", at.display());
+        assert_eq!(fsx::hash_tree(at).unwrap(), fsx::hash_tree(from).unwrap());
     }
 
     #[test]
@@ -799,10 +884,7 @@ mod colctl_names {
         .unwrap();
         assert_eq!(m["plugins"][0]["strict"], false);
         assert_eq!(m["plugins"][0]["skills"], json!(["./"]));
-        assert_eq!(
-            fs::read_link(manifests.join("plugin")).unwrap(),
-            clone.join("skills")
-        );
+        copied(&manifests.join("plugin"), &clone.join("skills"));
     }
 
     #[test]
